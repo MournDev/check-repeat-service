@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.abin.checkrepeatservice.user.mapper.TeacherAllocationRecordMapper">
+
+    <!-- 根据教师ID查询分配记录 -->
+    <select id="selectByTeacherId" resultType="com.abin.checkrepeatservice.pojo.entity.TeacherAllocationRecord">
+        SELECT *
+        FROM teacher_allocation_record
+        WHERE teacher_id = #{teacherId}
+          AND is_deleted = 0
+        ORDER BY create_time DESC
+    </select>
+
+    <!-- 根据学生ID查询分配记录 -->
+    <select id="selectByStudentId" resultType="com.abin.checkrepeatservice.pojo.entity.TeacherAllocationRecord">
+        SELECT *
+        FROM teacher_allocation_record
+        WHERE student_id = #{studentId}
+          AND is_deleted = 0
+        ORDER BY create_time DESC
+    </select>
+
+    <!-- 查询时间段内的分配记录统计 -->
+    <select id="selectCountByTimeRange" resultType="java.util.Map">
+        SELECT 
+            DATE(create_time) as date,
+            COUNT(*) as allocation_count
+        FROM teacher_allocation_record
+        WHERE create_time BETWEEN #{startDate} AND #{endDate}
+          AND is_deleted = 0
+        GROUP BY DATE(create_time)
+        ORDER BY date ASC
+    </select>
+
+    <!-- 批量插入分配记录 -->
+    <insert id="batchInsert" parameterType="java.util.List">
+        INSERT INTO teacher_allocation_record (
+            teacher_id,
+            student_id,
+            allocation_reason,
+            create_time,
+            is_deleted
+        ) VALUES
+        <foreach collection="list" item="item" separator=",">
+            (
+                #{item.teacherId},
+                #{item.studentId},
+                #{item.allocationReason},
+                NOW(),
+                0
+            )
+        </foreach>
+    </insert>
+
+    <!-- 更新分配记录状态 -->
+    <update id="updateAllocationStatus">
+        UPDATE teacher_allocation_record
+        SET allocation_status = #{status},
+            update_time = NOW()
+        WHERE id = #{recordId}
+          AND is_deleted = 0
+    </update>
+
+</mapper>

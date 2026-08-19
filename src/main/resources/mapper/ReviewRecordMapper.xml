@@ -1,0 +1,203 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.abin.checkrepeatservice.teacher.mapper.ReviewRecordMapper">
+
+    <!-- 按天统计审核趋势 -->
+    <select id="selectDailyTrend" resultType="com.abin.checkrepeatservice.teacher.vo.TrendDataVO">
+        SELECT
+        DATE(create_time) as date,
+        COUNT(*) as reviewCount,
+        SUM(CASE WHEN review_status = 3 THEN 1 ELSE 0 END) as approvedCount,
+        SUM(CASE WHEN review_status = 4 THEN 1 ELSE 0 END) as rejectedCount,
+        AVG(TIMESTAMPDIFF(HOUR, create_time, review_time)) as avgReviewTime
+        FROM review_record
+        WHERE teacher_id = #{teacherId}
+        AND create_time >= #{startDate}
+        AND create_time &lt;= #{endDate}
+        AND is_deleted = 0
+        GROUP BY DATE(create_time)
+        ORDER BY date
+    </select>
+
+    <!-- 按周统计审核趋势 -->
+    <select id="selectWeeklyTrend" resultType="com.abin.checkrepeatservice.teacher.vo.TrendDataVO">
+        SELECT
+        YEARWEEK(create_time, 1) as yearWeek,
+        CONCAT(YEAR(create_time), '-W', LPAD(WEEK(create_time), 2, '0')) as weekLabel,
+        COUNT(*) as reviewCount,
+        COUNT(DISTINCT paper_id) as uniquePapers
+        FROM review_record
+        WHERE teacher_id = #{teacherId}
+        AND create_time >= #{startDate}
+        AND create_time &lt;= #{endDate}
+        AND is_deleted = 0
+        GROUP BY YEARWEEK(create_time, 1)
+        ORDER BY yearWeek
+    </select>
+
+    <!-- 按月统计审核趋势 -->
+    <select id="selectMonthlyTrend" resultType="com.abin.checkrepeatservice.teacher.vo.TrendDataVO">
+        SELECT
+        DATE_FORMAT(create_time, '%Y-%m') as month,
+        COUNT(*) as reviewCount,
+        AVG(TIMESTAMPDIFF(HOUR, create_time, review_time)) as avgReviewTime,
+        (SELECT AVG(ct.check_rate) FROM check_task ct WHERE ct.paper_id = rr.paper_id AND ct.check_status = 2) as avgSimilarity
+        FROM review_record rr
+        WHERE teacher_id = #{teacherId}
+        AND create_time >= #{startDate}
+        AND create_time &lt;= #{endDate}
+        AND is_deleted = 0
+        GROUP BY DATE_FORMAT(create_time, '%Y-%m')
+        ORDER BY month
+    </select>
+
+    <!-- 获取审核统计数据对比 -->
+    <select id="selectTrendComparison" resultType="com.abin.checkrepeatservice.teacher.vo.TrendComparisonVO">
+        SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN create_time >= #{currentStart} THEN 1 ELSE 0 END) as currentPeriod,
+        SUM(CASE WHEN create_time >= #{previousStart} AND create_time &lt; #{currentStart} THEN 1 ELSE 0 END) as previousPeriod
+        FROM review_record
+        WHERE teacher_id = #{teacherId}
+        AND create_time >= #{previousStart}
+    </select>
+
+    <!-- 获取审核总数 -->
+    <select id="selectTotalReviews" resultType="java.lang.Integer">
+        SELECT COUNT(*)
+        FROM review_record
+        WHERE teacher_id = #{teacherId}
+        <if test="startDate != null">
+            AND create_time >= #{startDate}
+        </if>
+        <if test="endDate != null">
+            AND create_time &lt;= #{endDate}
+        </if>
+    </select>
+
+    <!-- 统计当前指导学生数 -->
+    <select id="countCurrentStudents" resultType="java.lang.Integer">
+        SELECT COUNT(DISTINCT pi.student_id)
+        FROM paper_info pi
+        INNER JOIN review_record rr ON pi.id = rr.paper_id
+        WHERE rr.teacher_id = #{teacherId}
+          AND rr.is_deleted = 0
+          AND pi.paper_status IN ('auditing', 'completed', 'rejected')
+          AND pi.is_deleted = 0
+    </select>
+
+    <!-- 按状态统计数量 -->
+    <select id="countByStatus" resultType="java.lang.Integer">
+        SELECT COUNT(*)
+        FROM review_record
+        WHERE teacher_id = #{teacherId}
+        AND review_status = #{status}
+        AND is_deleted = 0
+        AND create_time >= #{startDate}
+        AND create_time &lt;= #{endDate}
+    </select>
+
+    <!-- 获取详细数据（分页） -->
+    <select id="selectDetailData" resultType="com.abin.checkrepeatservice.teacher.vo.TrendDataVO">
+        SELECT
+        DATE(pi.create_time) as date,
+        COUNT(*) as reviewCount,
+        SUM(CASE WHEN pi.paper_status = 'completed' THEN 1 ELSE 0 END) as approvedCount,
+        SUM(CASE WHEN pi.paper_status = 'rejected' THEN 1 ELSE 0 END) as rejectedCount,
+        AVG(pi.similarity_rate) as avgSimilarity,
+        AVG(TIMESTAMPDIFF(HOUR, pi.create_time, rr.review_time)) as avgReviewTime
+        FROM paper_info pi
+        LEFT JOIN review_record rr ON pi.id = rr.paper_id
+        WHERE pi.teacher_id = #{teacherId}
+        AND pi.create_time >= #{startDate}
+        AND pi.create_time &lt;= #{endDate}
+        AND pi.is_deleted = 0
+        GROUP BY DATE(pi.create_time)
+        ORDER BY date DESC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <!-- 获取所有详细数据（导出用） -->
+    <select id="selectAllDetailData" resultType="com.abin.checkrepeatservice.teacher.vo.TrendDataVO">
+        SELECT
+        DATE(pi.create_time) as date,
+        COUNT(*) as reviewCount,
+        SUM(CASE WHEN pi.paper_status = 'completed' THEN 1 ELSE 0 END) as approvedCount,
+        SUM(CASE WHEN pi.paper_status = 'rejected' THEN 1 ELSE 0 END) as rejectedCount,
+        AVG(pi.similarity_rate) as avgSimilarity,
+        AVG(TIMESTAMPDIFF(HOUR, pi.create_time, rr.review_time)) as avgReviewTime
+        FROM paper_info pi
+        LEFT JOIN review_record rr ON pi.id = rr.paper_id
+        WHERE pi.teacher_id = #{teacherId}
+        AND pi.create_time >= #{startDate}
+        AND pi.create_time &lt;= #{endDate}
+        AND pi.is_deleted = 0
+        GROUP BY DATE(pi.create_time)
+        ORDER BY date DESC
+    </select>
+
+    <!-- 获取审核状态分布 -->
+    <select id="selectReviewStatusDistribution"
+            resultType="com.abin.checkrepeatservice.teacher.vo.ReviewStatusVO">
+        WITH total_count AS (
+        SELECT COUNT(*) as total
+        FROM review_record
+        WHERE teacher_id = #{teacherId}
+        AND is_deleted = 0
+        AND review_status IN (3, 4) <!-- 只统计通过和拒绝状态 -->
+        <if test="startDate != null">
+            AND create_time >= #{startDate}
+        </if>
+        <if test="endDate != null">
+            AND create_time &lt;= #{endDate}
+        </if>
+        )
+        SELECT
+        review_status as status,
+        CASE review_status
+        WHEN 3 THEN '审核通过'
+        WHEN 4 THEN '审核未通过'
+        ELSE '未知状态'
+        END as statusName,
+        COUNT(*) as count,
+        ROUND(COUNT(*) * 100.0 / (SELECT total FROM total_count), 1) as percentage,
+        CASE review_status
+        WHEN 3 THEN '#52c41a'
+        WHEN 4 THEN '#ff4d4f'
+        ELSE '#d9d9d9'
+        END as color
+        FROM review_record
+        WHERE teacher_id = #{teacherId}
+        AND is_deleted = 0
+        AND review_status IN (3, 4) <!-- 只返回通过和拒绝状态 -->
+        <if test="startDate != null">
+            AND create_time >= #{startDate}
+        </if>
+        <if test="endDate != null">
+            AND create_time &lt;= #{endDate}
+        </if>
+        GROUP BY review_status
+        ORDER BY
+        CASE review_status
+        WHEN 3 THEN 1
+        WHEN 4 THEN 2
+        ELSE 3
+        END
+    </select>
+    <select id="selectAllStatusReviews" resultType="map">
+    SELECT
+        rr.review_status,
+        COUNT(*) as count,
+        GROUP_CONCAT(DISTINCT pi.student_id) as student_ids
+    FROM review_record rr
+    INNER JOIN paper_info pi ON rr.paper_id = pi.id
+    WHERE rr.teacher_id = #{teacherId}
+        AND rr.is_deleted = 0
+        AND pi.is_deleted = 0
+        AND rr.create_time BETWEEN #{startTime} AND #{endTime}
+    GROUP BY rr.review_status
+</select>
+
+
+</mapper>

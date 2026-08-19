@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.abin.checkrepeatservice.teacher.mapper.PendingReviewMapper">
+    
+    <!--根据条件查询待审核论文 -->
+    <select id="selectPendingReviews" resultType="com.abin.checkrepeatservice.pojo.entity.PaperInfo">
+        SELECT 
+            p.*,
+            u.real_name as studentName,
+            u.username as studentUsername,
+            c.college_name as collegeName
+        FROM paper_info p
+        LEFT JOIN sys_user u ON p.student_id = u.id
+        LEFT JOIN college c ON p.college_id = c.id
+        WHERE p.teacher_id = #{teacherId}
+          AND p.paper_status = 'auditing'
+          AND p.is_deleted = 0
+        <if test="college != null and college != ''">
+            AND c.college_name LIKE CONCAT('%', #{college}, '%')
+        </if>
+        <if test="similarityRange != null and similarityRange != ''">
+            <choose>
+                <when test="similarityRange == 'low'">
+                    AND p.similarity_rate &lt;= 20
+                </when>
+                <when test="similarityRange == 'medium'">
+                    AND p.similarity_rate &gt; 20 AND p.similarity_rate &lt;= 40
+                </when>
+                <when test="similarityRange == 'high'">
+                    AND p.similarity_rate &gt; 40
+                </when>
+            </choose>
+        </if>
+        ORDER BY 
+        <choose>
+            <when test="sortField == 'submitTime' and sortOrder == 'asc'">
+                p.submit_time ASC
+            </when>
+            <when test="sortField == 'submitTime' and sortOrder == 'desc'">
+                p.submit_time DESC
+            </when>
+            <when test="sortField == 'deadline' and sortOrder == 'asc'">
+                p.check_time ASC
+            </when>
+            <when test="sortField == 'deadline' and sortOrder == 'desc'">
+                p.check_time DESC
+            </when>
+            <otherwise>
+                p.submit_time DESC
+            </otherwise>
+        </choose>
+    </select>
+
+    <!-- 统计待审核论文数量 -->
+    <select id="countPendingReviews" resultType="java.lang.Long">
+        SELECT COUNT(*)
+        FROM paper_info p
+        WHERE p.teacher_id = #{teacherId}
+          AND p.paper_status = 'auditing'
+          AND p.is_deleted = 0
+    </select>
+
+    <!-- 获取今日审核统计 -->
+    <select id="getTodayReviewedCount" resultType="java.lang.Long">
+        SELECT COUNT(*)
+        FROM paper_info p
+        WHERE p.teacher_id = #{teacherId}
+          AND p.paper_status != 'auditing'
+          AND DATE(p.update_time) = CURDATE()
+          AND p.is_deleted = 0
+    </select>
+
+</mapper>

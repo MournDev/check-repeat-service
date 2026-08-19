@@ -1,0 +1,240 @@
+# 服务基础配置
+server:
+  address: 0.0.0.0
+  port: ${SERVER_PORT:8080}
+  servlet:
+    context-path: /check
+  tomcat:
+    threads:
+      max: 200
+      min-spare: 20
+
+# 预览服务
+kkfileview:
+  base-url: ${KKFILEVIEW_BASE_URL:http://localhost:8080}
+
+# 对象存储
+minio:
+  endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+  accesskey: ${MINIO_ACCESSKEY:minioadmin}
+  secretkey: ${MINIO_SECRETKEY:minioadmin}
+  bucket:
+    main: check-repeat-service
+    avatar: avatar
+    report: report-bucket
+    paper_content: paper-content
+
+spring:
+  application:
+    name: check-repeat-service
+
+  # 数据源配置
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/check-repeat-service?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=GMT%2B8&allowPublicKeyRetrieval=true&autoReconnect=true&failOverReadOnly=false&maxReconnects=10&initialTimeout=2
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:your_password}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 10
+      idle-timeout: 180000
+      connection-timeout: 30000
+      max-lifetime: 1800000
+      validation-timeout: 5000
+      leak-detection-threshold: 60000
+      connection-test-query: SELECT 1
+
+  # 文件上传配置
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 200MB
+
+  # Redis 缓存配置
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:your_redis_password}
+      database: 0
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 16
+          max-idle: 16
+          min-idle: 4
+
+  # JWT 配置（密钥必须通过环境变量设置）
+  jwt:
+    secret-key: ${JWT_SECRET_KEY:change-this-secret-key-in-production}
+    expiration: 86400000
+    token-header: Authorization
+
+  # 邮件发送配置
+  mail:
+    host: ${MAIL_HOST:smtp.qq.com}
+    port: ${MAIL_PORT:465}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    protocol: smtp
+    default-encoding: UTF-8
+    properties:
+      mail:
+        smtp:
+          auth: true
+          ssl:
+            enable: true
+            required: true
+          starttls:
+            enable: false
+        debug: false
+
+  # 通知内容模板
+  notice:
+    email:
+      subject-prefix: "[论文查重管理系统] "
+      content-header: "尊敬的用户：<br><br>您有一条新的系统通知，请查收：<br><br>"
+      content-footer: "<br><br>此邮件为系统自动发送，请勿回复。如需帮助，请联系管理员。<br>论文查重系统团队"
+
+# 查重算法配置
+check:
+  task:
+    max-concurrent: 10
+    timeout: 3600000
+    temp-file-path: /data/check-temp/
+  simhash:
+    hash-bits: 64
+    k: 3
+    hamming-threshold: 3
+  text:
+    segment:
+      type: ik
+      dic-path: classpath:dic/
+  local:
+    enabled: true
+    cache-enabled: true
+    cache-expire-hours: 24
+  third-party:
+    enabled: false
+    api-url: https://api.thirdparty.com/check
+    api-key: ${THIRD_PARTY_API_KEY:}
+    timeout: 30000
+  deep-learning:
+    enabled: false
+    model-path: /models/bert-similarity
+    gpu-enabled: false
+
+# MyBatis-Plus配置
+mybatis-plus:
+  mapper-locations: classpath*:mapper/**/*.xml
+  type-aliases-package: com.abin.checkrepeatservice.pojo.entity
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+  global-config:
+    db-config:
+      id-type: ASSIGN_ID
+      logic-delete-field: isDeleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+# 监控管理配置
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true
+    metrics:
+      enabled: true
+  metrics:
+    enable:
+      jvm: true
+      system: true
+      process: true
+      logback: true
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+
+# 报告模块配置
+report:
+  pdf:
+    font-path: fonts/SimHei.ttf
+    page-size: A4
+    margin: 50
+  preview:
+    max-paragraph-length: 500
+  storage:
+    enabled: true
+    base-path: ${REPORT_STORAGE_PATH:/data/report}
+    expire-days: 365
+  enhanced:
+    enabled: true
+    include-charts: true
+    include-recommendations: true
+    template-type: professional
+
+# 教师审核模块配置
+review:
+  attach:
+    base-path: ${REVIEW_ATTACH_PATH:/data/review-attach/}
+    max-size: 50MB
+    allowed-types: doc,docx,pdf,jpg,png
+  batch:
+    max-count: 20
+  notify:
+    enabled: true
+
+# 管理员规则配置模块默认值
+admin:
+  check-rule:
+    default-threshold: 20.00
+    default-interval: 86400
+    default-max-count: 5
+  compare-lib:
+    default-enabled: 1
+  system-param:
+    max-paper-size: 209715200
+    max-concurrent-check: 10
+  jwt-expiration: 86400000
+
+# 文件上传配置
+file:
+  upload:
+    storage-type: ${STORAGE_TYPE:LOCAL}
+    base-path: ${UPLOAD_BASE_PATH:/data/upload/}
+    max-size-mb: 50
+
+# 阿里云OSS配置（可选）
+aliyun:
+  oss:
+    endpoint: ${ALIYUN_OSS_ENDPOINT:}
+    access-key-id: ${ALIYUN_OSS_ACCESS_KEY_ID:}
+    access-key-secret: ${ALIYUN_OSS_ACCESS_KEY_SECRET:}
+    bucket-name: ${ALIYUN_OSS_BUCKET_NAME:}
+    access-prefix: ${ALIYUN_OSS_ACCESS_PREFIX:}
+
+# 论文查重服务配置
+paper-check:
+  threshold: 20.0
+  min-hash-distance: 3
+  parse-timeout: 30000
+  report-storage-path: ${REPORT_STORAGE_PATH:/data/check-report/}
+  compare-library:
+#校内论文库：true
+    network-resource: false
+
+# 指导老师分配配置
+advisor-assign:
+  max-task-count: 10
+  retry-count: 3
+
+# 兼容性配置
+upload:
+  base-path: ${UPLOAD_BASE_PATH:/data/upload/}

@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- namespace 必须与 Mapper 接口的全类名一致 -->
+<mapper namespace="com.abin.checkrepeatservice.admin.mapper.PaperSubmitMapper">
+
+    <!-- 实现 countByTimeRange 方法：按时间维度统计提交人数 -->
+    <select id="countByTimeRange" resultType="java.util.Map">
+        SELECT
+        -- 根据统计维度格式化时间（日/周/月）
+        CASE
+        WHEN #{statDimension} = 'DAY' THEN DATE_FORMAT(submit_time, '%Y-%m-%d')
+        WHEN #{statDimension} = 'WEEK' THEN CONCAT(
+        DATE_FORMAT(DATE_SUB(submit_time, INTERVAL WEEKDAY(submit_time) DAY), '%Y-%m-%d'),
+        ' 至 ',
+        DATE_FORMAT(DATE_ADD(submit_time, INTERVAL 6 - WEEKDAY(submit_time) DAY), '%Y-%m-%d')
+        )
+        WHEN #{statDimension} = 'MONTH' THEN DATE_FORMAT(submit_time, '%Y-%m')
+        END AS time_key, -- 时间维度的 key（对应 Map 的 key）
+        COUNT(DISTINCT student_id) AS submit_count -- 提交人数（去重，避免同一学生多次提交）
+        FROM
+        paper_submit
+        WHERE
+        -- 时间范围筛选
+        DATE(submit_time) BETWEEN #{startDate} AND #{endDate}
+        -- 专业筛选（非空才加条件）
+        <if test="majorId != null">AND major_id = #{majorId}</if>
+        -- 年级筛选（非空才加条件）
+        <if test="grade != null">AND grade = #{grade}</if>
+        -- 软删除：只查未删除的记录
+        AND is_deleted = 0
+        GROUP BY
+        -- 按格式化后的时间分组
+        CASE
+        WHEN #{statDimension} = 'DAY' THEN DATE_FORMAT(submit_time, '%Y-%m-%d')
+        WHEN #{statDimension} = 'WEEK' THEN CONCAT(
+        DATE_FORMAT(DATE_SUB(submit_time, INTERVAL WEEKDAY(submit_time) DAY), '%Y-%m-%d'),
+        ' 至 ',
+        DATE_FORMAT(DATE_ADD(submit_time, INTERVAL 6 - WEEKDAY(submit_time) DAY), '%Y-%m-%d')
+        )
+        WHEN #{statDimension} = 'MONTH' THEN DATE_FORMAT(submit_time, '%Y-%m')
+        END
+        ORDER BY
+        -- 按时间升序排列
+        CASE
+        WHEN #{statDimension} = 'DAY' THEN DATE_FORMAT(submit_time, '%Y-%m-%d')
+        WHEN #{statDimension} = 'WEEK' THEN DATE_FORMAT(DATE_SUB(submit_time, INTERVAL WEEKDAY(submit_time) DAY), '%Y-%m-%d')
+        WHEN #{statDimension} = 'MONTH' THEN DATE_FORMAT(submit_time, '%Y-%m')
+        END ASC
+    </select>
+    <select id="selectAdvisorTaskList" resultType="com.abin.checkrepeatservice.user.vo.PaperAdvisorTaskVO">
+        SELECT
+        pi.id          AS paperId,
+        pi.paper_title AS paperTitle,
+        pi.paper_type  AS paperType,
+        -- paper_info 中论文状态映射到 submitStatus：auditing=2待审核、completed=3已完成、others=1待处理
+        CASE pi.paper_status
+            WHEN 'auditing'   THEN 2
+            WHEN 'completed'  THEN 3
+            WHEN 'rejected'   THEN 4
+            ELSE 1
+        END AS submitStatus,
+        CASE pi.paper_status
+            WHEN 'auditing'   THEN '待审核'
+            WHEN 'completed'  THEN '导师指导完成'
+            WHEN 'rejected'   THEN '已驳回'
+            ELSE '待处理'
+        END AS submitStatusDesc,
+        pi.student_id  AS id,
+        su.real_name   AS userName,
+        pi.major_id    AS majorId,
+        pi.teacher_id  AS advisorId,
+        pi.submit_time AS submitTime,
+        pi.allocation_time AS advisorAssignTime,
+        tu.real_name   AS advisorName
+        FROM paper_submit ps
+        -- 关联论文表（获取论文状态等）
+        INNER JOIN paper_info pi ON ps.paper_id = pi.id AND pi.is_deleted = 0
+        -- 关联学生表
+        LEFT JOIN sys_user su ON pi.student_id = su.id AND su.is_deleted = 0
+        -- 关联导师表
+        LEFT JOIN sys_user tu ON pi.teacher_id = tu.id AND tu.is_deleted = 0
+        WHERE
+        pi.teacher_id = #{advisorId}
+        AND ps.is_deleted = 0
+        <if test="status != null">
+            AND (
+                CASE pi.paper_status
+                    WHEN 'auditing'  THEN 2
+                    WHEN 'completed' THEN 3
+                    WHEN 'rejected'  THEN 4
+                    ELSE 1
+                END
+            ) = #{status}
+        </if>
+        -- 取每篇论文最新一次提交记录
+        AND ps.submit_version = (
+            SELECT MAX(ps2.submit_version) FROM paper_submit ps2
+            WHERE ps2.paper_id = ps.paper_id AND ps2.is_deleted = 0
+        )
+        ORDER BY pi.allocation_time DESC
+    </select>
+
+
+</mapper>

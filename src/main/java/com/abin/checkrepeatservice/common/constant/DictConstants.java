@@ -1,0 +1,150 @@
+package com.abin.checkrepeatservice.common.constant;
+
+/**
+ * 字典值常量类
+ */
+public class DictConstants {
+    /**
+     * 论文状态字典类型
+     */
+    public static final String DICT_PAPER_STATUS = "paper_status";
+
+    /**
+     * 查重状态字典类型
+     */
+    public static final String DICT_CHECK_STATUS = "check_status";
+
+    /**
+     * 论文类型字典类型
+     */
+    public static final String DICT_PAPER_TYPE = "paper_type";
+
+
+    /**
+     * 查重任务状态字典类型
+     */
+    public static final String DICT_TASK_STATUS = "task_status";
+
+    /**
+     * 分配类型字典类型
+     */
+    public static final String DICT_ALLOCATION_TYPE = "allocation_type";
+
+    /**
+     * 分配类型字典类型
+     */
+    public static final String DICT_ALLOCATION_STATUS = "allocation_status";
+
+    /**
+     * 消息类型字典类型
+     */
+    public static final String DICT_MESSAGE_TYPE = "message_type";
+
+    /**
+     * 消息优先级类型
+     */
+    public static final String MESSAGE_PRIORITY = "message_priority";
+
+    /**
+     * 关联业务类型
+     */
+    public static final String RELATED_TYPE = "related_type";
+
+    /**
+     * 模板类型类型
+     */
+    public static final String TEMPLATE_TYPE = "template_type";
+
+
+    /**
+     * 论文状态字典值
+     */
+    public static class PaperStatus {
+
+        public static final String PENDING = "pending";// 待分配
+        public static final String ASSIGNED = "assigned";// 已分配
+        public static final String CHECKING = "checking";// 待查重
+        public static final String AUDITING = "auditing";// 待审核
+        public static final String COMPLETED = "completed";// 审核通过
+        public static final String REJECTED = "rejected";// 审核不通过
+        public static final String WITHDRAWN = "withdrawn";// 已取消
+    }
+
+    /**
+     * 论文类型字典值
+     */
+    public static class PaperType {
+        public static final String GRADUATION = "graduation";// 毕业论文
+        public static final String COURSE = "course";// 课程论文
+        public static final String OTHER = "other";// 其他
+    }
+
+    /**
+     * 查重状态字典值
+     */
+    public static class CheckStatus {
+        public static final String PENDING = "pending";// 待查重
+        public static final String CHECKING = "checking";// 查重中
+        public static final String CANCELLED = "cancelled";// 已取消
+        public static final String COMPLETED = "completed";// 查重完成
+        public static final String FAILURE = "failure";// 查重失败
+    }
+
+    /**
+     * 查重任务状态字典值
+     */
+    public static class TaskStatus {
+        public static final String PENDING = "pending";// 待处理
+        public static final String PROCESSING = "processing";// 处理中
+        public static final String COMPLETED = "completed";// 处理完成
+        public static final String FAILURE = "failure";// 处理失败
+    }
+
+    /**
+     * 分配类型字典值
+     */
+    public static class AllocationType {
+        public static final String AUTO = "auto";// 自动分配
+        public static final String MANUAL = "manual";// 手动分配
+    }
+
+    /**
+     * 分配状态字典值
+     */
+    public static class AllocationStatus {
+        public static final String PENDING = "pending";// 待确认
+        public static final String CONFIRMED = "confirmed";// 已确认
+        public static final String REJECTED = "rejected";// 已拒绝
+    }
+
+    /**
+     * 消息类型字典值
+     */
+    public static class MessageType {
+        public static final String ASSIGNMENT = "assignment"; // 分配通知
+        public static final String CONFIRM = "confirm";       // 确认通知
+        public static final String REJECT = "reject";         // 拒绝通知
+        public static final String REMINDER = "reminder";     // 提醒通知
+    }
+
+    // 消息优先级
+    public static class MessagePriority {
+        public static final Integer NORMAL = 1;    // 普通
+        public static final Integer IMPORTANT = 2; // 重要
+        public static final Integer URGENT = 3;    // 紧急
+    }
+
+    // 关联业务类型
+    public static class RelatedType {
+        public static final String PAPER = "paper";// 论文
+        public static final String TASK = "task";// 查重任务
+        public static final String SYSTEM = "system";
+    }
+
+    // 模板类型
+    public static class TemplateType {
+        public static final String ASSIGNMENT = "assignment";   // 分配模板
+        public static final String CONFIRM = "confirm";         // 确认模板
+        public static final String REJECT = "reject";       // 拒绝模板
+    }
+}

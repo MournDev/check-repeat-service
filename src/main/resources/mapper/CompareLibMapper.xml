@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.abin.checkrepeatservice.admin.mapper.CompareLibMapper">
+
+    <!-- 根据库编码查询比对库 -->
+    <select id="selectByLibCode" resultType="com.abin.checkrepeatservice.pojo.entity.CompareLib">
+        SELECT *
+        FROM compare_lib
+        WHERE lib_code = #{libCode}
+          AND is_deleted = 0
+        LIMIT 1
+    </select>
+
+    <!-- 查询所有启用的比对库 -->
+    <select id="selectEnabledLibs" resultType="com.abin.checkrepeatservice.pojo.entity.CompareLib">
+        SELECT *
+        FROM compare_lib
+        WHERE is_enabled = 1
+          AND is_deleted = 0
+        ORDER BY lib_name ASC
+    </select>
+
+    <!-- 根据库类型查询比对库 -->
+    <select id="selectByLibType" resultType="com.abin.checkrepeatservice.pojo.entity.CompareLib">
+        SELECT *
+        FROM compare_lib
+        WHERE lib_type = #{libType}
+          AND is_deleted = 0
+        ORDER BY lib_name ASC
+    </select>
+
+    <!-- 批量更新比对库状态 -->
+    <update id="batchUpdateStatus">
+        UPDATE compare_lib
+        SET is_enabled = #{status},
+            update_time = NOW()
+        WHERE id IN
+        <foreach collection="libIds" item="libId" open="(" separator="," close=")">
+            #{libId}
+        </foreach>
+        AND is_deleted = 0
+    </update>
+
+    <!-- 统计各类比对库数量 -->
+    <select id="countByType" resultType="java.util.Map">
+        SELECT 
+            lib_type as libType,
+            COUNT(*) as count
+        FROM compare_lib
+        WHERE is_deleted = 0
+        GROUP BY lib_type
+    </select>
+
+    <!-- 查询关联了指定规则的比对库 -->
+    <select id="selectByRuleId" resultType="com.abin.checkrepeatservice.pojo.entity.CompareLib">
+        SELECT cl.*
+        FROM compare_lib cl
+        INNER JOIN rule_lib_relation rlr ON cl.id = rlr.lib_id
+        WHERE rlr.rule_id = #{ruleId}
+          AND cl.is_deleted = 0
+          AND rlr.is_deleted = 0
+        ORDER BY cl.lib_name ASC
+    </select>
+
+</mapper>

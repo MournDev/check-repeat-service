@@ -1,0 +1,1682 @@
+-- MySQL dump 10.13  Distrib 8.0.23, for Win64 (x86_64)
+--
+-- Host: localhost    Database: check-repeat-service
+-- ------------------------------------------------------
+-- Server version	8.0.23
+
+/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
+/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
+/*!50503 SET NAMES utf8mb4 */;
+/*!40103 SET @OLD_TIME_ZONE=@@TIME_ZONE */;
+/*!40103 SET TIME_ZONE='+00:00' */;
+/*!40014 SET @OLD_UNIQUE_CHECKS=@@UNIQUE_CHECKS, UNIQUE_CHECKS=0 */;
+/*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;
+/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;
+/*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
+
+--
+-- Table structure for table `academic_checklist`
+--
+
+DROP TABLE IF EXISTS `academic_checklist`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `academic_checklist` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '雪花ID',
+  `student_id` bigint NOT NULL COMMENT '学生ID',
+  `text` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '文本',
+  `checked` tinyint(1) DEFAULT '0' COMMENT '是否查重',
+  `sort` int DEFAULT '0' COMMENT '排序',
+  `create_by` bigint DEFAULT NULL COMMENT '创建人ID',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` bigint DEFAULT NULL COMMENT '更新人ID',
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` tinyint DEFAULT '0' COMMENT '是否删除',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_student_id` (`student_id`),
+  KEY `idx_create_time` (`create_time`)
+) ENGINE=InnoDB AUTO_INCREMENT=17 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='??????????????';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `admin_info`
+--
+
+DROP TABLE IF EXISTS `admin_info`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `admin_info` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `user_id` bigint NOT NULL COMMENT '用户ID',
+  `position` varchar(100) DEFAULT NULL COMMENT '职位',
+  `department` varchar(100) DEFAULT NULL COMMENT '所属部门',
+  `office_address` varchar(255) DEFAULT NULL COMMENT '办公地址',
+  `create_by` bigint DEFAULT NULL COMMENT '创建人',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` bigint DEFAULT NULL COMMENT '更新人',
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` tinyint DEFAULT '0' COMMENT '软删除标志（0-未删除，1-已删除）',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_user_id` (`user_id`)
+) ENGINE=InnoDB AUTO_INCREMENT=2060661729448300547 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='管理员信息表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `admin_task_intervene_log`
+--
+
+DROP TABLE IF EXISTS `admin_task_intervene_log`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `admin_task_intervene_log` (
+  `id` bigint NOT NULL COMMENT '主键ID',
+  `created_by` bigint NOT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `created_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_by` bigint NOT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `updated_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `task_type` tinyint NOT NULL COMMENT '任务类型：1-待审核任务（关联teacher_audit表），2-待查重任务（关联paper_submit表）',
+  `task_id` bigint NOT NULL COMMENT '任务ID（关联对应任务表的id字段，如teacher_audit.id或paper_submit.id）',
+  `intervene_type` tinyint NOT NULL COMMENT '干预类型：1-重新分配教师，2-驳回提交，3-标记文件损坏，4-强制通过',
+  `old_teacher_id` bigint DEFAULT NULL COMMENT '原负责教师ID（仅task_type=1时有效，关联sys_user.id）',
+  `new_teacher_id` bigint DEFAULT NULL COMMENT '新负责教师ID（仅intervene_type=1时有效，关联sys_user.id）',
+  `intervene_reason` varchar(500) NOT NULL COMMENT '干预原因（如“教师超期未审核：48小时+”“文件损坏：无法解析PDF”）',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_task_type_id` (`task_type`,`task_id`) COMMENT '避免同一任务重复记录干预日志'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='管理员任务干预日志表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `alert_record`
+--
+
+DROP TABLE IF EXISTS `alert_record`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `alert_record` (
+  `id` bigint NOT NULL COMMENT 'Snowflake ID',
+  `rule_id` bigint DEFAULT NULL COMMENT 'FK to alert_rule.id',
+  `rule_name` varchar(100) DEFAULT NULL COMMENT 'Rule name snapshot',
+  `severity` varchar(20) DEFAULT NULL COMMENT 'Severity level',
+  `title` varchar(200) DEFAULT NULL COMMENT 'Alert title',
+  `message` varchar(1000) DEFAULT NULL COMMENT 'Alert detail message',
+  `metric_value` double DEFAULT NULL COMMENT 'Trigger metric value',
+  `status` varchar(20) DEFAULT 'ACTIVE' COMMENT 'ACTIVE | RESOLVED',
+  `trigger_time` datetime DEFAULT NULL COMMENT 'When alert triggered',
+  `resolve_time` datetime DEFAULT NULL COMMENT 'When alert resolved',
+  `resolved_by` varchar(64) DEFAULT NULL COMMENT 'Who resolved it',
+  `create_by` bigint DEFAULT NULL COMMENT 'Creator user ID',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT 'Create time',
+  `update_by` bigint DEFAULT NULL COMMENT 'Updater user ID',
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Update time',
+  `is_deleted` tinyint DEFAULT '0' COMMENT 'Soft delete',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_rule_id` (`rule_id`),
+  KEY `idx_status` (`status`),
+  KEY `idx_trigger_time` (`trigger_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='System alerts / monitoring alert records';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `alert_rule`
+--
+
+DROP TABLE IF EXISTS `alert_rule`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `alert_rule` (
+  `id` bigint NOT NULL COMMENT '主键（雪花ID）',
+  `rule_name` varchar(100) NOT NULL COMMENT '规则名称',
+  `rule_type` varchar(50) NOT NULL COMMENT '规则类型(CPU/MEMORY/LOGIN_FAIL/CHECK_FAIL/STORAGE)',
+  `metric_name` varchar(100) DEFAULT '' COMMENT 'Micrometer指标名',
+  `threshold` double NOT NULL COMMENT '阈值',
+  `duration` int DEFAULT '60' COMMENT '持续秒数',
+  `severity` varchar(20) DEFAULT 'WARNING' COMMENT '严重级别(CRITICAL/WARNING/INFO)',
+  `enabled` tinyint(1) DEFAULT '1' COMMENT '是否启用',
+  `notify_email` varchar(200) DEFAULT '' COMMENT '通知邮箱',
+  `description` varchar(500) DEFAULT '' COMMENT '规则描述',
+  `create_by` bigint DEFAULT NULL COMMENT '创建人ID',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` bigint DEFAULT NULL COMMENT '更新人ID',
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` tinyint DEFAULT '0' COMMENT '软删除标记(0-未删除,1-已删除)',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_enabled` (`enabled`),
+  KEY `idx_rule_type` (`rule_type`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='告警规则表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `auto_assignment_config`
+--
+
+DROP TABLE IF EXISTS `auto_assignment_config`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `auto_assignment_config` (
+  `id` bigint NOT NULL COMMENT '主键ID',
+  `config_key` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '配置键',
+  `config_value` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '配置值',
+  `description` varchar(200) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '配置描述',
+  `config_type` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '配置类型 (algorithm/weight/limit)',
+  `is_enabled` tinyint(1) DEFAULT '1' COMMENT '是否启用 0-禁用 1-启用',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` tinyint(1) DEFAULT '0' COMMENT '是否删除 0-未删除 1-已删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_config_key` (`config_key`,`is_deleted`),
+  KEY `idx_config_type` (`config_type`),
+  KEY `idx_is_enabled` (`is_enabled`),
+  KEY `idx_create_time` (`create_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='自动分配配置表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `auto_assignment_history`
+--
+
+DROP TABLE IF EXISTS `auto_assignment_history`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `auto_assignment_history` (
+  `id` bigint NOT NULL COMMENT '主键ID',
+  `task_id` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '任务ID',
+  `start_time` datetime DEFAULT NULL COMMENT '开始时间',
+  `end_time` datetime DEFAULT NULL COMMENT '结束时间',
+  `strategy` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '使用的分配策略',
+  `total_students` int DEFAULT '0' COMMENT '总学生数',
+  `assigned_count` int DEFAULT '0' COMMENT '成功分配数',
+  `success_rate` decimal(5,2) DEFAULT '0.00' COMMENT '成功率百分比',
+  `duration` bigint DEFAULT '0' COMMENT '执行时长(毫秒)',
+  `status` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '任务状态 (completed/failed/cancelled)',
+  `operator_id` bigint DEFAULT NULL COMMENT '操作人ID',
+  `operator_name` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '操作人姓名',
+  `config_detail` text COLLATE utf8mb4_unicode_ci COMMENT '配置详情(JSON格式)',
+  `result_detail` text COLLATE utf8mb4_unicode_ci COMMENT '分配结果详情(JSON格式)',
+  `remark` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '备注',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` tinyint(1) DEFAULT '0' COMMENT '是否删除 0-未删除 1-已删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_task_id` (`task_id`,`is_deleted`),
+  KEY `idx_operator_id` (`operator_id`),
+  KEY `idx_start_time` (`start_time`),
+  KEY `idx_status` (`status`),
+  KEY `idx_create_time` (`create_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='自动分配历史记录表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `category_similarity_threshold`
+--
+
+DROP TABLE IF EXISTS `category_similarity_threshold`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `category_similarity_threshold` (
+  `id` bigint NOT NULL COMMENT '主键ID',
+  `category_type` varchar(50) DEFAULT NULL COMMENT '分类类型：college-学院，major-专业',
+  `college_id` bigint DEFAULT NULL COMMENT '学院ID',
+  `major_id` bigint DEFAULT NULL COMMENT '专业ID',
+  `threshold` int DEFAULT NULL COMMENT '相似度阈值',
+  `create_by` bigint DEFAULT NULL COMMENT '创建人ID',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `update_by` bigint DEFAULT NULL COMMENT '更新人ID',
+  `update_time` datetime DEFAULT NULL COMMENT '更新时间',
+  `is_deleted` int DEFAULT NULL COMMENT '软删除标记（0-未删除，1-已删除）',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='学科/专业相似度阈值设置表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `check_report`
+--
+
+DROP TABLE IF EXISTS `check_report`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `check_report` (
+  `id` bigint NOT NULL COMMENT '报告唯一ID（雪花ID）',
+  `task_id` bigint NOT NULL COMMENT '对应的查重任务ID（关联check_task.id）',
+  `paper_id` bigint NOT NULL COMMENT '对应的论文ID（关联关联paper_info.id）',
+  `report_no` varchar(50) NOT NULL COMMENT '报告编号（如“REPORT20240512001”，唯一）',
+  `repeat_details` text NOT NULL COMMENT '重复详情（JSON格式，含重复段落、相似来源、相似度）',
+  `report_path` varchar(500) NOT NULL COMMENT '报告文件存储路径（如“/data/report/2024/05/12/xxx.pdf”）',
+  `report_type` varchar(20) NOT NULL DEFAULT 'pdf' COMMENT '报告文件类型（默认pdf）',
+  `create_by` bigint NOT NULL COMMENT '创建人ID（关联sys_user.id，系统默认填管理员ID）',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '数据创建时间',
+  `update_by` bigint NOT NULL COMMENT '更新人ID（关联sys_user.id，系统/管理员）',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '数据更新时间',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除标记（0-未删除，1-已删除）',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  `total_similarity` decimal(5,2) DEFAULT NULL COMMENT '总相似度',
+  `report_generate_time` timestamp NULL DEFAULT NULL COMMENT '报告生成时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_report_no` (`report_no`),
+  KEY `idx_check_report_total_similarity` (`total_similarity`),
+  KEY `idx_check_report_report_generate_time` (`report_generate_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='查重报告表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `check_result`
+--
+
+DROP TABLE IF EXISTS `check_result`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `check_result` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '查重结果ID',
+  `task_id` bigint DEFAULT NULL COMMENT '查重任务ID（关联check_task.id）',
+  `paper_id` bigint DEFAULT NULL COMMENT '论文ID（关联paper_info.id）',
+  `submit_id` bigint DEFAULT NULL COMMENT '论文提交ID（关联paper_submit.id）',
+  `rule_id` bigint DEFAULT NULL COMMENT '查重规则ID（关联check_rule.id）',
+  `repeat_rate` decimal(5,2) DEFAULT NULL COMMENT '重复率（百分比，如25.32）',
+  `check_source` varchar(50) DEFAULT NULL COMMENT '查重来源（LOCAL-本地库，THIRD_PARTY-第三方API）',
+  `most_similar_paper` varchar(200) DEFAULT NULL COMMENT '最相似论文标题',
+  `similar_paper_id` bigint DEFAULT NULL COMMENT '最相似论文ID（本地库专用）',
+  `report_url` varchar(500) DEFAULT NULL COMMENT '查重报告链接（第三方API专用）',
+  `check_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '查重完成时间',
+  `check_duration` int DEFAULT NULL COMMENT '查重耗时（秒）',
+  `word_count` int DEFAULT NULL COMMENT '论文总字数',
+  `repeat_word_count` int DEFAULT NULL COMMENT '重复字数',
+  `check_details` text COMMENT '查重详情（JSON格式，包含重复段落信息）',
+  `status` tinyint DEFAULT '1' COMMENT '状态（0-无效，1-有效）',
+  `is_deleted` tinyint DEFAULT '0' COMMENT '删除标志（0-未删除，1-已删除）',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `create_by` varchar(200) DEFAULT NULL COMMENT '创建人',
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `update_by` varchar(200) DEFAULT NULL COMMENT '更新人',
+  PRIMARY KEY (`id`),
+  KEY `idx_task_id` (`task_id`),
+  KEY `idx_paper_id` (`paper_id`),
+  KEY `idx_submit_id` (`submit_id`),
+  KEY `idx_rule_id` (`rule_id`),
+  KEY `idx_repeat_rate` (`repeat_rate`),
+  KEY `idx_check_source` (`check_source`),
+  KEY `idx_check_time` (`check_time`),
+  KEY `idx_status` (`status`),
+  KEY `idx_check_result_task_id` (`task_id`),
+  KEY `idx_check_result_paper_id` (`paper_id`)
+) ENGINE=InnoDB AUTO_INCREMENT=2048440745244753923 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='论文查重结果表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `check_rule`
+--
+
+DROP TABLE IF EXISTS `check_rule`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `check_rule` (
+  `id` bigint NOT NULL COMMENT '规则唯一ID（雪花ID）',
+  `rule_name` varchar(100) NOT NULL COMMENT '规则名称（如“本科毕业论文查重规则”）',
+  `rule_code` varchar(50) NOT NULL COMMENT '规则编码（如“UNDERGRADUATE”，唯一）',
+  `pass_threshold` decimal(5,2) NOT NULL COMMENT '合格重复率阈值（如20.00表示≤20%为合格）',
+  `max_re_submit_count` tinyint DEFAULT '3' COMMENT '最大重提次数（0表示不允许重提）',
+  `compare_lib` varchar(200) NOT NULL COMMENT '比对库范围（JSON格式，如["校内论文库","知网期刊库"]）',
+  `check_interval` int NOT NULL DEFAULT '86400' COMMENT '二次查重间隔（单位：秒，默认24小时）',
+  `max_check_count` int NOT NULL DEFAULT '5' COMMENT '单篇论文最大查重次数（默认5次）',
+  `is_default` tinyint NOT NULL DEFAULT '0' COMMENT '是否默认规则（0-否，1-是，仅一条默认）',
+  `description` varchar(500) DEFAULT '' COMMENT '规则描述',
+  `create_by` bigint NOT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '数据创建时间',
+  `update_by` bigint NOT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '数据更新时间',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除标记（0-未删除，1-已删除）',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='查重规则表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `check_task`
+--
+
+DROP TABLE IF EXISTS `check_task`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `check_task` (
+  `id` bigint NOT NULL COMMENT '任务唯一ID（雪花ID）',
+  `paper_id` bigint NOT NULL COMMENT '对应的论文ID（关联paper_info.id）',
+  `file_id` bigint DEFAULT NULL COMMENT '论文文件ID',
+  `report_id` bigint DEFAULT NULL COMMENT '对应的查重报告ID（关联check_report.id，任务成功时生成）',
+  `task_no` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL COMMENT '任务编号（如“CHECK20240512001”，唯一）',
+  `check_rate` decimal(5,2) DEFAULT NULL COMMENT '查重重复率（如15.32表示15.32%）',
+  `check_status` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT '0' COMMENT '任务状态（pending-待查重，checking-查重中，completed-查重成功，failure-查重失败）',
+  `start_time` datetime DEFAULT NULL COMMENT '任务开始时间',
+  `end_time` datetime DEFAULT NULL COMMENT '任务结束时间',
+  `fail_reason` varchar(500) DEFAULT '' COMMENT '任务失败原因（如“文件解析错误”）',
+  `report_path` varchar(500) DEFAULT NULL COMMENT '查重报告存储路径（本地/OSS）',
+  `create_by` bigint NOT NULL COMMENT '创建人ID（关联sys_user.id，即学生ID）',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '数据创建时间',
+  `update_by` bigint NOT NULL COMMENT '更新人ID（关联sys_user.id，系统/管理员）',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '数据更新时间',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除标记（0-未删除，1-已删除）',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  `priority` int DEFAULT '3' COMMENT '任务优先级（1-5，5最高）',
+  `retry_count` int DEFAULT '0' COMMENT '任务重试次数',
+  `check_rule_id` bigint DEFAULT NULL COMMENT '查重规则ID（关联check_rule.id）',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_task_no` (`task_no`),
+  KEY `idx_check_task_rule_id` (`check_rule_id`),
+  KEY `idx_check_task_delete_by` (`delete_by`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='查重任务表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `college`
+--
+
+DROP TABLE IF EXISTS `college`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `college` (
+  `id` bigint NOT NULL COMMENT '主键ID',
+  `create_by` bigint NOT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` bigint NOT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  `college_code` varchar(32) NOT NULL COMMENT '学院编码（唯一，如：CS-计算机学院、EE-电子工程学院）',
+  `college_name` varchar(128) NOT NULL COMMENT '学院名称（如：计算机科学与技术学院）',
+  `college_desc` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL COMMENT '学院描述（如：计算机学院）',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_college_code` (`college_code`) COMMENT '学院编码唯一索引，避免重复'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='学院表（存储学校下属所有学院信息）';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `compare_lib`
+--
+
+DROP TABLE IF EXISTS `compare_lib`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `compare_lib` (
+  `id` bigint NOT NULL COMMENT '比对库ID（主键）',
+  `lib_name` varchar(100) NOT NULL COMMENT '比对库名称',
+  `lib_code` varchar(50) NOT NULL COMMENT '比对库编码（唯一）',
+  `lib_type` varchar(20) NOT NULL COMMENT '比对库类型（LOCAL-本地库，REMOTE-远程库）',
+  `lib_url` varchar(500) NOT NULL COMMENT '库地址（本地路径或远程URL）',
+  `is_enabled` tinyint NOT NULL DEFAULT '1' COMMENT '是否启用（0-禁用，1-启用）',
+  `description` varchar(500) DEFAULT '' COMMENT '比对库描述',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除标识（0-未删除，1-已删除）',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  `created_by` bigint NOT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `created_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_by` bigint NOT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `updated_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_lib_code` (`lib_code`) COMMENT '比对库编码唯一索引'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='比对库表（存储查重用的数据源信息）';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `config_change_log`
+--
+
+DROP TABLE IF EXISTS `config_change_log`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `config_change_log` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `config_key` varchar(100) NOT NULL COMMENT '配置键',
+  `old_value` text COMMENT '旧配置值',
+  `new_value` text COMMENT '新配置值',
+  `operator` varchar(50) DEFAULT NULL COMMENT '操作人',
+  `operate_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '操作时间',
+  `ip_address` varchar(50) DEFAULT NULL COMMENT '操作IP',
+  PRIMARY KEY (`id`),
+  KEY `idx_config_key` (`config_key`),
+  KEY `idx_operate_time` (`operate_time`)
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='配置变更日志表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `conversation_members`
+--
+
+DROP TABLE IF EXISTS `conversation_members`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `conversation_members` (
+  `id` bigint NOT NULL,
+  `conversation_id` bigint NOT NULL COMMENT '会话ID',
+  `user_id` bigint NOT NULL COMMENT '用户ID',
+  `role` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT 'MEMBER' COMMENT '成员角色(OWNER/ADMIN/MEMBER)',
+  `joined_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '加入时间',
+  `left_at` datetime DEFAULT NULL COMMENT '离开时间',
+  `is_left` tinyint DEFAULT '0' COMMENT '是否已离开(0-未离开,1-已离开)',
+  `unread_count` int DEFAULT '0' COMMENT '未读消息数量',
+  `create_by` bigint DEFAULT NULL COMMENT '创建人ID',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` bigint DEFAULT NULL COMMENT '更新人ID',
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` tinyint DEFAULT '0' COMMENT '是否删除(0-未删除,1-已删除)',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  `avatar` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '用户头像',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_conversation_user` (`conversation_id`,`user_id`),
+  KEY `idx_user_id` (`user_id`),
+  KEY `idx_conversation_id` (`conversation_id`),
+  KEY `idx_is_left` (`is_left`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='会话成员表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `conversations`
+--
+
+DROP TABLE IF EXISTS `conversations`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `conversations` (
+  `id` bigint NOT NULL,
+  `name` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '会话名称',
+  `type` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'PRIVATE' COMMENT '会话类型(PRIVATE/GROUP)',
+  `avatar` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '会话头像',
+  `last_message_id` bigint DEFAULT NULL COMMENT '最后一条消息ID',
+  `last_active_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '最后活跃时间',
+  `creator_id` bigint NOT NULL COMMENT '会话创建者ID',
+  `last_message_time` datetime DEFAULT NULL COMMENT '最后一条消息时间',
+  `description` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '会话描述',
+  `create_by` bigint DEFAULT NULL COMMENT '创建人ID',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` bigint DEFAULT NULL COMMENT '更新人ID',
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` tinyint DEFAULT '0' COMMENT '是否删除(0-未删除,1-已删除)',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_creator_id` (`creator_id`),
+  KEY `idx_last_active_time` (`last_active_time`),
+  KEY `idx_type` (`type`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='会话表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `file_info`
+--
+
+DROP TABLE IF EXISTS `file_info`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `file_info` (
+  `id` bigint NOT NULL COMMENT '文件ID',
+  `original_filename` varchar(255) NOT NULL COMMENT '原始文件名',
+  `file_size` bigint NOT NULL COMMENT '文件大小（字节）',
+  `file_size_desc` varchar(50) DEFAULT NULL COMMENT '文件大小描述',
+  `storage_path` varchar(500) DEFAULT NULL COMMENT '存储路径',
+  `page_count` int DEFAULT NULL COMMENT '文件页数',
+  `access_url` varchar(500) DEFAULT NULL COMMENT '访问URL',
+  `word_count` int DEFAULT NULL COMMENT '字数统计',
+  `md5` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '文件MD5',
+  `upload_time` datetime NOT NULL COMMENT '上传时间',
+  `upload_user_id` varchar(50) DEFAULT NULL COMMENT '上传用户ID',
+  `biz_type` varchar(50) DEFAULT NULL COMMENT '业务类型',
+  `biz_id` varchar(50) DEFAULT NULL COMMENT '业务ID',
+  `remark` varchar(500) DEFAULT NULL COMMENT '备注',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `update_time` datetime DEFAULT NULL COMMENT '更新时间',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `idx_md5` (`md5`) USING BTREE,
+  KEY `idx_file_info_md5` (`md5`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='文件信息表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `flyway_schema_history`
+--
+
+DROP TABLE IF EXISTS `flyway_schema_history`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `flyway_schema_history` (
+  `installed_rank` int NOT NULL,
+  `version` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `description` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `type` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `script` varchar(1000) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `checksum` int DEFAULT NULL,
+  `installed_by` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `installed_on` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `execution_time` int NOT NULL,
+  `success` tinyint(1) NOT NULL,
+  PRIMARY KEY (`installed_rank`),
+  KEY `flyway_schema_history_s_idx` (`success`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `knowledge_article`
+--
+
+DROP TABLE IF EXISTS `knowledge_article`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `knowledge_article` (
+  `id` bigint NOT NULL COMMENT '雪花ID',
+  `title` varchar(200) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `content` mediumtext COLLATE utf8mb4_unicode_ci NOT NULL,
+  `summary` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT '',
+  `category_id` bigint DEFAULT NULL,
+  `tags` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT '',
+  `view_count` bigint DEFAULT '0',
+  `status` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT 'DRAFT',
+  `sort` int DEFAULT '0',
+  `author_id` bigint DEFAULT NULL,
+  `author_name` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT '',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `is_deleted` tinyint DEFAULT '0',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `knowledge_category`
+--
+
+DROP TABLE IF EXISTS `knowledge_category`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `knowledge_category` (
+  `id` bigint NOT NULL COMMENT '雪花ID',
+  `code` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `icon` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT '',
+  `sort` int DEFAULT '0',
+  `status` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT 'ACTIVE',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `is_deleted` tinyint DEFAULT '0',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `code` (`code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `major`
+--
+
+DROP TABLE IF EXISTS `major`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `major` (
+  `id` bigint NOT NULL COMMENT '主键ID',
+  `create_by` bigint NOT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` bigint NOT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  `major_code` varchar(20) NOT NULL COMMENT '专业编码（如080901-计算机科学与技术，唯一）',
+  `major_name` varchar(50) NOT NULL COMMENT '专业名称（如计算机科学与技术）',
+  `college_id` bigint NOT NULL COMMENT '所属学院ID（关联college.id，如软件学院、信息学院）',
+  `major_desc` varchar(500) DEFAULT NULL COMMENT '专业描述（可选，如“培养计算机领域高级人才”）',
+  `user_id` bigint DEFAULT NULL COMMENT '用户ID（关联sys_user.id）',
+  `current_advisor_count` int DEFAULT '0' COMMENT '当前指导任务数',
+  `max_advisor_count` int DEFAULT '10' COMMENT '最大指导任务上限',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_major_code` (`major_code`),
+  KEY `idx_college_id` (`college_id`),
+  KEY `idx_major_user_id` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='专业表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `message_template`
+--
+
+DROP TABLE IF EXISTS `message_template`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `message_template` (
+  `id` bigint NOT NULL COMMENT '主键ID',
+  `template_code` varchar(100) DEFAULT NULL COMMENT '模板编码',
+  `template_name` varchar(100) DEFAULT NULL COMMENT '模板名称',
+  `template_type` varchar(50) DEFAULT NULL COMMENT '模板类型：assignment-分配, confirm-确认, reject-拒绝',
+  `title_template` varchar(200) NOT NULL COMMENT '标题模板',
+  `content_template` text COMMENT '内容模板',
+  `is_active` tinyint DEFAULT '1' COMMENT '是否启用',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_template_code` (`template_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='模版信息表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `messages`
+--
+
+DROP TABLE IF EXISTS `messages`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `messages` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `sender_id` bigint NOT NULL COMMENT '发送者ID',
+  `receiver_id` bigint NOT NULL COMMENT '接收者ID',
+  `conversation_id` bigint DEFAULT NULL COMMENT '会话ID',
+  `message_type` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '消息类型(PRIVATE/NOTIFICATION/GROUP/BROADCAST)',
+  `content_type` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '内容类型(TEXT/FILE/IMAGE/VOICE)',
+  `title` varchar(200) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '消息标题',
+  `content` text COLLATE utf8mb4_unicode_ci COMMENT '消息内容',
+  `attachments` json DEFAULT NULL COMMENT '附件列表',
+  `status` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT 'SENT' COMMENT '消息状态(SENT/DELIVERED/READ)',
+  `related_id` bigint DEFAULT NULL COMMENT '关联ID',
+  `related_type` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '关联类型',
+  `sent_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '发送时间',
+  `delivered_time` datetime DEFAULT NULL COMMENT '送达时间',
+  `read_time` datetime DEFAULT NULL COMMENT '阅读时间',
+  `create_by` bigint DEFAULT NULL COMMENT '创建人ID',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` bigint DEFAULT NULL COMMENT '更新人ID',
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` tinyint DEFAULT '0' COMMENT '是否删除(0-未删除,1-已删除)',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_sender_id` (`sender_id`),
+  KEY `idx_receiver_id` (`receiver_id`),
+  KEY `idx_conversation_id` (`conversation_id`),
+  KEY `idx_sent_time` (`sent_time`),
+  KEY `idx_status` (`status`)
+) ENGINE=InnoDB AUTO_INCREMENT=2058519055907819523 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='消息表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `paper_advisor_rel`
+--
+
+DROP TABLE IF EXISTS `paper_advisor_rel`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `paper_advisor_rel` (
+  `id` bigint NOT NULL COMMENT '主键ID',
+  `created_by` bigint NOT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `created_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_by` bigint NOT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `updated_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  `paper_id` bigint NOT NULL COMMENT '论文ID（关联paper_submit.id，唯一）',
+  `advisor_id` bigint NOT NULL COMMENT '指导老师ID（关联sys_user.id）',
+  `advisor_round` int NOT NULL COMMENT '指导轮次',
+  `student_major_id` bigint NOT NULL COMMENT '学生所属专业ID（关联major.id，与paper_submit一致）',
+  `advisor_major_id` bigint NOT NULL COMMENT '指导老师关联的专业ID（关联major.id，与sys_user_major一致）',
+  `rel_status` tinyint NOT NULL DEFAULT '1' COMMENT '关联状态：1-有效（指导中/已完成），0-无效（驳回/取消）',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_paper_id` (`paper_id`) COMMENT '论文ID唯一，避免重复关联',
+  KEY `idx_advisor_major_status` (`advisor_id`,`advisor_major_id`,`rel_status`),
+  KEY `idx_paper_id_status` (`paper_id`,`rel_status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='论文-指导老师关联表（用于精准统计指导任务数）';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `paper_attachment`
+--
+
+DROP TABLE IF EXISTS `paper_attachment`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `paper_attachment` (
+  `id` bigint NOT NULL COMMENT '主键ID',
+  `created_by` bigint NOT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `created_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_by` bigint NOT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `updated_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  `paper_id` bigint NOT NULL COMMENT '关联论文ID（关联paper_submit.id）',
+  `student_id` bigint NOT NULL COMMENT '附件上传者ID（学生ID，关联sys_user.id）',
+  `advisor_id` bigint DEFAULT NULL COMMENT '关联指导老师ID（关联sys_user.id）',
+  `original_filename` varchar(255) NOT NULL COMMENT '原始文件名（如“论文初稿.pdf”）',
+  `storage_path` varchar(512) NOT NULL COMMENT '文件存储路径（本地/OSS路径）',
+  `file_type` varchar(50) NOT NULL COMMENT '文件MIME类型（如application/pdf）',
+  `file_size` bigint NOT NULL COMMENT '文件大小（单位：字节）',
+  `file_md5` varchar(32) NOT NULL COMMENT '文件MD5值（32位小写，用于完整性校验）',
+  `attachment_type` varchar(50) DEFAULT NULL COMMENT '附件类型（如“论文初稿”“查重报告”）',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_file_md5` (`file_md5`) COMMENT '文件MD5唯一，防止重复上传'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='论文附件表（存储论文相关附件信息）';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `paper_attachment_rel`
+--
+
+DROP TABLE IF EXISTS `paper_attachment_rel`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `paper_attachment_rel` (
+  `id` bigint NOT NULL COMMENT '关联ID',
+  `paper_id` bigint DEFAULT NULL COMMENT '论文ID（关联paper_submit.id）',
+  `file_id` bigint DEFAULT NULL COMMENT '文件ID（关联sys_attachment.id）',
+  `attachment_use` varchar(50) DEFAULT NULL COMMENT '附件用途（论文初稿/终稿/修改说明）',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '逻辑删除标记',
+  `create_user_id` bigint DEFAULT NULL COMMENT '创建人ID（学生ID）',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='论文-附件关联表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `paper_info`
+--
+
+DROP TABLE IF EXISTS `paper_info`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `paper_info` (
+  `id` bigint NOT NULL COMMENT '论文唯一ID（雪花ID）',
+  `subject_code` varchar(50) DEFAULT NULL COMMENT '学科领域',
+  `paper_title` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL COMMENT '论文标题',
+  `student_id` bigint DEFAULT NULL COMMENT '提交论文的学生ID（关联sys_user.id）',
+  `author` varchar(255) DEFAULT NULL COMMENT '论文作者',
+  `college_id` bigint DEFAULT NULL COMMENT '学院ID',
+  `major_id` bigint DEFAULT NULL COMMENT '专业ID',
+  `lib_id` bigint DEFAULT NULL COMMENT '对比库ID（关联compare_lib.id）',
+  `teacher_id` bigint DEFAULT NULL COMMENT '指导教师ID（关联sys_user.id）',
+  `teacher_name` varchar(100) DEFAULT NULL COMMENT '指导老师姓名',
+  `allocation_type` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL COMMENT '分配类型（auto-自动分配, manual-手动分配）',
+  `allocation_status` varchar(50) DEFAULT NULL COMMENT '分配状态（pending-待确认, confirmed-已确认, rejected-已拒绝）',
+  `allocation_time` datetime DEFAULT NULL COMMENT '分配时间',
+  `confirm_time` datetime DEFAULT NULL COMMENT '确认时间',
+  `paper_type` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL COMMENT '论文类型（graduation-毕业论文，course-课程论文,other-其他）',
+  `paper_abstract` text COMMENT '论文摘要',
+  `file_id` varchar(255) DEFAULT NULL COMMENT '文件ID',
+  `file_md5` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL COMMENT '文件MD5值（防重复上传）',
+  `page_count` int DEFAULT NULL COMMENT '论文页数',
+  `word_count` int DEFAULT NULL COMMENT '论文字数',
+  `paper_status` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT '0' COMMENT '论文状态（pending-待分配，assigned-已分配导师，checking-待查重，auditing-待审核，completed-审核通过，rejected-审核不通过）',
+  `similarity_rate` decimal(5,2) DEFAULT NULL COMMENT '相似度',
+  `check_result` text COMMENT '查重结果',
+  `submit_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '论文提交时间',
+  `check_time` datetime DEFAULT NULL COMMENT '查重时间',
+  `file_path` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL COMMENT '存储路径',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除标记（0-未删除，1-已删除）',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  `create_by` bigint DEFAULT NULL COMMENT '创建人ID（关联sys_user.id，即学生ID）',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '数据创建时间',
+  `update_by` bigint DEFAULT NULL COMMENT '更新人ID（关联sys_user.id，学生/教师/管理员）',
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '数据更新时间',
+  `final_score` decimal(5,2) DEFAULT NULL COMMENT '最终成绩',
+  `check_engine_type` varchar(20) DEFAULT NULL COMMENT '查重引擎类型(local/third_party/deep_learning)',
+  `check_completed` tinyint DEFAULT '0' COMMENT '查重是否完成(0-未完成,1-已完成)',
+  `check_source` varchar(20) DEFAULT NULL COMMENT '查重来源(school-校内,external-外部)',
+  `version` int DEFAULT '1' COMMENT '论文版本号',
+  `keywords` varchar(255) DEFAULT NULL COMMENT '论文关键词',
+  `parent_paper_id` bigint DEFAULT NULL COMMENT '父版本论文ID',
+  `content_path` varchar(255) DEFAULT NULL COMMENT '论文正文在MinIO中的存储路径',
+  `segmented_path` varchar(255) DEFAULT NULL COMMENT 'IK分词后文本在MinIO中的存储路径',
+  `internal_check_result` text COMMENT '校内查重结果（JSON格式）',
+  `third_party_check_result` text COMMENT '第三方查重结果（JSON格式）',
+  PRIMARY KEY (`id`),
+  KEY `idx_paper_info_student_title` (`student_id`,`paper_title`),
+  KEY `idx_paper_info_file_id` (`file_id`),
+  KEY `idx_paper_info_student_id` (`student_id`),
+  KEY `idx_paper_info_teacher_status` (`teacher_id`,`paper_status`,`is_deleted`),
+  KEY `idx_paper_info_status` (`paper_status`,`is_deleted`),
+  KEY `idx_paper_info_delete_by` (`delete_by`),
+  KEY `idx_paper_info_lib_id` (`lib_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='论文信息表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `paper_library`
+--
+
+DROP TABLE IF EXISTS `paper_library`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `paper_library` (
+  `id` bigint NOT NULL COMMENT '主键ID',
+  `title` varchar(255) DEFAULT NULL COMMENT '论文标题',
+  `content_path` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL COMMENT '论文正文在MinIO中的存储路径',
+  `segmented_path` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL COMMENT ' IK分词后文本在MinIO中的存储路径',
+  `author` varchar(100) DEFAULT NULL COMMENT '论文作者',
+  `student_num` varchar(100) DEFAULT NULL COMMENT '学号',
+  `major` varchar(255) DEFAULT NULL COMMENT '专业',
+  `grade` varchar(50) DEFAULT NULL COMMENT '年级',
+  `keyword` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL COMMENT '关键词',
+  `summary` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL COMMENT '摘要',
+  `similarity` decimal(5,2) DEFAULT NULL COMMENT '相似度',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '入库时间',
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` tinyint(1) DEFAULT '0' COMMENT '逻辑删除：0-正常，1-删除',
+  PRIMARY KEY (`id`),
+  KEY `idx_title` (`title`) COMMENT '标题索引',
+  KEY `idx_create_time` (`create_time`) COMMENT '入库时间索引'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='本地论文参考库';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `paper_status_log`
+--
+
+DROP TABLE IF EXISTS `paper_status_log`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `paper_status_log` (
+  `id` bigint NOT NULL COMMENT '主键ID',
+  `paper_id` bigint NOT NULL COMMENT '论文提交ID（关联paper_submit.id）',
+  `old_status` varchar(50) DEFAULT NULL COMMENT '变更前状态（如0-草稿）',
+  `new_status` varchar(50) DEFAULT NULL COMMENT '变更后状态（如1-已提交）',
+  `operate_ip` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL COMMENT '操作IP地址（用于安全追溯）',
+  `status_reason` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '状态变更原因（如“学生点击提交按钮”“审核通过：论文符合要求”）',
+  `create_by` bigint DEFAULT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` bigint DEFAULT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` tinyint DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='论文状态变更日志表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `paper_submit`
+--
+
+DROP TABLE IF EXISTS `paper_submit`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `paper_submit` (
+  `id` bigint NOT NULL COMMENT '论文提交记录ID',
+  `paper_id` bigint DEFAULT NULL COMMENT '论文ID',
+  `major_id` bigint DEFAULT NULL COMMENT '专业ID（关联major_id）',
+  `student_id` bigint DEFAULT NULL COMMENT '学生ID',
+  `submit_version` int DEFAULT NULL COMMENT '提交版本',
+  `file_id` varchar(255) DEFAULT NULL COMMENT '文件ID',
+  `file_md5` varchar(255) DEFAULT NULL COMMENT '文件MD5',
+  `submit_time` datetime DEFAULT NULL COMMENT '提交时间',
+  `check_status` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL COMMENT '查重状态（pending-待查重, checking-查重中, completed-已完成, failed-查重失败）',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  `create_by` bigint NOT NULL COMMENT '创建人ID',
+  `similarity_rate` decimal(5,2) DEFAULT NULL COMMENT '相似度',
+  `check_result` text COMMENT '查重结果',
+  `check_report_id` bigint DEFAULT NULL COMMENT '查重报告ID（关联check_task.id）',
+  `check_sim_hash` bigint DEFAULT NULL COMMENT '论文SimHash指纹（用于查重比对）',
+  `check_time` datetime DEFAULT NULL COMMENT '查重时间',
+  `remark` varchar(500) DEFAULT NULL COMMENT '备注',
+  `advisor_suggestion` varchar(2000) DEFAULT NULL COMMENT '指导老师审核意见',
+  `status` int DEFAULT NULL COMMENT '状态（已废弃）',
+  `advisor_id` bigint DEFAULT NULL COMMENT '导师ID',
+  `review_time` datetime DEFAULT NULL COMMENT '审核时间',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` bigint NOT NULL COMMENT '更新人ID',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='论文提交表（存储用户提交的论文及审核信息）';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `re_submit_record`
+--
+
+DROP TABLE IF EXISTS `re_submit_record`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `re_submit_record` (
+  `id` bigint NOT NULL COMMENT '主键ID',
+  `created_by` bigint NOT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `created_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_by` bigint NOT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `updated_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `paper_id` bigint NOT NULL COMMENT '原论文提交ID（关联paper_submit.id）',
+  `re_submit_paper_id` bigint NOT NULL COMMENT '重提后的论文提交ID（关联paper_submit.id）',
+  `re_submit_reason` varchar(500) NOT NULL COMMENT '重提原因（如“重复率超标：35%>30%”“审核驳回：格式错误”）',
+  `re_submit_count` tinyint NOT NULL COMMENT '本次重提是第几次（1=第一次重提，2=第二次，...）',
+  PRIMARY KEY (`id`),
+  KEY `idx_paper_id` (`paper_id`),
+  KEY `idx_created_by` (`created_by`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='论文重提记录表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `review_draft`
+--
+
+DROP TABLE IF EXISTS `review_draft`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `review_draft` (
+  `id` bigint NOT NULL COMMENT '主键ID（雪花算法生成）',
+  `paper_id` bigint NOT NULL COMMENT '论文ID',
+  `teacher_id` bigint NOT NULL COMMENT '教师ID',
+  `review_status` varchar(50) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '审核状态',
+  `review_opinion` varchar(500) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '审核意见',
+  `review_attach` varchar(500) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '审核附件路径',
+  `create_by` bigint DEFAULT NULL COMMENT '创建人ID',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `update_by` bigint DEFAULT NULL COMMENT '更新人ID',
+  `update_time` datetime DEFAULT NULL COMMENT '更新时间',
+  `is_deleted` tinyint(1) DEFAULT '0' COMMENT '软删除标记',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_paper_teacher` (`paper_id`,`teacher_id`,`is_deleted`),
+  KEY `idx_teacher` (`teacher_id`,`is_deleted`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='审核草稿表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `review_record`
+--
+
+DROP TABLE IF EXISTS `review_record`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `review_record` (
+  `id` bigint NOT NULL COMMENT '审核记录唯一ID（雪花ID）',
+  `paper_id` bigint NOT NULL COMMENT '对应的论文ID（关联paper_info.id）',
+  `task_id` bigint NOT NULL COMMENT '对应的查重任务ID（关联check_task.id）',
+  `teacher_id` bigint NOT NULL COMMENT '执行审核的教师ID（关联sys_user.id）',
+  `review_status` varchar(50) NOT NULL,
+  `review_opinion` text COMMENT '审核意见（富文本）',
+  `suggested_modifications` text COMMENT '建议修改点（JSON 格式）',
+  `review_attach` varchar(500) DEFAULT NULL COMMENT '审核附件路径（如修改建议文档）',
+  `review_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '审核时间',
+  `create_by` bigint NOT NULL COMMENT '创建人ID（关联sys_user.id，即教师ID）',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '数据创建时间',
+  `update_by` bigint NOT NULL COMMENT '更新人ID（关联sys_user.id，教师/管理员）',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '数据更新时间',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除标记（0-未删除，1-已删除）',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='审核记录表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `review_template`
+--
+
+DROP TABLE IF EXISTS `review_template`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `review_template` (
+  `id` bigint NOT NULL COMMENT '模板ID',
+  `title` varchar(255) DEFAULT NULL COMMENT '模板标题',
+  `category` varchar(100) DEFAULT NULL COMMENT '模板分类',
+  `content` text COMMENT '模板内容',
+  `scenarios` json DEFAULT NULL COMMENT '使用场景',
+  `is_public` tinyint(1) DEFAULT NULL COMMENT '是否公开',
+  `usage_count` int DEFAULT NULL COMMENT '使用次数',
+  `last_used` datetime DEFAULT NULL COMMENT '最后使用时间',
+  `create_by` bigint DEFAULT NULL COMMENT '创建人ID',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `update_by` bigint DEFAULT NULL COMMENT '更新人ID',
+  `update_time` datetime DEFAULT NULL COMMENT '更新时间',
+  `is_deleted` int DEFAULT '0' COMMENT '软删除标记（0-未删除，1-已删除）',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='审核意见模板表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `review_workflow`
+--
+
+DROP TABLE IF EXISTS `review_workflow`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `review_workflow` (
+  `id` bigint NOT NULL COMMENT '工作流ID',
+  `name` varchar(255) DEFAULT NULL COMMENT '工作流名称',
+  `description` text COMMENT '工作流描述',
+  `steps` json DEFAULT NULL COMMENT '工作流步骤（JSON格式）',
+  `enabled` tinyint(1) DEFAULT NULL COMMENT '启用状态',
+  `create_by` bigint DEFAULT NULL COMMENT '创建人ID',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `update_by` bigint DEFAULT NULL COMMENT '更新人ID',
+  `update_time` datetime DEFAULT NULL COMMENT '更新时间',
+  `is_deleted` int DEFAULT NULL COMMENT '软删除标记（0-未删除，1-已删除）',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='审核工作流表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `rule_lib_relation`
+--
+
+DROP TABLE IF EXISTS `rule_lib_relation`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `rule_lib_relation` (
+  `id` bigint NOT NULL COMMENT '关联记录ID（主键）',
+  `rule_id` bigint NOT NULL COMMENT '查重规则ID（关联check_rule.id）',
+  `lib_id` bigint NOT NULL COMMENT '比对库ID（关联compare_lib.id）',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除标识（0-未删除，1-已删除）',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  `created_by` bigint NOT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `created_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_by` bigint NOT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `updated_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='查重规则-比对库关联表（多对多中间表）';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `similarity_threshold`
+--
+
+DROP TABLE IF EXISTS `similarity_threshold`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `similarity_threshold` (
+  `id` bigint NOT NULL COMMENT '主键ID',
+  `global_threshold` int DEFAULT NULL COMMENT '全局相似度阈值',
+  `create_by` bigint DEFAULT NULL COMMENT '创建人ID',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `update_by` bigint DEFAULT NULL COMMENT '更新人ID',
+  `update_time` datetime DEFAULT NULL COMMENT '更新时间',
+  `is_deleted` int DEFAULT '0' COMMENT '软删除标记（0-未删除，1-已删除）',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='相似度阈值设置表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `student_group`
+--
+
+DROP TABLE IF EXISTS `student_group`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `student_group` (
+  `id` bigint NOT NULL COMMENT '分组ID',
+  `name` varchar(255) DEFAULT NULL COMMENT '分组名称',
+  `description` text COMMENT '分组描述',
+  `create_by` bigint DEFAULT NULL COMMENT '创建人ID',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `update_by` bigint DEFAULT NULL COMMENT '更新人ID',
+  `update_time` datetime DEFAULT NULL COMMENT '更新时间',
+  `is_deleted` int DEFAULT '0' COMMENT '软删除标记（0-未删除，1-已删除）',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='学生分组表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `student_group_student_rel`
+--
+
+DROP TABLE IF EXISTS `student_group_student_rel`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `student_group_student_rel` (
+  `id` bigint NOT NULL COMMENT '关系ID',
+  `group_id` bigint DEFAULT NULL COMMENT '分组ID',
+  `student_id` bigint DEFAULT NULL COMMENT '学生ID',
+  `create_by` bigint DEFAULT NULL COMMENT '创建人ID',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `update_by` bigint DEFAULT NULL COMMENT '更新人ID',
+  `update_time` datetime DEFAULT NULL COMMENT '更新时间',
+  `is_deleted` int DEFAULT '0' COMMENT '软删除标记（0-未删除，1-已删除）',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='学生分组与学生关系表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `student_info`
+--
+
+DROP TABLE IF EXISTS `student_info`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `student_info` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `user_id` bigint NOT NULL COMMENT '用户ID',
+  `college_id` bigint DEFAULT NULL COMMENT '学院ID（关联college.id）',
+  `grade` varchar(20) DEFAULT NULL COMMENT '年级',
+  `major` varchar(100) DEFAULT NULL COMMENT '专业',
+  `class_name` varchar(100) DEFAULT NULL COMMENT '班级',
+  `college_name` varchar(100) DEFAULT NULL COMMENT '学院名称',
+  `major_id` bigint DEFAULT NULL COMMENT '专业ID',
+  `create_by` bigint DEFAULT NULL COMMENT '创建人',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` bigint DEFAULT NULL COMMENT '更新人',
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` tinyint DEFAULT '0' COMMENT '软删除标志（0-未删除，1-已删除）',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_user_id` (`user_id`),
+  KEY `idx_college_name` (`college_name`),
+  KEY `idx_major_id` (`major_id`),
+  KEY `idx_grade` (`grade`),
+  KEY `idx_college_id` (`college_id`),
+  KEY `idx_student_info_user_id` (`user_id`),
+  KEY `idx_student_info_college_id` (`college_id`),
+  CONSTRAINT `fk_student_info_college` FOREIGN KEY (`college_id`) REFERENCES `college` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=9 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='学生信息表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `sys_backup_log`
+--
+
+DROP TABLE IF EXISTS `sys_backup_log`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `sys_backup_log` (
+  `id` bigint NOT NULL COMMENT '主键ID',
+  `file_name` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '备份文件名',
+  `file_size` bigint DEFAULT NULL COMMENT '文件大小(字节)',
+  `status` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '备份状态(SUCCESS/FAILED)',
+  `start_time` datetime DEFAULT NULL COMMENT '备份开始时间',
+  `end_time` datetime DEFAULT NULL COMMENT '备份结束时间',
+  `duration_ms` bigint DEFAULT NULL COMMENT '耗时(毫秒)',
+  `error_message` varchar(1000) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '错误信息',
+  `backup_type` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '备份类型(AUTO/MANUAL)',
+  `is_deleted` int DEFAULT '0' COMMENT '软删除标记(0-未删除,1-已删除)',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `update_time` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `sys_dict_data`
+--
+
+DROP TABLE IF EXISTS `sys_dict_data`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `sys_dict_data` (
+  `id` bigint NOT NULL COMMENT '字典编码',
+  `dict_sort` int DEFAULT '0' COMMENT '字典排序',
+  `dict_label` varchar(100) DEFAULT '' COMMENT '字典标签',
+  `dict_value` varchar(100) DEFAULT '' COMMENT '字典键值',
+  `dict_type` varchar(100) DEFAULT '' COMMENT '字典类型',
+  `is_default` char(1) DEFAULT 'N' COMMENT '是否默认（Y是 N否）',
+  `status` char(1) DEFAULT '0' COMMENT '状态（0正常 1停用）',
+  `create_by` varchar(64) DEFAULT '' COMMENT '创建者',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `update_by` varchar(64) DEFAULT '' COMMENT '更新者',
+  `update_time` datetime DEFAULT NULL COMMENT '更新时间',
+  `remark` varchar(500) DEFAULT NULL COMMENT '备注',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='字典数据表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `sys_dict_type`
+--
+
+DROP TABLE IF EXISTS `sys_dict_type`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `sys_dict_type` (
+  `id` bigint NOT NULL COMMENT '字典主键',
+  `dict_name` varchar(100) DEFAULT '' COMMENT '字典名称',
+  `dict_type` varchar(100) DEFAULT '' COMMENT '字典类型',
+  `status` char(1) DEFAULT '0' COMMENT '状态（0正常 1停用）',
+  `create_by` varchar(64) DEFAULT '' COMMENT '创建者',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `update_by` varchar(64) DEFAULT '' COMMENT '更新者',
+  `update_time` datetime DEFAULT NULL COMMENT '更新时间',
+  `remark` varchar(500) DEFAULT NULL COMMENT '备注',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `dict_type` (`dict_type`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='字典类型表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `sys_error_log`
+--
+
+DROP TABLE IF EXISTS `sys_error_log`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `sys_error_log` (
+  `id` bigint NOT NULL COMMENT '异常日志唯一ID（雪花ID）',
+  `error_code` varchar(50) NOT NULL COMMENT '错误编码（如“FILE_PARSE_ERROR”）',
+  `error_msg` text NOT NULL COMMENT '错误信息（异常堆栈）',
+  `related_id` bigint DEFAULT '0' COMMENT '关联业务ID（如paper_id、task_id，无则填0）',
+  `related_type` varchar(50) DEFAULT 'system' COMMENT '关联业务类型（如“paper”“task”）',
+  `error_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '异常发生时间',
+  `handle_status` tinyint NOT NULL DEFAULT '0' COMMENT '处理状态（0-未处理，1-已处理）',
+  `handle_remark` varchar(500) DEFAULT NULL COMMENT '处理备注',
+  `handle_time` datetime DEFAULT NULL COMMENT '处理时间',
+  `handle_by` bigint DEFAULT '0' COMMENT '处理人ID（关联sys_user.id，未处理填0）',
+  `create_by` bigint NOT NULL COMMENT '创建人ID（关联sys_user.id，系统默认填管理员ID）',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '数据创建时间',
+  `update_by` bigint NOT NULL COMMENT '更新人ID（关联sys_user.id，处理人ID）',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '数据更新时间',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除标记（0-未删除，1-已删除）',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='系统异常日志表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `sys_login_log`
+--
+
+DROP TABLE IF EXISTS `sys_login_log`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `sys_login_log` (
+  `id` bigint NOT NULL COMMENT '登录日志ID',
+  `user_id` bigint DEFAULT NULL COMMENT '用户ID（关联sys_user.id）',
+  `username` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL COMMENT '登录用户名',
+  `login_ip` varchar(50) DEFAULT NULL COMMENT '登录IP',
+  `login_location` varchar(100) DEFAULT NULL COMMENT '登录地点',
+  `login_device` varchar(200) DEFAULT NULL COMMENT '登录设备',
+  `login_time` datetime DEFAULT NULL COMMENT '登录时间',
+  `login_result` tinyint DEFAULT NULL COMMENT '登录结果（1=成功，0=失败）',
+  `fail_reason` varchar(200) DEFAULT NULL COMMENT '失败原因（如用户名密码错误）',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '逻辑删除',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  KEY `idx_login_log_user_time` (`user_id`,`login_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='用户登录历史记录表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `sys_notice`
+--
+
+DROP TABLE IF EXISTS `sys_notice`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `sys_notice` (
+  `id` bigint NOT NULL COMMENT '主键ID',
+  `user_id` bigint NOT NULL COMMENT '接收用户ID（关联sys_user.id）',
+  `notice_type` tinyint NOT NULL COMMENT '通知类型：1-提交成功，2-查重完成，3-审核结果，4-截止提醒',
+  `notice_title` varchar(100) NOT NULL COMMENT '通知标题',
+  `notice_content` text NOT NULL COMMENT '通知内容（含关键信息，如“您的论文重复率为12.3%”）',
+  `is_read` tinyint NOT NULL DEFAULT '0' COMMENT '是否已读：0-未读，1-已读',
+  `read_time` datetime DEFAULT NULL COMMENT '阅读时间',
+  `priority` int DEFAULT '0' COMMENT '优先级：0-普通，1-重要，2-紧急',
+  `related_id` bigint DEFAULT NULL COMMENT '相关业务ID',
+  `related_type` varchar(50) DEFAULT NULL COMMENT '相关业务类型',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_user_is_read` (`user_id`,`is_read`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='系统站内信表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `sys_notice_log`
+--
+
+DROP TABLE IF EXISTS `sys_notice_log`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `sys_notice_log` (
+  `id` bigint NOT NULL COMMENT '主键ID',
+  `to_email` varchar(50) DEFAULT NULL COMMENT '用户邮箱',
+  `subject` varchar(255) DEFAULT NULL COMMENT '邮件主题',
+  `content` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `notice_type` varchar(50) DEFAULT NULL COMMENT '通知类型',
+  `success` tinyint(1) DEFAULT NULL COMMENT '是否成功',
+  `error_msg` varchar(255) DEFAULT NULL COMMENT '错误信息',
+  `related_id` bigint DEFAULT NULL COMMENT '关联业务ID',
+  `related_type` varchar(50) DEFAULT NULL COMMENT '关联业务类型',
+  `send_time` datetime DEFAULT NULL COMMENT '发送时间',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 STATS_PERSISTENT=0;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `sys_operation_log`
+--
+
+DROP TABLE IF EXISTS `sys_operation_log`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `sys_operation_log` (
+  `id` bigint NOT NULL COMMENT '日志唯一ID（雪花ID）',
+  `user_id` bigint NOT NULL COMMENT '操作人ID（关联sys_user.id，匿名操作填0）',
+  `user_name` varchar(50) NOT NULL COMMENT '操作人姓名（冗余存储）',
+  `operation_type` varchar(50) NOT NULL COMMENT '操作类型（login-登录，paper_upload-论文上传等）',
+  `operation_desc` varchar(200) NOT NULL COMMENT '操作描述',
+  `operation_param` text COMMENT '操作参数（JSON格式）',
+  `ip_address` varchar(50) NOT NULL COMMENT '操作IP地址',
+  `description` varchar(255) DEFAULT NULL COMMENT '描述',
+  `operation_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '操作时间',
+  `create_by` bigint NOT NULL COMMENT '创建人ID（关联sys_user.id，即操作人ID）',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '数据创建时间',
+  `update_by` bigint NOT NULL COMMENT '更新人ID（关联sys_user.id，与create_by一致）',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '数据更新时间',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除标记（0-未删除，1-已删除）',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  `user_type` varchar(20) DEFAULT '未知用户' COMMENT '操作用户类型',
+  `target` varchar(255) DEFAULT '未知对象' COMMENT '操作对象',
+  `status` tinyint DEFAULT '1' COMMENT '操作状态（1成功，0失败）',
+  `details` text COMMENT '详细信息',
+  `trace_id` varchar(32) DEFAULT NULL COMMENT '请求追踪ID',
+  PRIMARY KEY (`id`),
+  KEY `idx_ip_address` (`ip_address`),
+  KEY `idx_sys_operation_log_user_type` (`user_type`),
+  KEY `idx_sys_operation_log_status` (`status`),
+  KEY `idx_sys_operation_log_user_type_status` (`user_type`,`status`),
+  KEY `idx_operation_log_trace_id` (`trace_id`),
+  KEY `idx_sys_operation_log_delete_by` (`delete_by`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='系统操作日志表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `sys_operation_type`
+--
+
+DROP TABLE IF EXISTS `sys_operation_type`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `sys_operation_type` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `type` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '操作类型编码',
+  `name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '操作类型名称',
+  `description` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '操作类型描述',
+  `module` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '所属模块',
+  `permission_level` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '权限等级(LOW/MEDIUM/HIGH)',
+  `status` tinyint(1) NOT NULL DEFAULT '1' COMMENT '状态(1启用,0禁用)',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_type` (`type`)
+) ENGINE=InnoDB AUTO_INCREMENT=135 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='操作类型配置表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `sys_operation_type_mapping`
+--
+
+DROP TABLE IF EXISTS `sys_operation_type_mapping`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `sys_operation_type_mapping` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `old_type` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '旧操作类型编码',
+  `new_type` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '新操作类型编码',
+  `status` tinyint(1) NOT NULL DEFAULT '1' COMMENT '状态(1已映射,0未映射)',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_old_type` (`old_type`)
+) ENGINE=InnoDB AUTO_INCREMENT=43 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='操作类型映射表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `sys_role`
+--
+
+DROP TABLE IF EXISTS `sys_role`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `sys_role` (
+  `id` bigint NOT NULL COMMENT '角色唯一ID（雪花ID）',
+  `role_name` varchar(50) NOT NULL COMMENT '角色名称（学生、教师、教务管理员）',
+  `role_code` varchar(50) NOT NULL COMMENT '角色编码（STUDENT、TEACHER、ADMIN，唯一）',
+  `permissions` varchar(500) NOT NULL COMMENT '权限列表（JSON格式，如["paper:upload","report:view"]）',
+  `description` varchar(200) DEFAULT '' COMMENT '角色描述',
+  `create_by` bigint NOT NULL COMMENT '创建人ID（关联sys_user.id，初始化时填管理员ID）',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '数据创建时间',
+  `update_by` bigint NOT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '数据更新时间',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除标记（0-未删除，1-已删除）',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_role_name` (`role_name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='角色权限表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `sys_user`
+--
+
+DROP TABLE IF EXISTS `sys_user`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `sys_user` (
+  `id` bigint NOT NULL COMMENT '用户唯一ID（雪花ID）',
+  `avatar` varchar(255) DEFAULT NULL COMMENT '用户头像URL',
+  `username` varchar(50) NOT NULL COMMENT '登录账号（学生用学号，教师用工号，管理员自定义）',
+  `password` varchar(100) NOT NULL COMMENT '密码（BCrypt加密存储）',
+  `real_name` varchar(50) NOT NULL COMMENT '真实姓名',
+  `role_id` bigint NOT NULL COMMENT '关联sys_role.id，用户角色ID',
+  `college_id` bigint DEFAULT NULL COMMENT '所属学院ID(关联学院表）',
+  `user_type` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL COMMENT '用户类型：STUDENT-学生，TEACHER-教师，ADMIN-管理员',
+  `email` varchar(100) NOT NULL COMMENT '邮箱（用于密码重置、消息通知）',
+  `email_verified` tinyint(1) DEFAULT '0' COMMENT '邮箱验证状态：0-未验证，1-已验证',
+  `phone` varchar(20) DEFAULT '' COMMENT '手机号',
+  `introduce` varchar(200) DEFAULT NULL COMMENT '个人介绍，如Java炒饭选手',
+  `status` tinyint NOT NULL DEFAULT '1' COMMENT '账号状态（0-禁用，1-正常）',
+  `create_by` bigint NOT NULL COMMENT '创建人ID（关联sys_user.id，自注册用户填自身ID）',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '数据创建时间',
+  `update_by` bigint NOT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '数据更新时间',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除标记（0-未删除，1-已删除）',
+  `last_login_time` datetime DEFAULT NULL COMMENT '最后登录时间',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `idx_sys_user_email` (`email`),
+  KEY `idx_sys_user_delete_by` (`delete_by`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='用户表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `system_config`
+--
+
+DROP TABLE IF EXISTS `system_config`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `system_config` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `config_key` varchar(100) NOT NULL COMMENT '配置键',
+  `config_value` text COMMENT '配置值（JSON格式存储）',
+  `description` varchar(500) DEFAULT NULL COMMENT '配置描述',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` tinyint DEFAULT '0' COMMENT '是否删除 0-未删除 1-已删除',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_config_key` (`config_key`),
+  KEY `idx_is_deleted` (`is_deleted`)
+) ENGINE=InnoDB AUTO_INCREMENT=13 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='系统配置表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `system_message`
+--
+
+DROP TABLE IF EXISTS `system_message`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `system_message` (
+  `id` bigint NOT NULL COMMENT '主键ID',
+  `create_by` bigint DEFAULT NULL COMMENT '?????D',
+  `title` varchar(200) DEFAULT NULL COMMENT '消息标题',
+  `content` text COMMENT '消息内容',
+  `message_type` varchar(50) DEFAULT NULL COMMENT '消息类型：assignment-分配通知, confirm-确认通知, reject-拒绝通知',
+  `sender_id` bigint DEFAULT NULL COMMENT '发送者ID（系统发送为0）',
+  `receiver_id` bigint DEFAULT NULL COMMENT '接收者ID',
+  `related_id` bigint DEFAULT NULL COMMENT '关联的业务ID（如论文ID）',
+  `related_type` varchar(50) DEFAULT NULL COMMENT '关联的业务类型：paper-论文',
+  `is_read` tinyint DEFAULT '0' COMMENT '是否已读：0-未读，1-已读',
+  `read_time` datetime DEFAULT NULL COMMENT '阅读时间',
+  `expire_time` datetime DEFAULT NULL COMMENT '过期时间',
+  `priority` tinyint DEFAULT '1' COMMENT '优先级：1-普通，2-重要，3-紧急',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_by` bigint DEFAULT NULL COMMENT '?????D',
+  `is_deleted` tinyint DEFAULT NULL COMMENT '软删除标记',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_receiver_id` (`receiver_id`),
+  KEY `idx_receiver_read` (`receiver_id`,`is_read`),
+  KEY `idx_related` (`related_type`,`related_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='站内信息表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `system_param`
+--
+
+DROP TABLE IF EXISTS `system_param`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `system_param` (
+  `id` bigint NOT NULL COMMENT '系统参数ID（主键，仅存1条记录）',
+  `max_paper_size` bigint NOT NULL DEFAULT '209715200' COMMENT '论文最大大小（字节，默认200MB）',
+  `max_concurrent_check` int NOT NULL DEFAULT '10' COMMENT '最大并发查重数（默认10）',
+  `jwt_expiration` bigint NOT NULL DEFAULT '86400000' COMMENT 'JWT有效期（毫秒，默认24小时）',
+  `default_threshold` double DEFAULT NULL COMMENT '默认重复率阈值',
+  `storage_type` varchar(50) DEFAULT NULL COMMENT '文件存储类型',
+  `maintenance_status` tinyint DEFAULT NULL COMMENT '系统维护状态（非空，0-正常运行，1-维护中）',
+  `maintenance_start_time` datetime DEFAULT NULL COMMENT '维护开始时间',
+  `maintenance_end_time` datetime DEFAULT NULL COMMENT '维护结束时间',
+  `maintenance_notice` varchar(255) DEFAULT NULL COMMENT '维护公告',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除标识（0-未删除，1-已删除，系统参数不允许删除）',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  `create_by` bigint NOT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` bigint NOT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `backup_retention_days` int DEFAULT '30' COMMENT '备份文件保留天数',
+  `backup_enabled` int DEFAULT '1' COMMENT '是否启用自动备份(0-禁用,1-启用)',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='系统参数表（存储全局基础配置）';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `teacher_allocation_record`
+--
+
+DROP TABLE IF EXISTS `teacher_allocation_record`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `teacher_allocation_record` (
+  `id` bigint NOT NULL COMMENT '记录ID',
+  `paper_id` bigint NOT NULL COMMENT '论文ID',
+  `student_id` bigint NOT NULL COMMENT '学生ID',
+  `teacher_id` bigint NOT NULL COMMENT '老师ID',
+  `allocation_type` varchar(20) DEFAULT NULL COMMENT '分配类型',
+  `allocation_reason` varchar(500) DEFAULT NULL COMMENT '分配原因',
+  `allocation_status` varchar(20) DEFAULT 'active' COMMENT '???????????? active-??????, revoked-?????????, expired-?????????',
+  `allocation_time` datetime NOT NULL COMMENT '分配时间',
+  `operator_id` bigint DEFAULT NULL COMMENT '操作人ID',
+  `create_by` bigint DEFAULT NULL COMMENT '创建人',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `update_by` bigint DEFAULT NULL COMMENT '更新人',
+  `is_deleted` tinyint(1) DEFAULT '0' COMMENT '软删除标记',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  `college_id` bigint DEFAULT NULL COMMENT '学生学院ID',
+  `college_name` varchar(255) DEFAULT NULL COMMENT '学生学院名称',
+  `major_id` bigint DEFAULT NULL COMMENT '学生专业ID',
+  `major_name` varchar(255) DEFAULT NULL COMMENT '学生专业名称',
+  PRIMARY KEY (`id`),
+  KEY `idx_paper_id` (`paper_id`),
+  KEY `idx_teacher_id` (`teacher_id`),
+  KEY `idx_allocation_time` (`allocation_time`),
+  KEY `idx_is_deleted` (`is_deleted`),
+  KEY `idx_update_time` (`update_time`),
+  KEY `idx_allocation_status` (`allocation_status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='指导老师分配记录表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `teacher_info`
+--
+
+DROP TABLE IF EXISTS `teacher_info`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `teacher_info` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `user_id` bigint NOT NULL COMMENT '用户ID',
+  `professional_title` varchar(50) DEFAULT NULL COMMENT '职称',
+  `research_direction` varchar(255) DEFAULT NULL COMMENT '科研方向',
+  `current_advisor_count` int DEFAULT '0' COMMENT '当前指导教师数量',
+  `office` varchar(100) DEFAULT NULL COMMENT '办公地点',
+  `office_hours` varchar(255) DEFAULT NULL COMMENT '办公时间',
+  `max_review_count` int DEFAULT '5' COMMENT '最大审核数量',
+  `review_deadline` int DEFAULT '7' COMMENT '审核期限（天）',
+  `college_name` varchar(100) DEFAULT NULL COMMENT '学院名称',
+  `major_id` bigint DEFAULT NULL COMMENT '专业ID',
+  `major` varchar(100) DEFAULT NULL COMMENT '专业名称',
+  `create_by` bigint DEFAULT NULL COMMENT '创建人',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` bigint DEFAULT NULL COMMENT '更新人',
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` tinyint DEFAULT '0' COMMENT '软删除标志（0-未删除，1-已删除）',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_user_id` (`user_id`),
+  KEY `idx_college_name` (`college_name`),
+  KEY `idx_major_id` (`major_id`),
+  KEY `idx_teacher_info_user_id` (`user_id`)
+) ENGINE=InnoDB AUTO_INCREMENT=10 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='教师信息表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping routines for database 'check-repeat-service'
+--
+/*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
+
+/*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
+/*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;
+/*!40014 SET UNIQUE_CHECKS=@OLD_UNIQUE_CHECKS */;
+/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
+/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
+/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
+/*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
+
+-- Dump completed on 2026-08-09 16:32:33

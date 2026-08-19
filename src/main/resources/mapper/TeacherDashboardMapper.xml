@@ -1,0 +1,243 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.abin.checkrepeatservice.teacher.mapper.TeacherDashboardMapper">
+
+    <!-- 统计指导学生总数 -->
+    <select id="countTotalStudents" resultType="java.lang.Long">
+        SELECT
+            COUNT(DISTINCT pi.student_id) AS total_students
+        FROM
+            paper_info pi
+        WHERE
+            pi.teacher_id = #{teacherId}
+          AND pi.is_deleted = 0
+    </select>
+
+    <!-- 统计待审核论文数量 -->
+    <select id="countPendingPapers" resultType="java.lang.Long">
+        SELECT
+            COUNT(*) AS pending_papers
+        FROM
+            paper_info pi
+        WHERE
+            pi.teacher_id = #{teacherId}
+          AND pi.is_deleted = 0
+          AND pi.paper_status = 'auditing'
+    </select>
+
+    <!-- 统计已审核论文数量 -->
+    <select id="countReviewedPapers" resultType="java.lang.Long">
+        SELECT
+            COUNT(*) AS reviewed_papers
+        FROM
+            paper_info pi
+        WHERE
+            pi.teacher_id = #{teacherId}
+          AND pi.is_deleted = 0
+          AND pi.paper_status IN ('completed', 'rejected')
+    </select>
+
+    <!-- 统计审核通过的论文数量 -->
+    <select id="countPassedPapers" resultType="java.lang.Long">
+        SELECT
+            COUNT(*) AS passed_papers
+        FROM
+            paper_info pi
+        WHERE
+            pi.teacher_id = #{teacherId}
+          AND pi.is_deleted = 0
+          AND pi.paper_status = 'completed'
+    </select>
+
+    <!-- 统计已提交论文数 -->
+    <select id="countSubmittedPapers" resultType="java.lang.Long">
+        SELECT
+            COUNT(*) AS submitted_papers
+        FROM
+            paper_info pi
+        WHERE
+            pi.teacher_id = #{teacherId}
+          AND pi.is_deleted = 0
+          AND pi.submit_time IS NOT NULL
+    </select>
+
+    <!-- 统计审核中论文数 -->
+    <select id="countAuditingPapers" resultType="java.lang.Long">
+        SELECT
+            COUNT(*) AS auditing_papers
+        FROM
+            paper_info pi
+        WHERE
+            pi.teacher_id = #{teacherId}
+          AND pi.is_deleted = 0
+          AND pi.paper_status = 'auditing'
+    </select>
+
+    <!-- 统计被驳回的论文数 -->
+    <select id="countRejectedPapers" resultType="java.lang.Long">
+        SELECT
+            COUNT(*) AS rejected_papers
+        FROM
+            paper_info pi
+        WHERE
+            pi.teacher_id = #{teacherId}
+          AND pi.is_deleted = 0
+          AND pi.paper_status = 'rejected'
+    </select>
+
+    <!-- 获取论文状态分布统计 -->
+    <select id="getPaperStatusDistribution" resultType="map">
+        SELECT 
+            pi.paper_status as status,
+            COUNT(*) as count,
+            CASE pi.paper_status
+                WHEN 'pending' THEN '待分配'
+                WHEN 'assigned' THEN '已分配'
+                WHEN 'checking' THEN '查重中'
+                WHEN 'auditing' THEN '待审核'
+                WHEN 'completed' THEN '审核通过'
+                WHEN 'rejected' THEN '审核不通过'
+                WHEN 'withdrawn' THEN '已撤回'
+                ELSE pi.paper_status
+            END as statusName
+        FROM paper_info pi
+        WHERE pi.teacher_id = #{teacherId}
+          AND pi.is_deleted = 0
+        GROUP BY pi.paper_status
+        ORDER BY count DESC
+    </select>
+
+    <!-- 获取各专业审核情况统计 -->
+    <select id="getMajorReviewStatistics" resultType="map">
+        SELECT 
+            su.major as majorName,
+            COUNT(*) as totalPapers,
+            SUM(CASE WHEN pi.paper_status = 'completed' THEN 1 ELSE 0 END) as passedPapers,
+            SUM(CASE WHEN pi.paper_status = 'rejected' THEN 1 ELSE 0 END) as rejectedPapers,
+            SUM(CASE WHEN pi.paper_status = 'auditing' THEN 1 ELSE 0 END) as auditingPapers
+        FROM paper_info pi
+        JOIN sys_user su ON pi.student_id = su.id
+        WHERE pi.teacher_id = #{teacherId}
+          AND pi.is_deleted = 0
+          AND su.is_deleted = 0
+        GROUP BY su.major
+        ORDER BY totalPapers DESC
+    </select>
+
+    <!-- 获取时间趋势统计（近30天） -->
+    <select id="getTimeTrendStatistics" resultType="map">
+        SELECT 
+            DATE(pi.submit_time) as date,
+            COUNT(*) as submitCount,
+            SUM(CASE WHEN pi.paper_status = 'completed' THEN 1 ELSE 0 END) as completeCount
+        FROM paper_info pi
+        WHERE pi.teacher_id = #{teacherId}
+          AND pi.submit_time >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+          AND pi.is_deleted = 0
+        GROUP BY DATE(pi.submit_time)
+        ORDER BY date ASC
+    </select>
+
+    <!-- 获取近期审核活动记录 -->
+    <select id="getRecentReviewActivities" resultType="map">
+        SELECT 
+            pi.id as paperId,
+            pi.paper_title as paperTitle,
+            su.real_name as studentName,
+            pi.paper_status as status,
+            pi.check_time as operateTime,
+            CASE pi.paper_status
+                WHEN 'completed' THEN '审核通过'
+                WHEN 'rejected' THEN '审核不通过'
+                ELSE '未知操作'
+            END as operateType
+        FROM paper_info pi
+        JOIN sys_user su ON pi.student_id = su.id
+        WHERE pi.teacher_id = #{teacherId}
+          AND pi.paper_status IN ('completed', 'rejected')
+          AND pi.check_time IS NOT NULL
+          AND pi.is_deleted = 0
+          AND su.is_deleted = 0
+        ORDER BY pi.check_time DESC
+        LIMIT #{page.offset}, #{page.size}
+    </select>
+
+    <!-- 根据教师ID获取学生IDs -->
+    <select id="getStudentIdsByTeacher" resultType="java.lang.Long">
+        SELECT DISTINCT pi.student_id
+        FROM paper_info pi
+        WHERE pi.teacher_id = #{teacherId}
+          AND pi.is_deleted = 0
+    </select>
+
+    <!-- 统计新提交论文数（指定小时内） -->
+    <select id="countNewSubmissions" resultType="java.lang.Long">
+        SELECT
+            COUNT(*) AS new_submissions
+        FROM
+            paper_info pi
+        WHERE
+            pi.teacher_id = #{teacherId}
+          AND pi.is_deleted = 0
+          AND pi.submit_time >= DATE_SUB(NOW(), INTERVAL #{hours} HOUR)
+    </select>
+
+    <!-- 统计不活跃学生数（指定天内未提交） -->
+    <select id="countInactiveStudents" resultType="java.lang.Long">
+        SELECT
+            COUNT(DISTINCT pi.student_id) AS inactive_students
+        FROM
+            paper_info pi
+        WHERE
+            pi.teacher_id = #{teacherId}
+          AND pi.is_deleted = 0
+          AND pi.student_id NOT IN (
+              SELECT DISTINCT pi2.student_id
+              FROM paper_info pi2
+              WHERE pi2.teacher_id = #{teacherId}
+                AND pi2.is_deleted = 0
+                AND pi2.submit_time >= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+          )
+    </select>
+
+    <!-- 统计今日审核数 -->
+    <select id="countTodayReviews" resultType="java.lang.Long">
+        SELECT
+            COUNT(*) AS today_reviews
+        FROM
+            paper_info pi
+        WHERE
+            pi.teacher_id = #{teacherId}
+          AND pi.is_deleted = 0
+          AND DATE(pi.check_time) = CURDATE()
+          AND pi.paper_status IN ('completed', 'rejected')
+    </select>
+
+    <!-- 统计今日通过数 -->
+    <select id="countTodayPasses" resultType="java.lang.Long">
+        SELECT
+            COUNT(*) AS today_passes
+        FROM
+            paper_info pi
+        WHERE
+            pi.teacher_id = #{teacherId}
+          AND pi.is_deleted = 0
+          AND DATE(pi.check_time) = CURDATE()
+          AND pi.paper_status = 'completed'
+    </select>
+
+    <!-- 计算平均审核耗时（小时） -->
+    <select id="getAverageReviewTime" resultType="java.lang.Double">
+        SELECT
+            AVG(TIMESTAMPDIFF(HOUR, pi.submit_time, pi.check_time)) AS avg_review_time
+        FROM
+            paper_info pi
+        WHERE
+            pi.teacher_id = #{teacherId}
+          AND pi.is_deleted = 0
+          AND pi.paper_status IN ('completed', 'rejected')
+          AND pi.submit_time IS NOT NULL
+          AND pi.check_time IS NOT NULL
+    </select>
+
+</mapper>

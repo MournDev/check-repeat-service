@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.abin.checkrepeatservice.user.mapper.ConversationMapper">
+
+    <!-- 结果映射 -->
+    <resultMap id="ConversationResultMap" type="com.abin.checkrepeatservice.pojo.entity.Conversation">
+        <id column="id" property="id"/>
+        <result column="name" property="name"/>
+        <result column="type" property="type"/>
+        <result column="avatar" property="avatar"/>
+        <result column="last_message_id" property="lastMessageId"/>
+        <result column="last_active_time" property="lastActiveTime"/>
+        <result column="creator_id" property="creatorId"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_time" property="updateTime"/>
+        <result column="is_deleted" property="isDeleted"/>
+        <!-- 冗余字段 -->
+        <result column="last_message_content" property="lastMessageContent"/>
+        <result column="unread_count" property="unreadCount"/>
+        <result column="participants" property="participants"/>
+    </resultMap>
+
+    <!-- 获取用户的会话列表 -->
+    <select id="getUserConversations" resultMap="ConversationResultMap">
+        SELECT 
+            c.*,
+            m.content as last_message_content,
+            cm.unread_count,
+            (SELECT JSON_ARRAYAGG(JSON_OBJECT(
+                'userId', u.id,
+                'userName', u.real_name,
+                'userAvatar', u.avatar,
+                'userType', u.user_type
+            ))
+            FROM conversation_members cm2
+            JOIN sys_user u ON cm2.user_id = u.id
+            WHERE cm2.conversation_id = c.id AND cm2.is_left = 0
+            ) as participants
+        FROM conversations c
+        JOIN conversation_members cm ON c.id = cm.conversation_id AND cm.is_left = 0
+        LEFT JOIN messages m ON c.last_message_id = m.id
+        WHERE cm.user_id = #{userId}
+        AND c.is_deleted = 0
+        ORDER BY c.last_active_time DESC
+    </select>
+
+    <!-- 获取用户参与的所有会话ID -->
+    <select id="getUserConversationIds" resultType="java.lang.Long">
+        SELECT DISTINCT conversation_id
+        FROM conversation_members
+        WHERE user_id = #{userId}
+        AND is_left = 0
+    </select>
+
+    <!-- 更新会话的最后活跃时间和最后消息 -->
+    <update id="updateLastActive">
+        UPDATE conversations 
+        SET last_message_id = #{lastMessageId},
+            last_active_time = NOW()
+        WHERE id = #{conversationId}
+    </update>
+
+    <!-- 搜索会话 -->
+    <select id="searchConversations" resultMap="ConversationResultMap">
+        SELECT 
+            c.*,
+            m.content as last_message_content,
+            cm.unread_count
+        FROM conversations c
+        JOIN conversation_members cm ON c.id = cm.conversation_id AND cm.is_left = 0
+        LEFT JOIN messages m ON c.last_message_id = m.id
+        WHERE cm.user_id = #{userId}
+        AND c.is_deleted = 0
+        AND (
+            c.name LIKE CONCAT('%', #{keyword}, '%')
+            OR EXISTS (
+                SELECT 1 FROM conversation_members cm2
+                JOIN sys_user u ON cm2.user_id = u.id
+                WHERE cm2.conversation_id = c.id
+                AND cm2.is_left = 0
+                AND u.real_name LIKE CONCAT('%', #{keyword}, '%')
+            )
+        )
+        ORDER BY c.last_active_time DESC
+    </select>
+
+</mapper>

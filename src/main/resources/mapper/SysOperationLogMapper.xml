@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.abin.checkrepeatservice.admin.mapper.SysOperationLogMapper">
+
+    <!-- 通用查询映射结果 -->
+    <resultMap id="BaseResultMap" type="com.abin.checkrepeatservice.pojo.entity.SysOperationLog">
+        <id column="id" property="id"/>
+        <result column="operation_type" property="operationType"/>
+        <result column="operation_desc" property="description"/>
+        <result column="operation_param" property="requestParams"/>
+        <result column="user_id" property="userId"/>
+        <result column="user_name" property="userName"/>
+        <result column="ip_address" property="ipAddress"/>
+        <result column="operation_time" property="operationTime"/>
+        <result column="is_deleted" property="isDeleted"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_time" property="updateTime"/>
+    </resultMap>
+
+    <!-- 通用查询结果列 -->
+    <sql id="Base_Column_List">
+        id, operation_type, operation_desc, operation_param, user_id, 
+        user_name, ip_address, operation_time, is_deleted, create_time, update_time
+    </sql>
+
+    <!-- 分页查询操作日志 -->
+    <select id="selectOperationLogPage" parameterType="map" resultType="com.abin.checkrepeatservice.pojo.entity.SysOperationLog">
+        SELECT 
+        <include refid="Base_Column_List"/>
+        FROM sys_operation_log
+        WHERE is_deleted = 0
+        <if test="operationType != null and operationType != ''">
+            AND operation_type = #{operationType}
+        </if>
+        <if test="username != null and username != ''">
+            AND user_name LIKE CONCAT('%', #{username}, '%')
+        </if>
+        <if test="startTime != null">
+            AND operation_time >= #{startTime}
+        </if>
+        <if test="endTime != null">
+            AND operation_time &lt;= #{endTime}
+        </if>
+        ORDER BY operation_time DESC
+    </select>
+
+    <!-- 获取操作统计信息 -->
+    <select id="getOperationStatistics" parameterType="map" resultType="map">
+        SELECT 
+            COUNT(*) as total_count,
+            SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) as success_count,
+            SUM(CASE WHEN status = 0 THEN 1 ELSE 0 END) as fail_count,
+            AVG(execution_time) as avg_execution_time,
+            MAX(operation_time) as last_operation_time
+        FROM sys_operation_log
+        WHERE is_deleted = 0
+        AND operation_time >= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+    </select>
+
+    <!-- 获取热门操作统计 -->
+    <select id="getHotOperations" parameterType="map" resultType="map">
+        SELECT 
+            operation_type,
+            description,
+            COUNT(*) as operation_count,
+            SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) as success_count,
+            AVG(execution_time) as avg_time
+        FROM sys_operation_log
+        WHERE is_deleted = 0
+        AND operation_time >= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+        GROUP BY operation_type, description
+        ORDER BY operation_count DESC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 获取用户活跃度统计 -->
+    <select id="getUserActivityStatistics" parameterType="map" resultType="map">
+        SELECT 
+            user_name,
+            user_id,
+            COUNT(*) as operation_count,
+            SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) as success_count,
+            MIN(operation_time) as first_operation,
+            MAX(operation_time) as last_operation
+        FROM sys_operation_log
+        WHERE is_deleted = 0
+        AND operation_time >= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+        GROUP BY user_name, user_id
+        ORDER BY operation_count DESC
+    </select>
+
+    <!-- 获取模块使用统计 -->
+    <select id="getModuleUsageStatistics" parameterType="map" resultType="map">
+        SELECT 
+            COALESCE(module, 'unknown') as module_name,
+            COUNT(*) as operation_count,
+            SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) as success_count,
+            AVG(execution_time) as avg_execution_time
+        FROM sys_operation_log
+        WHERE is_deleted = 0
+        AND operation_time >= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+        GROUP BY module_name
+        ORDER BY operation_count DESC
+    </select>
+
+    <!-- 批量删除操作日志 -->
+    <update id="batchDeleteOperationLogs" parameterType="map">
+        UPDATE sys_operation_log
+        SET is_deleted = 1
+        WHERE id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </update>
+
+    <!-- 清理过期操作日志 -->
+    <delete id="cleanExpiredLogs" parameterType="map">
+        DELETE FROM sys_operation_log
+        WHERE is_deleted = 1
+        OR operation_time &lt; DATE_SUB(NOW(), INTERVAL #{days} DAY)
+    </delete>
+
+</mapper>

@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.abin.checkrepeatservice.admin.mapper.CheckResultMapper">
+
+    <!-- 实现 statByGroup 方法：按专业/年级统计查重结果 -->
+    <select id="statByGroup" resultType="java.util.Map">
+        SELECT
+        <!-- 按分组类型获取分组名（专业名或年级） -->
+        <choose>
+            <when test="groupType == 'MAJOR'">
+                m.major_name AS groupName, <!-- 专业名 -->
+                ps.major_id AS groupId
+            </when>
+            <when test="groupType == 'GRADE'">
+                ps.grade AS groupName, <!-- 年级（直接作为分组名） -->
+                ps.grade AS groupId
+            </when>
+        </choose>,
+        <!-- 合格数（重复率 ≤ 30%阈值） -->
+        SUM(CASE WHEN cr.repeat_rate &lt;= 30.00 THEN 1 ELSE 0 END) AS qualified_count,
+        <!-- 不合格数（重复率 > 30%阈值） -->
+        SUM(CASE WHEN cr.repeat_rate > 30.00 THEN 1 ELSE 0 END) AS unqualified_count,
+        <!-- 平均重复率（保留4位小数） -->
+        ROUND(AVG(cr.repeat_rate), 4) AS avg_repeat_rate
+        FROM
+        check_result cr
+        <!-- 关联提交表（获取学生的专业/年级信息） -->
+        LEFT JOIN paper_submit ps ON cr.submit_id = ps.id
+        LEFT JOIN major m ON ps.major_id = m.id
+        <!-- 关联查重规则表（获取合格阈值） -->
+        LEFT JOIN check_rule rule ON cr.rule_id = rule.id
+        WHERE
+        <!-- 时间范围筛选（查重完成时间） -->
+        DATE(cr.check_time) BETWEEN #{startDate} AND #{endDate}
+        <!-- 专业筛选 -->
+        <if test="majorId != null">AND ps.major_id = #{majorId}</if>
+        <!-- 年级筛选 -->
+        <if test="grade != null">AND ps.grade = #{grade}</if>
+        <!-- 仅统计有效记录 -->
+        AND cr.status = 1
+        AND cr.is_deleted = 0
+        AND ps.is_deleted = 0
+        GROUP BY
+        <!-- 按分组类型分组 -->
+        <choose>
+            <when test="groupType == 'MAJOR'">ps.major_id, m.major_name</when>
+            <when test="groupType == 'GRADE'">ps.grade</when>
+        </choose>
+        ORDER BY groupName ASC
+    </select>
+
+    <!-- 查询高重复率论文列表 -->
+    <select id="selectHighSimilarityPapers" resultType="com.abin.checkrepeatservice.pojo.entity.CheckResult">
+        SELECT *
+        FROM check_result
+        WHERE repeat_rate >= #{threshold}
+          AND status = 1
+          AND is_deleted = 0
+        ORDER BY repeat_rate DESC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 按时间范围统计查重摘要 -->
+    <select id="statCheckSummary" resultType="java.util.Map">
+        SELECT
+            COUNT(*) AS total_checks,
+            ROUND(AVG(repeat_rate), 2) AS avg_repeat_rate,
+            MAX(repeat_rate) AS max_repeat_rate,
+            MIN(repeat_rate) AS min_repeat_rate
+        FROM check_result
+        WHERE DATE(check_time) BETWEEN #{startDate} AND #{endDate}
+          AND status = 1
+          AND is_deleted = 0
+    </select>
+
+</mapper>

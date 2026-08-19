@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.abin.checkrepeatservice.admin.mapper.RuleLibRelationMapper">
+
+    <!-- 批量插入规则-比对库关联关系 -->
+    <insert id="batchInsert" parameterType="java.util.List">
+        INSERT INTO rule_lib_relation (
+        rule_id,        -- 查重规则ID
+        lib_id,         -- 比对库ID
+        create_user_id, -- 创建人ID
+        create_time,    -- 创建时间
+        is_deleted      -- 软删除标识
+        ) VALUES
+        <!-- 遍历关联列表：item="item" 表示列表中单个元素，separator="," 表示元素间用逗号分隔 -->
+        <foreach collection="list" item="item" separator=",">
+            (
+            #{item.ruleId},        -- 取单个关联对象的ruleId
+            #{item.libId},         -- 取单个关联对象的libId
+            #{item.createUserId},  -- 取单个关联对象的创建人ID（管理员ID）
+            NOW(),                 -- 创建时间：用数据库当前时间（避免前端传值不一致）
+            0                      -- 软删除：默认0（未删除）
+            )
+        </foreach>
+
+        <!-- 可选：处理重复关联（若唯一索引冲突，忽略重复数据，避免插入失败） -->
+        ON DUPLICATE KEY UPDATE
+        is_deleted = 0,  -- 若rule_id+lib_id已存在且被删除，恢复为未删除
+        create_time = NOW()  -- 更新创建时间为当前时间
+    </insert>
+
+    <!-- 根据规则ID删除所有关联关系（物理删除改为逻辑删除，符合软删除规范） -->
+    <update id="deleteByRuleId">
+        UPDATE rule_lib_relation
+        SET
+            is_deleted = 1,        -- 标记为已删除
+            delete_time = NOW()    -- 若表中有delete_time字段，可补充（需在实体类中添加）
+        WHERE
+            rule_id = #{ruleId}
+          AND is_deleted = 0     -- 仅删除未删除的关联
+    </update>
+
+    <!-- 根据规则ID查询关联的所有比对库ID（用于编辑规则时回显已选的库） -->
+    <select id="selectLibIdsByRuleId" resultType="java.lang.Long">
+        SELECT lib_id
+        FROM rule_lib_relation
+        WHERE
+            rule_id = #{ruleId}
+          AND is_deleted = 0     -- 仅查询未删除的关联
+        ORDER BY create_time DESC  -- 按关联时间倒序（可选）
+    </select>
+
+</mapper>

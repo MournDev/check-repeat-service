@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.abin.checkrepeatservice.mapper.SysDictDataMapper">
+
+    <!-- 根据字典类型查询字典数据 -->
+    <select id="selectByDictType" resultType="com.abin.checkrepeatservice.pojo.entity.SysDictData">
+        SELECT *
+        FROM sys_dict_data
+        WHERE dict_type = #{dictType}
+          AND status = 1
+          AND is_deleted = 0
+        ORDER BY dict_sort ASC
+    </select>
+
+    <!-- 根据字典标签查询字典数据 -->
+    <select id="selectByDictLabel" resultType="com.abin.checkrepeatservice.pojo.entity.SysDictData">
+        SELECT *
+        FROM sys_dict_data
+        WHERE dict_type = #{dictType}
+          AND dict_label = #{dictLabel}
+          AND status = 1
+          AND is_deleted = 0
+        LIMIT 1
+    </select>
+
+    <!-- 查询所有启用的字典类型 -->
+    <select id="selectAllDictTypes" resultType="java.lang.String">
+        SELECT DISTINCT dict_type
+        FROM sys_dict_data
+        WHERE status = 1
+          AND is_deleted = 0
+        ORDER BY dict_type ASC
+    </select>
+
+    <!-- 批量更新字典数据状态 -->
+    <update id="batchUpdateStatus">
+        UPDATE sys_dict_data
+        SET status = #{status},
+            update_time = NOW()
+        WHERE dict_code IN
+        <foreach collection="dictCodes" item="dictCode" open="(" separator="," close=")">
+            #{dictCode}
+        </foreach>
+        AND is_deleted = 0
+    </update>
+
+    <!-- 根据父级字典查询子级字典 -->
+    <select id="selectChildrenByParent" resultType="com.abin.checkrepeatservice.pojo.entity.SysDictData">
+        SELECT *
+        FROM sys_dict_data
+        WHERE parent_id = #{parentId}
+          AND status = 1
+          AND is_deleted = 0
+        ORDER BY dict_sort ASC
+    </select>
+
+</mapper>

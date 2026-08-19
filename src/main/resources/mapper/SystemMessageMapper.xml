@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.abin.checkrepeatservice.user.mapper.SystemMessageMapper">
+
+    <!-- 获取用户未读消息数量 -->
+    <select id="selectUnreadCount" resultType="java.lang.Integer">
+        SELECT COUNT(*)
+        FROM system_message
+        WHERE receiver_id = #{userId}
+          AND is_read = 0
+          AND (expire_time IS NULL OR expire_time > NOW())
+    </select>
+
+    <!-- 标记消息为已读 -->
+    <update id="markAsRead">
+        UPDATE system_message
+        SET is_read = 1, read_time = NOW()
+        WHERE id = #{messageId}
+          AND receiver_id = #{userId}
+    </update>
+
+    <!-- 批量标记为已读 -->
+    <update id="batchMarkAsRead">
+        UPDATE system_message
+        SET is_read = 1, read_time = NOW()
+        WHERE id IN
+        <foreach collection="messageIds" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+        AND receiver_id = #{userId}
+    </update>
+
+    <!-- 获取过期的消息 -->
+    <select id="selectExpiredMessages" resultType="com.abin.checkrepeatservice.pojo.entity.SystemMessage">
+        SELECT *
+        FROM system_message
+        WHERE expire_time IS NOT NULL
+          AND expire_time &lt; NOW()
+          AND is_read = 0
+    </select>
+
+    <!-- 删除过期消息 -->
+    <delete id="deleteExpiredMessages">
+        DELETE FROM system_message
+        WHERE expire_time IS NOT NULL
+          AND expire_time &lt; NOW()
+          AND is_read = 0
+    </delete>
+
+</mapper>

@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.abin.checkrepeatservice.user.mapper.ConversationMemberMapper">
+
+    <!-- 结果映射 -->
+    <resultMap id="ConversationMemberResultMap" type="com.abin.checkrepeatservice.pojo.entity.ConversationMember">
+        <id column="id" property="id"/>
+        <result column="conversation_id" property="conversationId"/>
+        <result column="user_id" property="userId"/>
+        <result column="role" property="role"/>
+        <result column="joined_at" property="joinedAt"/>
+        <result column="left_at" property="leftAt"/>
+        <result column="is_left" property="isLeft"/>
+        <result column="unread_count" property="unreadCount"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_time" property="updateTime"/>
+        <result column="is_deleted" property="isDeleted"/>
+        <!-- 冗余字段 -->
+        <result column="user_name" property="userName"/>
+        <result column="user_avatar" property="userAvatar"/>
+        <result column="user_type" property="userType"/>
+    </resultMap>
+
+    <!-- 获取会话的所有成员 -->
+    <select id="getMembersByConversationId" resultMap="ConversationMemberResultMap">
+        SELECT 
+            cm.*,
+            u.real_name as user_name,
+            u.avatar as user_avatar,
+            u.user_type
+        FROM conversation_members cm
+        JOIN sys_user u ON cm.user_id = u.id
+        WHERE cm.conversation_id = #{conversationId}
+        AND cm.is_left = 0
+        AND cm.is_deleted = 0
+        ORDER BY cm.role DESC, cm.joined_at ASC
+    </select>
+
+    <!-- 获取用户加入的所有会话ID -->
+    <select id="getConversationIdsByUserId" resultType="java.lang.Long">
+        SELECT conversation_id
+        FROM conversation_members
+        WHERE user_id = #{userId}
+        AND is_left = 0
+        AND is_deleted = 0
+    </select>
+
+    <!-- 获取会话中除指定用户外的其他成员 -->
+    <select id="getOtherMembers" resultMap="ConversationMemberResultMap">
+        SELECT 
+            cm.*,
+            u.real_name as user_name,
+            u.avatar as user_avatar,
+            u.user_type
+        FROM conversation_members cm
+        JOIN sys_user u ON cm.user_id = u.id
+        WHERE cm.conversation_id = #{conversationId}
+        AND cm.user_id != #{excludeUserId}
+        AND cm.is_left = 0
+        AND cm.is_deleted = 0
+    </select>
+
+    <!-- 批量更新成员未读消息数量 -->
+    <update id="batchUpdateUnreadCount">
+        UPDATE conversation_members 
+        SET unread_count = unread_count + #{increment}
+        WHERE conversation_id = #{conversationId}
+        AND user_id != #{userId}
+        AND is_left = 0
+    </update>
+
+    <!-- 重置指定用户的未读消息数量 -->
+    <update id="resetUnreadCount">
+        UPDATE conversation_members 
+        SET unread_count = 0
+        WHERE conversation_id = #{conversationId}
+        AND user_id = #{userId}
+        AND is_left = 0
+    </update>
+
+    <!-- 获取会话成员分页列表 -->
+    <select id="getMembersPage" resultMap="ConversationMemberResultMap">
+        SELECT 
+            cm.*,
+            u.real_name as user_name,
+            u.avatar as user_avatar,
+            u.user_type
+        FROM conversation_members cm
+        JOIN sys_user u ON cm.user_id = u.id
+        WHERE cm.conversation_id = #{conversationId}
+        AND cm.is_left = 0
+        AND cm.is_deleted = 0
+        ORDER BY cm.role DESC, cm.joined_at ASC
+    </select>
+
+    <!-- 检查用户是否为会话成员 -->
+    <select id="isMember" resultType="java.lang.Boolean">
+        SELECT COUNT(*) > 0
+        FROM conversation_members
+        WHERE conversation_id = #{conversationId}
+        AND user_id = #{userId}
+        AND is_left = 0
+        AND is_deleted = 0
+    </select>
+
+</mapper>

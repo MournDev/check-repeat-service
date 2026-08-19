@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.abin.checkrepeatservice.user.mapper.InstantMessageMapper">
+
+    <!-- 结果映射 -->
+    <resultMap id="InstantMessageResultMap" type="com.abin.checkrepeatservice.pojo.entity.InstantMessage">
+        <id column="id" property="id"/>
+        <result column="sender_id" property="senderId"/>
+        <result column="receiver_id" property="receiverId"/>
+        <result column="conversation_id" property="conversationId"/>
+        <result column="message_type" property="messageType"/>
+        <result column="content_type" property="contentType"/>
+        <result column="title" property="title"/>
+        <result column="content" property="content"/>
+        <result column="attachments" property="attachments"/>
+        <result column="status" property="status"/>
+        <result column="related_id" property="relatedId"/>
+        <result column="related_type" property="relatedType"/>
+        <result column="sent_time" property="sentTime"/>
+        <result column="delivered_time" property="deliveredTime"/>
+        <result column="read_time" property="readTime"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_time" property="updateTime"/>
+        <result column="is_deleted" property="isDeleted"/>
+        <!-- 冗余字段 -->
+        <result column="sender_name" property="senderName"/>
+        <result column="receiver_name" property="receiverName"/>
+        <result column="sender_avatar" property="senderAvatar"/>
+        <result column="receiver_avatar" property="receiverAvatar"/>
+    </resultMap>
+
+    <!-- 获取用户的会话列表 -->
+    <select id="getConversations" resultMap="InstantMessageResultMap">
+        SELECT DISTINCT
+            m.*,
+            u1.real_name as sender_name,
+            u1.avatar as sender_avatar,
+            u2.real_name as receiver_name,
+            u2.avatar as receiver_avatar
+        FROM messages m
+        LEFT JOIN sys_user u1 ON m.sender_id = u1.id
+        LEFT JOIN sys_user u2 ON m.receiver_id = u2.id
+        WHERE (m.sender_id = #{userId} OR m.receiver_id = #{userId})
+        AND m.is_deleted = 0
+        ORDER BY m.sent_time DESC
+    </select>
+
+    <!-- 获取会话消息历史 -->
+    <select id="getMessageHistory" resultMap="InstantMessageResultMap">
+        SELECT 
+            m.*,
+            u1.real_name as sender_name,
+            u1.avatar as sender_avatar,
+            u2.real_name as receiver_name,
+            u2.avatar as receiver_avatar
+        FROM messages m
+        LEFT JOIN sys_user u1 ON m.sender_id = u1.id
+        LEFT JOIN sys_user u2 ON m.receiver_id = u2.id
+        WHERE m.conversation_id = #{conversationId}
+        AND m.is_deleted = 0
+        ORDER BY m.sent_time DESC
+    </select>
+
+    <!-- 获取用户之间的私信历史 -->
+    <select id="getPrivateMessages" resultMap="InstantMessageResultMap">
+        SELECT 
+            m.*,
+            u1.real_name as sender_name,
+            u1.avatar as sender_avatar,
+            u2.real_name as receiver_name,
+            u2.avatar as receiver_avatar
+        FROM messages m
+        LEFT JOIN sys_user u1 ON m.sender_id = u1.id
+        LEFT JOIN sys_user u2 ON m.receiver_id = u2.id
+        WHERE ((m.sender_id = #{senderId} AND m.receiver_id = #{receiverId}) 
+               OR (m.sender_id = #{receiverId} AND m.receiver_id = #{senderId}))
+        AND m.message_type = 'PRIVATE'
+        AND m.is_deleted = 0
+        ORDER BY m.sent_time DESC
+    </select>
+
+    <!-- 获取未读消息数量 -->
+    <select id="getUnreadCount" resultType="java.lang.Integer">
+        SELECT COUNT(*)
+        FROM messages m
+        WHERE m.receiver_id = #{userId}
+        AND m.status != 'READ'
+        AND m.is_deleted = 0
+    </select>
+
+    <!-- 批量标记消息为已读 -->
+    <update id="batchMarkRead">
+        UPDATE messages 
+        SET status = 'READ',
+            read_time = NOW()
+        WHERE id IN
+        <foreach collection="messageIds" item="messageId" open="(" separator="," close=")">
+            #{messageId}
+        </foreach>
+        AND receiver_id = #{userId}
+    </update>
+
+</mapper>

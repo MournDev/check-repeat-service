@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- namespace 必须与 SysUserMapper 接口全类名一致 -->
+<mapper namespace="com.abin.checkrepeatservice.mapper.SysUserMapper">
+
+    <!-- 定义教师列表的通用结果集（仅返回统计所需的核心字段，避免冗余） -->
+    <resultMap id="TeacherResultMap" type="com.abin.checkrepeatservice.pojo.entity.SysUser">
+        <id column="id" property="id"/> <!-- 教师ID -->
+        <result column="real_name" property="realName"/> <!-- 教师真实姓名（统计展示用） -->
+<!--        <result column="user_type" property="userType"/> &lt;!&ndash; 用户类型（确保是2=教师） &ndash;&gt;-->
+        <result column="phone" property="phone"/> <!-- 可选：教师联系方式（如需扩展） -->
+        <result column="email" property="email"/> <!-- 可选：教师邮箱（如需扩展） -->
+    </resultMap>
+
+    <!-- 实现 selectTeacherList 方法：按专业或教师ID筛选教师 -->
+    <select id="selectTeacherList" resultMap="TeacherResultMap">
+        SELECT
+        DISTINCT su.id, su.real_name, su.user_type, su.phone, su.email
+        FROM
+        sys_user su
+        <!-- 若传了 majorId，关联用户-专业表（筛选负责该专业的教师）；否则不关联 -->
+        <if test="majorId != null">
+            INNER JOIN sys_user_major sum ON su.id = sum.user_id
+        </if>
+        WHERE
+        <!-- 1. 固定筛选：仅查询教师（user_type=2）、未删除（is_deleted=0） -->
+        su.user_type = 2
+        AND su.is_deleted = 0
+
+        <!-- 2. 动态筛选：若传了 teacherId，优先筛选该教师（单独统计用） -->
+        <if test="teacherId != null">
+            AND su.id = #{teacherId}
+        </if>
+
+        <!-- 3. 动态筛选：若传了 majorId 且未传 teacherId，筛选负责该专业的教师 -->
+        <if test="majorId != null and teacherId == null">
+            AND sum.major_id = #{majorId}
+        </if>
+
+        <!-- 排序：按教师姓名升序（统计展示更整齐） -->
+        ORDER BY
+        su.real_name ASC
+    </select>
+    <select id="countStudentByCondition" resultType="java.lang.Integer">
+        SELECT
+        COUNT(DISTINCT su.id) AS student_total  <!-- 去重统计（避免同学生多条记录） -->
+        FROM
+        sys_user su
+        WHERE
+        <!-- 1. 固定条件：仅统计“学生”且“未删除” -->
+        su.user_type = 1  <!-- user_type=1 约定为学生 -->
+        AND su.is_deleted = 0  <!-- 排除软删除学生 -->
+
+        <!-- 2. 动态条件：若传了 majorId，筛选该专业的学生 -->
+        <if test="majorId != null">
+            AND su.major_id = #{majorId}
+        </if>
+
+        <!-- 3. 动态条件：若传了 grade，筛选该年级的学生 -->
+        <if test="grade != null">
+            AND su.grade = #{grade}
+        </if>
+    </select>
+    <select id="selectByEmail" resultType="com.abin.checkrepeatservice.pojo.entity.SysUser">
+            SELECT * FROM sys_user
+            WHERE email = #{email} AND is_deleted = 0
+                LIMIT 1
+    </select>
+
+</mapper>

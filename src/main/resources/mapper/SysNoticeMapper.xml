@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.abin.checkrepeatservice.user.mapper.SysNoticeMapper">
+
+    <!-- 结果集映射：匹配SysNotice实体类字段 -->
+    <resultMap id="SysNoticeResultMap" type="com.abin.checkrepeatservice.pojo.entity.SysNotice">
+        <id column="id" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="notice_type" property="noticeType"/>
+        <result column="notice_title" property="noticeTitle"/>
+        <result column="notice_content" property="noticeContent"/>
+        <result column="is_read" property="isRead"/>
+        <result column="read_time" property="readTime"/>
+        <result column="create_time" property="createTime"/>
+        <result column="is_deleted" property="isDeleted"/>
+    </resultMap>
+
+    <!-- 1. 分页查询用户通知 -->
+    <select id="selectByUserId" resultMap="SysNoticeResultMap">
+        SELECT
+        id, user_id, notice_type, notice_title, notice_content,
+        is_read, read_time, create_time, is_deleted
+        FROM
+        sys_notice
+        WHERE
+        user_id = #{userId}
+        AND is_deleted = 0  <!-- 仅查询未删除的通知 -->
+        <if test="isRead != null">
+            AND is_read = #{isRead}  <!-- 动态筛选已读/未读 -->
+        </if>
+        ORDER BY
+        create_time DESC  <!-- 最新通知排在前面 -->
+        LIMIT #{start}, #{pageSize}  <!-- 分页截取 -->
+    </select>
+
+    <!-- 2. 统计用户通知总条数 -->
+    <select id="countTotalByUserId" resultType="java.lang.Integer">
+        SELECT
+        COUNT(*) AS total_count
+        FROM
+        sys_notice
+        WHERE
+        user_id = #{userId}
+        AND is_deleted = 0
+        <if test="isRead != null">
+            AND is_read = #{isRead}
+        </if>
+    </select>
+
+    <!-- 3. 统计用户未读通知数 -->
+    <select id="countUnreadByUserId" resultType="java.lang.Integer">
+        SELECT
+        COUNT(*) AS unread_count
+        FROM
+        sys_notice
+        WHERE
+        user_id = #{userId}
+        AND is_read = 0  <!-- 未读 -->
+        AND is_deleted = 0  <!-- 未删除 -->
+    </select>
+
+    <!-- 4. 标记单个通知为已读 -->
+    <update id="markAsRead">
+        UPDATE
+        sys_notice
+        SET
+        is_read = 1,
+        read_time = #{readTime}
+        WHERE
+        id = #{noticeId}
+        AND user_id = #{userId}  <!-- 权限校验：仅所属用户可操作 -->
+        AND is_read = 0  <!-- 仅未读通知可标记 -->
+        AND is_deleted = 0
+    </update>
+
+    <!-- 5. 批量标记所有未读通知为已读 -->
+    <update id="markAllUnreadAsRead">
+        UPDATE
+            sys_notice
+        SET
+            is_read = 1,
+            read_time = #{readTime}
+        WHERE
+            user_id = #{userId}
+          AND is_read = 0
+          AND is_deleted = 0
+    </update>
+
+</mapper>

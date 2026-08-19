@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.abin.checkrepeatservice.user.mapper.MessageTemplateMapper">
+
+    <!-- 根据模板类型查询模板列表 -->
+    <select id="selectByType" resultType="com.abin.checkrepeatservice.pojo.entity.MessageTemplate">
+        SELECT *
+        FROM message_template
+        WHERE is_active = 1
+        <if test="templateType != null and templateType != ''">
+            AND template_type = #{templateType}
+        </if>
+        ORDER BY id ASC
+    </select>
+</mapper>

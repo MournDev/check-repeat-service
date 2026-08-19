@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.abin.checkrepeatservice.student.mapper.PaperInfoMapper">
+
+    <select id="selectLatestPaper" resultType="com.abin.checkrepeatservice.pojo.entity.PaperInfo">
+        SELECT *
+        FROM paper_info
+        WHERE student_id = #{studentId}
+        AND is_deleted = 0
+        ORDER BY create_time DESC
+        LIMIT 1;
+    </select>
+
+    <!-- 获取相似度分布数据 -->
+    <select id="selectSimilarityDistribution" resultType="com.abin.checkrepeatservice.teacher.vo.SimilarityDistributionVO">
+        WITH total_count AS (
+        SELECT COUNT(*) as total
+        FROM paper_info
+        WHERE teacher_id = #{teacherId}
+        AND is_deleted = 0
+        AND similarity_rate IS NOT NULL
+        AND similarity_rate > 0
+        <if test="startDate != null">
+            AND submit_time >= #{startDate}
+        </if>
+        <if test="endDate != null">
+            AND submit_time &lt;= #{endDate}
+        </if>
+        )
+        SELECT
+        CASE
+        WHEN similarity_rate &lt; 10 THEN '0-10%'
+        WHEN similarity_rate &lt; 20 THEN '10-20%'
+        WHEN similarity_rate &lt; 30 THEN '20-30%'
+        WHEN similarity_rate &lt; 40 THEN '30-40%'
+        WHEN similarity_rate &lt; 50 THEN '40-50%'
+        ELSE '50%以上'
+        END as `range`,
+        COUNT(*) as paperCount,
+        ROUND(COUNT(*) * 100.0 / (SELECT total FROM total_count), 1) as percentage
+        FROM paper_info
+        WHERE teacher_id = #{teacherId}
+        AND is_deleted = 0
+        AND similarity_rate IS NOT NULL
+        AND similarity_rate > 0
+        <if test="startDate != null">
+            AND submit_time >= #{startDate}
+        </if>
+        <if test="endDate != null">
+            AND submit_time &lt;= #{endDate}
+        </if>
+        GROUP BY
+        CASE
+        WHEN similarity_rate &lt; 10 THEN '0-10%'
+        WHEN similarity_rate &lt; 20 THEN '10-20%'
+        WHEN similarity_rate &lt; 30 THEN '20-30%'
+        WHEN similarity_rate &lt; 40 THEN '30-40%'
+        WHEN similarity_rate &lt; 50 THEN '40-50%'
+        ELSE '50%以上'
+        END
+        ORDER BY
+        MIN(similarity_rate)
+    </select>
+
+    <!-- 获取学院分布数据 -->
+    <select id="selectCollegeDistribution" resultType="com.abin.checkrepeatservice.teacher.vo.CollegeDistributionVO">
+        SELECT
+        su.college_name as collegeName,
+        COUNT(DISTINCT pi.student_id) as studentCount,
+        COUNT(*) as reviewCount,
+        ROUND(AVG(pi.similarity_rate), 1) as avgSimilarity
+        FROM paper_info pi
+        LEFT JOIN sys_user su ON pi.student_id = su.id
+        WHERE pi.teacher_id = #{teacherId}
+        AND pi.is_deleted = 0
+        AND su.college_name IS NOT NULL
+        AND su.college_name != ''
+        <if test="startDate != null">
+            AND pi.submit_time >= #{startDate}
+        </if>
+        <if test="endDate != null">
+            AND pi.submit_time &lt;= #{endDate}
+        </if>
+        GROUP BY su.college_name
+        ORDER BY studentCount DESC, reviewCount DESC
+    </select>
+    
+    <!-- 统计指定教师在时间范围内的论文总数 -->
+    <select id="countTotalPapers" resultType="java.lang.Integer">
+        SELECT COUNT(*)
+        FROM paper_info
+        WHERE teacher_id = #{teacherId}
+        AND is_deleted = 0
+        AND similarity_rate IS NOT NULL
+        AND similarity_rate > 0
+        <if test="startDate != null">
+            AND submit_time >= #{startDate}
+        </if>
+        <if test="endDate != null">
+            AND submit_time &lt;= #{endDate}
+        </if>
+    </select>
+
+    <!-- 统计教师论文总数（无时间限制）-->
+    <select id="countTeacherPapers" resultType="java.lang.Integer">
+        SELECT COUNT(*)
+        FROM paper_info
+        WHERE teacher_id = #{teacherId}
+          AND is_deleted = 0
+    </select>
+    
+    <!-- 管理员学院论文分布统计 -->
+    <select id="selectCollegePaperStats" resultType="com.abin.checkrepeatservice.admin.vo.CollegePaperStatsVO">
+        SELECT
+            p.college_id as collegeId,
+            c.college_name as collegeName,
+            COUNT(*) as paperCount
+        FROM paper_info p
+                 LEFT JOIN college c ON p.college_id = c.id
+        WHERE p.is_deleted = 0
+        GROUP BY p.college_id, c.college_name
+        ORDER BY paperCount DESC
+    </select>
+    
+    <!-- 管理员专业论文分布统计 -->
+    <select id="selectMajorPaperStats" resultType="com.abin.checkrepeatservice.admin.vo.MajorPaperStatsVO">
+        SELECT
+            p.major_id as majorId,
+            m.major_name as majorName,
+            COUNT(*) as paperCount
+        FROM paper_info p
+                 LEFT JOIN major m ON p.major_id = m.id
+        WHERE p.is_deleted = 0
+        GROUP BY p.major_id, m.major_name
+        ORDER BY paperCount DESC
+    </select>
+</mapper>
