@@ -43,3 +43,6 @@ src/main/resources/application-local.yml
 logs/
 **/logs/**
 
+#环境变量
+.env
+
