@@ -1,17 +1,23 @@
 # ========================================
 # 论文查重后端服务 - 运行时镜像
-# JAR 由 Jenkins 构建并推送，Dockerfile 只负责打包
 # ========================================
 
 FROM eclipse-temurin:17-jre
 
 WORKDIR /app
 
-# 配置阿里云 Ubuntu 源（解决国内网络问题）
-RUN echo "deb http://mirrors.aliyun.com/ubuntu/ resolute main universe restricted multiverse" > /etc/apt/sources.list && \
-    echo "deb http://mirrors.aliyun.com/ubuntu/ resolute-updates main universe restricted multiverse" >> /etc/apt/sources.list && \
-    echo "deb http://mirrors.aliyun.com/ubuntu/ resolute-security main universe restricted multiverse" >> /etc/apt/sources.list && \
-    echo "deb http://mirrors.aliyun.com/ubuntu/ resolute-backports main universe restricted multiverse" >> /etc/apt/sources.list
+# 配置阿里云 Ubuntu 源（deb822 格式 - 直接替换 ubuntu.sources）
+RUN echo 'Types: deb' > /etc/apt/sources.list.d/ubuntu.sources && \
+    echo 'URIs: http://mirrors.aliyun.com/ubuntu/' >> /etc/apt/sources.list.d/ubuntu.sources && \
+    echo 'Suites: resolute resolute-updates resolute-backports' >> /etc/apt/sources.list.d/ubuntu.sources && \
+    echo 'Components: main universe restricted multiverse' >> /etc/apt/sources.list.d/ubuntu.sources && \
+    echo 'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg' >> /etc/apt/sources.list.d/ubuntu.sources && \
+    echo '' >> /etc/apt/sources.list.d/ubuntu.sources && \
+    echo 'Types: deb' >> /etc/apt/sources.list.d/ubuntu.sources && \
+    echo 'URIs: http://mirrors.aliyun.com/ubuntu/' >> /etc/apt/sources.list.d/ubuntu.sources && \
+    echo 'Suites: resolute-security' >> /etc/apt/sources.list.d/ubuntu.sources && \
+    echo 'Components: main universe restricted multiverse' >> /etc/apt/sources.list.d/ubuntu.sources && \
+    echo 'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg' >> /etc/apt/sources.list.d/ubuntu.sources
 
 # 安装中文字体（PDF 生成需要）
 RUN apt-get update && \
@@ -21,7 +27,7 @@ RUN apt-get update && \
 # 创建数据目录
 RUN mkdir -p /data/upload /data/report /data/check-temp /data/check-report /data/review-attach
 
-# 复制 JAR（Jenkins 推送后，在目标服务器上执行 docker build）
+# 复制 JAR 文件
 COPY *.jar app.jar
 
 EXPOSE 8080
