@@ -7,6 +7,12 @@ FROM eclipse-temurin:17-jre
 
 WORKDIR /app
 
+# 配置阿里云 Ubuntu 源（解决国内网络问题）
+RUN echo "deb http://mirrors.aliyun.com/ubuntu/ resolute main universe restricted multiverse" > /etc/apt/sources.list && \
+    echo "deb http://mirrors.aliyun.com/ubuntu/ resolute-updates main universe restricted multiverse" >> /etc/apt/sources.list && \
+    echo "deb http://mirrors.aliyun.com/ubuntu/ resolute-security main universe restricted multiverse" >> /etc/apt/sources.list && \
+    echo "deb http://mirrors.aliyun.com/ubuntu/ resolute-backports main universe restricted multiverse" >> /etc/apt/sources.list
+
 # 安装中文字体（PDF 生成需要）
 RUN apt-get update && \
     apt-get install -y --no-install-recommends fonts-wqy-microhei && \
