@@ -1,7 +1,6 @@
 # Maven / Gradle
 target/
 !.mvn/wrapper/maven-wrapper.jar
-*.jar
 *.war
 
 # IDE
