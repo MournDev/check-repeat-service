@@ -28,7 +28,7 @@ RUN apt-get update && \
 RUN mkdir -p /data/upload /data/report /data/check-temp /data/check-report /data/review-attach
 
 # 复制 JAR 文件
-COPY *.jar app.jar
+COPY target/*.jar app.jar
 
 EXPOSE 8080
 
