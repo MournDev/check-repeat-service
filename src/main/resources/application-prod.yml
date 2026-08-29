@@ -63,6 +63,14 @@ spring:
           max-active: 16
           max-idle: 16
           min-idle: 4
+# Redisson 配置（关键！）
+redisson:
+  config: |
+    singleServerConfig:
+      address: "redis://${REDIS_HOST:192.168.30.130}:${REDIS_PORT:6379}"
+      password: "${REDIS_PASSWORD:123456}"
+      connectionPoolSize: 64
+      connectionMinimumIdleSize: 10
 
   # JWT 配置（密钥必须通过环境变量设置）
   jwt:
