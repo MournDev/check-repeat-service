@@ -101,7 +101,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: check-repeat-service-1.0.0
+    image: check-repeat-service-2.0.0
     container_name: check-backend
     restart: unless-stopped
     depends_on:
