@@ -53,9 +53,9 @@ spring:
   # Redis 缓存配置
   data:
     redis:
-      host: ${REDIS_HOST:localhost}
+      host: ${REDIS_HOST:192.168.30.130}
       port: ${REDIS_PORT:6379}
-      password: ${REDIS_PASSWORD:your_redis_password}
+      password: ${REDIS_PASSWORD:123456}
       database: 0
       timeout: 2000ms
       lettuce:
