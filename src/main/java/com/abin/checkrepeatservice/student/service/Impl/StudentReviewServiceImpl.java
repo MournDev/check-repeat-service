@@ -365,7 +365,7 @@ public class StudentReviewServiceImpl extends ServiceImpl<PaperInfoMapper, Paper
                 // 构建查重报告下载URL
                 CheckReport report = checkReportMapper.selectById(task.getReportId());
                 if (report != null) {
-                    String reportDownloadUrl = "/api/v1/student/reports/download?reportId=" + report.getId();
+                    String reportDownloadUrl = "/api/student/reports/download?reportId=" + report.getId();
                     checkCore.setReportDownloadUrl(reportDownloadUrl);
                 }
                 dto.setCheckCore(checkCore);
@@ -391,7 +391,7 @@ public class StudentReviewServiceImpl extends ServiceImpl<PaperInfoMapper, Paper
                         attachDTO.setAttachSize(0L);
                     }
                     // 构建附件下载URL
-                    String attachDownloadUrl = "/api/v1/student/reviews/download-attach?attachPath=" + URLEncoder.encode(attachPath, StandardCharsets.UTF_8);
+                    String attachDownloadUrl = "/api/student/reviews/download-attach?attachPath=" + URLEncoder.encode(attachPath, StandardCharsets.UTF_8);
                     attachDTO.setDownloadUrl(attachDownloadUrl);
                     reviewResult.setAttachInfo(attachDTO);
                 }

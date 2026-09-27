@@ -736,7 +736,7 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
                 // 解析重复段落数量（从JSON字符串中提取）
                 List<Map<String, Object>> repeatDetails = JSON.parseObject(checkReport.getRepeatDetails(), new TypeReference<List<Map<String, Object>>>(){});
                 reportSummary.setRepeatParagraphCount(repeatDetails.size());
-                // 构建报告下载URL（前端拼接域名，如：/api/v1/student/reports/download?reportId=xxx）
+                // 构建报告下载URL（前端拼接域名，如：/api/student/reports/download?reportId=xxx）
                 reportSummary.setReportDownloadUrl("/api/student/reports/download?reportId=" + checkReport.getId());
                 dto.setReportSummary(reportSummary);
             }

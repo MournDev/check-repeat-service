@@ -20,7 +20,7 @@ import java.util.Map;
  * 学生端审核结果控制器：仅学生角色可访问，统一用@RequestParam传参
  */
 @RestController
-@RequestMapping("/api/v1/student/reviews")
+@RequestMapping("/api/student/reviews")
 @PreAuthorize("hasAuthority('STUDENT')") // 权限控制：仅学生可访问
 public class StudentReviewController {
 

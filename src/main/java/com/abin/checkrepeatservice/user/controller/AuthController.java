@@ -23,7 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @Slf4j
 @RestController
-@RequestMapping("/api/auth") // 接口前缀，便于版本管理（后续可扩展为 /api/v1/auth）
+@RequestMapping("/api/auth") // 接口前缀，便于版本管理
 public class AuthController {
 
     // 仅依赖Service接口，不依赖具体实现（符合依赖倒置原则）
