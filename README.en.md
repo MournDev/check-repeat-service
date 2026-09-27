@@ -89,7 +89,6 @@ check-repeat-service/
 │   │   └── V1__init.sql          # Baseline: table structures
 │   └── ...
 ├── Dockerfile                    # Docker Build File
-├── docker-compose.yml            # Docker Compose Orchestration (dev)
 ├── docker-compose.prod.yml       # Docker Compose Orchestration (prod)
 ├── DEPLOY.md                     # Production deployment guide
 └── pom.xml                       # Maven Configuration
@@ -166,11 +165,11 @@ java -jar target/check-repeat-service.jar
 
 ### Docker Deployment
 
-```bash
-# Start using Docker Compose
-docker-compose up -d
+For production, see [`DEPLOY.md`](DEPLOY.md) (Jenkins pipeline + `docker-compose.prod.yml`).
 
-# Or build and run separately
+For local development, build and run standalone; middleware (MySQL / Redis / MinIO) must be provided by yourself:
+
+```bash
 docker build -t check-repeat-service .
 docker run -d -p 8080:8080 --name check-repeat-service check-repeat-service
 ```

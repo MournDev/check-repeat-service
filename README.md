@@ -91,7 +91,6 @@ check-repeat-service/
 │   │   └── V1__init.sql          # 基线：建表结构
 │   └── ...
 ├── Dockerfile                    # Docker构建文件
-├── docker-compose.yml            # Docker Compose编排（开发）
 ├── docker-compose.prod.yml       # Docker Compose编排（生产）
 ├── DEPLOY.md                     # 生产部署手册
 └── pom.xml                       # Maven配置
@@ -168,11 +167,11 @@ java -jar target/check-repeat-service.jar
 
 ### Docker部署
 
-```bash
-# 使用Docker Compose启动
-docker-compose up -d
+生产环境部署见 [`DEPLOY.md`](DEPLOY.md)（Jenkins 流水线 + `docker-compose.prod.yml`）。
 
-# 或单独构建运行
+本地开发可单独构建运行，中间件（MySQL / Redis / MinIO）需自备：
+
+```bash
 docker build -t check-repeat-service .
 docker run -d -p 8080:8080 --name check-repeat-service check-repeat-service
 ```
