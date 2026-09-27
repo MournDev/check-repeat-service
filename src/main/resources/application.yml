@@ -30,7 +30,7 @@ spring:
 
   # 数据源配置
   datasource:
-    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/check-repeat-service?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=GMT%2B8&allowPublicKeyRetrieval=true&autoReconnect=true&failOverReadOnly=false&maxReconnects=10&initialTimeout=2
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:check-repeat-service}?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=GMT%2B8&allowPublicKeyRetrieval=true&autoReconnect=true&failOverReadOnly=false&maxReconnects=10&initialTimeout=2
     username: ${MYSQL_USERNAME:root}
     password: ${MYSQL_PASSWORD:89864243}
     driver-class-name: com.mysql.cj.jdbc.Driver
