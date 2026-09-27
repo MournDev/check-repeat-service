@@ -7,7 +7,7 @@
 ## 架构
 
 ```
-Gitee ──Webhook──► Jenkins(容器, 宿主 :8081) ──► mvn package
+Gitee ◄──Poll SCM(每5分钟)── Jenkins(容器, 宿主 127.0.0.1:8081) ──► mvn package
                         │
                         ├──► docker build   (经挂载的 docker.sock)
                         ├──► docker compose up -d backend
@@ -105,7 +105,7 @@ chown -R 1000:1000 /usr/local/check-repeat
 | 端口 | 策略 |
 |---|---|
 | 22 / 80 / 443 | 放行 |
-| 8081（Jenkins） | 只放行你的办公 IP，或走 SSH 隧道 |
+| 8081（Jenkins） | **不需要放行**（已绑 `127.0.0.1`，只能走 SSH 隧道访问） |
 | 50000 | 不需要放行（单机 Jenkins，无 agent） |
 | 3306 / 6379 / 9000 / 9001 / 8080 | **禁止对公网开放**，中间件只在内网 docker 网络，backend 只绑 127.0.0.1 |
 
@@ -128,7 +128,7 @@ docker build -t jenkins-custom:lts-jdk17 jenkins/
 docker rm -f jenkins   # 只删容器，/home/jenkins_home 是宿主目录，数据不受影响
 
 docker run -d --name jenkins --restart unless-stopped \
-  -p 8081:8080 -p 50000:50000 \
+  -p 127.0.0.1:8081:8080 \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /usr/local/check-repeat:/usr/local/check-repeat \
   -v /home/jenkins_home:/var/jenkins_home \
@@ -138,6 +138,10 @@ docker run -d --name jenkins --restart unless-stopped \
   --memory 1536m \
   jenkins-custom:lts-jdk17
 ```
+
+> **端口只绑 `127.0.0.1`**，Jenkins 管理界面不对公网开放，从本机用 `ssh -L 8081:127.0.0.1:8081 root@<服务器IP>` 建隧道访问。
+> 因此本项目**用 Poll SCM 触发构建，不用 Gitee Webhook**——webhook 需要公网可达，见 §5。
+> 不发布 50000：单机 Jenkins 没有 agent，用不到。
 
 三个关键点，漏一个就会出问题：
 
@@ -168,7 +172,7 @@ docker exec -u root jenkins sh -c \
 
 漏了这一步不会构建失败，但 Maven 会走官方 central，在 2C4G 上拉依赖会明显变慢。
 
-若 Job 与插件是新建的，安装：`Pipeline`、`Git`、`Generic Webhook Trigger`、`Docker Pipeline`、`Credentials Binding`、`Workspace Cleanup`。
+若 Job 与插件是新建的，安装：`Pipeline`、`Git`、`Docker Pipeline`、`Credentials Binding`、`Workspace Cleanup`。
 
 ### 4. 新建 Job
 
@@ -182,15 +186,26 @@ New Item → **Pipeline** → Pipeline script from SCM：
 | Branch Specifier | `*/master` |
 | Script Path | `Jenkinsfile` |
 
-构建触发器选 **Generic Webhook Trigger**，自行设置一个 Token（不要写进 Jenkinsfile，避免泄露到版本库）。
+构建触发器选 **Poll SCM**，Schedule 填 `H/5 * * * *`：每 5 分钟向 Gitee 轮询一次，有新提交才构建。
 
-### 5. Gitee Webhook
+### 5. 为什么不用 Gitee Webhook
 
-Gitee 仓库 → 管理 → Webhook，URL 填：
+Jenkins 只绑 `127.0.0.1:8081`（见 §2），公网不可达，Gitee 的 webhook 请求根本送不进来。要收 webhook 就必须把 Jenkins 暴露到公网，代价远大于「推送后最长等 5 分钟」。所以选 **Poll SCM**：零端口暴露、无需 token、无需动 nginx。
 
-```
-http://<域名>/generic-webhook-trigger/invoke?token=<你的token>
-```
+如果确实需要秒级触发，改造步骤如下：
+
+1. 在承载 80/443 的 nginx 上加一条**窄路由**，只代理这一个端点。路径不变，所以不需要给 Jenkins 加 `--prefix`：
+
+   ```nginx
+   location /generic-webhook-trigger/ {
+       proxy_pass http://127.0.0.1:8081;
+   }
+   ```
+
+2. Job 的构建触发器换成 Generic Webhook Trigger，自行设置 Token（不要写进 Jenkinsfile，避免泄露到版本库）
+3. Gitee 仓库 → 管理 → Webhook，URL 填 `http://<域名>/generic-webhook-trigger/invoke?token=<你的token>`
+
+> **不要**试图用安全组限制来源 IP 来保护这个端点——webhook 请求来自 Gitee 的服务器，不是你的办公 IP，限制 IP 只会把 webhook 一起挡掉。
 
 ## 三、首次部署
 
@@ -228,11 +243,11 @@ location /check/ {
 
 **若用宿主机 Nginx**，把 `proxy_pass` 改成 `http://127.0.0.1:8080`（backend 只绑回环）。
 
-Jenkins 控制台建议走安全组限制来源 IP 或 SSH 隧道访问。不要用 `/jenkins/` 子路径反代——那需要给 Jenkins 加 `--prefix` 参数，很折腾。
+Jenkins 控制台走 SSH 隧道访问（`ssh -L 8081:127.0.0.1:8081 root@<服务器IP>`）——它只绑 `127.0.0.1`，安全组根本不需要放行 8081。不要用 `/jenkins/` 子路径反代——那需要给 Jenkins 加 `--prefix` 参数，很折腾。
 
 ## 五、日常部署与回滚
 
-推送 `master` 即自动触发。流水线：`mvn package` → `docker build` → 同步部署文件到 `/usr/local/check-repeat` → 调用 `deploy.sh <构建号>`。
+推送 `master` 后，最长 5 分钟内自动触发（Poll SCM）。流水线：`mvn package` → `docker build` → 同步部署文件到 `/usr/local/check-repeat` → 调用 `deploy.sh <构建号>`。
 
 `deploy.sh` 的行为：
 

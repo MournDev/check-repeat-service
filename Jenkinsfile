@@ -2,10 +2,10 @@
 // 论文查重后端 - CI/CD 流水线
 //
 // 前置条件（在 Jenkins Job 配置里设置，不写进本文件以免泄露）:
-//   1. 源码管理 -> Gitee 仓库地址 + 凭据
-//   2. 构建触发器 -> Generic Webhook Trigger，Token 自行设置
-//      并在 Gitee 仓库添加 Webhook 指向:
-//      http://<服务器>/generic-webhook-trigger/invoke?token=<你的token>
+//   1. Pipeline script from SCM: Gitee 仓库地址 + 分支 */master + Script Path: Jenkinsfile
+//   2. 构建触发器 -> Poll SCM，Schedule: H/5 * * * *
+//      不用 Generic Webhook Trigger: Jenkins 只绑 127.0.0.1，公网不可达。
+//      详见 DEPLOY.md「二、Jenkins」§2 与 §5。
 //
 // 部署路径约定:
 //   /usr/local/check-repeat 必须以相同路径挂载进 Jenkins 容器
