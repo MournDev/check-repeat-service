@@ -7,7 +7,7 @@
 ## 架构
 
 ```
-Gitee ◄──Poll SCM(每5分钟)── Jenkins(容器, 宿主 127.0.0.1:8081) ──► mvn package
+Gitee ──Push webhook(秒级)──► Jenkins(容器, 网关 vhost → jenkins:8080) ──► mvn package
                         │
                         ├──► docker build   (经挂载的 docker.sock)
                         ├──► docker compose up -d backend
@@ -139,8 +139,9 @@ docker run -d --name jenkins --restart unless-stopped \
   jenkins-custom:lts-jdk17
 ```
 
-> **端口只绑 `127.0.0.1`**，Jenkins 管理界面不对公网开放，从本机用 `ssh -L 8081:127.0.0.1:8081 root@<服务器IP>` 建隧道访问。
-> 因此本项目**用 Poll SCM 触发构建，不用 Gitee Webhook**——webhook 需要公网可达，见 §5。
+> Jenkins 自身只绑 `127.0.0.1:8081`，管理界面走 SSH 隧道：`ssh -L 8081:127.0.0.1:8081 root@<服务器IP>`。
+> 但容器在网络内的名字是 `jenkins:8080`，网关的 `jenkins.check-repeat-system.xyz` vhost 整站反代到它，所以 **Generic Webhook Trigger 的 invoke 端点公网可达**，构建由 Gitee 的 Push webhook 触发（见 §5）。
+> 代价是**该域名的 Jenkins 管理界面同样对公网开放**，只能靠强口令保护。
 > 不发布 50000：单机 Jenkins 没有 agent，用不到。
 
 三个关键点，漏一个就会出问题：
@@ -186,26 +187,19 @@ New Item → **Pipeline** → Pipeline script from SCM：
 | Branch Specifier | `*/master` |
 | Script Path | `Jenkinsfile` |
 
-构建触发器选 **Poll SCM**，Schedule 填 `H/5 * * * *`：每 5 分钟向 Gitee 轮询一次，有新提交才构建。
+构建触发器勾 **Generic Webhook Trigger**，在展开区的 Token 里填一个自定字符串（**不要写进 Jenkinsfile**，避免泄露到版本库），其余字段（Post content parameters、Optional Filter 等）全部留空。Gitee 侧的 Push webhook 指向这个 token，见 §5。
 
-### 5. 为什么不用 Gitee Webhook
+### 5. 用 Gitee Webhook 触发（秒级）
 
-Jenkins 只绑 `127.0.0.1:8081`（见 §2），公网不可达，Gitee 的 webhook 请求根本送不进来。要收 webhook 就必须把 Jenkins 暴露到公网，代价远大于「推送后最长等 5 分钟」。所以选 **Poll SCM**：零端口暴露、无需 token、无需动 nginx。
+Jenkins 自身只绑回环（见 §2），但公网入口由网关提供：`/opt/check-repeat/nginx/conf/jenkins.d/10-jenkins.conf` 里的 `server_name jenkins.check-repeat-system.xyz;` 块，把请求整站反代到 `http://jenkins:8080`（Jenkins 容器在 docker 网络内的名字）。因此 **Generic Webhook Trigger 可以直接用**，既不需要给 Jenkins 加 `--prefix`，也不需要改这份 nginx 配置。
 
-如果确实需要秒级触发，改造步骤如下：
-
-1. 在承载 80/443 的 nginx 上加一条**窄路由**，只代理这一个端点。路径不变，所以不需要给 Jenkins 加 `--prefix`：
-
-   ```nginx
-   location /generic-webhook-trigger/ {
-       proxy_pass http://127.0.0.1:8081;
-   }
-   ```
-
-2. Job 的构建触发器换成 Generic Webhook Trigger，自行设置 Token（不要写进 Jenkinsfile，避免泄露到版本库）
-3. Gitee 仓库 → 管理 → Webhook，URL 填 `http://<域名>/generic-webhook-trigger/invoke?token=<你的token>`
+1. Job 构建触发器勾 **Generic Webhook Trigger**，Token 填自定字符串，其余留空；同时**不要**再勾 Poll SCM（两者并存会带来无谓的轮询构建）
+2. Gitee 仓库 → 管理 → WebHooks → 添加，URL 填 `https://jenkins.check-repeat-system.xyz/generic-webhook-trigger/invoke?token=<你的token>`，事件勾 **Push**
+3. 推一次 `master` 验证：构建原因应显示 `Generic Cause`，而不是 `Started by an SCM change`
 
 > **不要**试图用安全组限制来源 IP 来保护这个端点——webhook 请求来自 Gitee 的服务器，不是你的办公 IP，限制 IP 只会把 webhook 一起挡掉。
+>
+> Token 是唯一凭据，且默认不做分支过滤：**推任何分支都会触发构建**（流水线仍只检出 `master`），代价是一次无谓的重建。需要过滤时在触发器的 `Optional Filter` 里加 regexp。
 
 ## 三、首次部署
 
@@ -247,7 +241,9 @@ Jenkins 控制台走 SSH 隧道访问（`ssh -L 8081:127.0.0.1:8081 root@<服务
 
 ## 五、日常部署与回滚
 
-推送 `master` 后，最长 5 分钟内自动触发（Poll SCM）。流水线：`mvn package` → `docker build` → 同步部署文件到 `/usr/local/check-repeat` → 调用 `deploy.sh <构建号>`。
+推送 `master` 后由 Gitee webhook 立即触发。若本次提交改动的文件**全部是 `.md` 文档**，流水线会跳过打包与部署——避免纯文档提交换来一次 50-60 秒的服务中断。判定采用 fail-safe 策略：取不到变更集时一律按"需要部署"处理。
+
+流水线：`mvn package` → `docker build` → 同步部署文件到 `/usr/local/check-repeat` → 调用 `deploy.sh <构建号>`。
 
 `deploy.sh` 的行为：
 

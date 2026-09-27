@@ -3,8 +3,10 @@
 //
 // 前置条件（在 Jenkins Job 配置里设置，不写进本文件以免泄露）:
 //   1. Pipeline script from SCM: Gitee 仓库地址 + 分支 */master + Script Path: Jenkinsfile
-//   2. 构建触发器 -> Poll SCM，Schedule: H/5 * * * *
-//      不用 Generic Webhook Trigger: Jenkins 只绑 127.0.0.1，公网不可达。
+//   2. 构建触发器 -> Generic Webhook Trigger
+//      Token 在 Jenkins UI 里设置，不写进本文件以免泄露。
+//      Gitee Push webhook 指向
+//      https://jenkins.check-repeat-system.xyz/generic-webhook-trigger/invoke?token=<token>
 //      详见 DEPLOY.md「二、Jenkins」§2 与 §5。
 //
 // 部署路径约定:
@@ -35,31 +37,65 @@ pipeline {
     }
 
     stages {
-        stage('构建 JAR') {
+        stage('判定是否部署') {
             steps {
-                sh 'mvn -B -DskipTests clean package'
+                script {
+                    // fail-safe：默认部署。只有确实取到变更集、且改的全是 .md 文档时才跳过，
+                    // 避免纯文档提交引发 50-60 秒的服务中断。
+                    env.SKIP_DEPLOY = 'false'
+                    try {
+                        def paths = currentBuild.changeSets
+                                .collectMany { it.items }
+                                .collectMany { it.affectedFiles }
+                                .collect { it.path }
+                        if (paths && paths.every { it.toLowerCase().endsWith('.md') }) {
+                            env.SKIP_DEPLOY = 'true'
+                        }
+                        echo "本次变更: ${paths ? paths.join(', ') : '未取到变更集，按需要部署处理'}"
+                    } catch (e) {
+                        echo "变更集解析失败: ${e}；按需要部署处理"
+                    }
+                }
             }
         }
 
-        stage('构建镜像') {
-            steps {
-                sh "docker build -t ${env.IMAGE_NAME}:${env.IMAGE_TAG} -t ${env.IMAGE_NAME}:latest ."
+        stage('构建与部署') {
+            when { expression { env.SKIP_DEPLOY != 'true' } }
+            stages {
+                stage('构建 JAR') {
+                    steps {
+                        sh 'mvn -B -DskipTests clean package'
+                    }
+                }
+
+                stage('构建镜像') {
+                    steps {
+                        sh "docker build -t ${env.IMAGE_NAME}:${env.IMAGE_TAG} -t ${env.IMAGE_NAME}:latest ."
+                    }
+                }
+
+                stage('同步部署文件') {
+                    steps {
+                        sh """
+                            mkdir -p ${env.DEPLOY_DIR}
+                            cp ${env.COMPOSE_FILE} deploy.sh ${env.DEPLOY_DIR}/
+                            chmod +x ${env.DEPLOY_DIR}/deploy.sh
+                        """
+                    }
+                }
+
+                stage('部署') {
+                    steps {
+                        sh "cd ${env.DEPLOY_DIR} && ./deploy.sh ${env.IMAGE_TAG}"
+                    }
+                }
             }
         }
 
-        stage('同步部署文件') {
+        stage('跳过部署') {
+            when { expression { env.SKIP_DEPLOY == 'true' } }
             steps {
-                sh """
-                    mkdir -p ${env.DEPLOY_DIR}
-                    cp ${env.COMPOSE_FILE} deploy.sh ${env.DEPLOY_DIR}/
-                    chmod +x ${env.DEPLOY_DIR}/deploy.sh
-                """
-            }
-        }
-
-        stage('部署') {
-            steps {
-                sh "cd ${env.DEPLOY_DIR} && ./deploy.sh ${env.IMAGE_TAG}"
+                echo '本次提交全部为文档变更，跳过打包与部署。'
             }
         }
     }
