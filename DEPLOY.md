@@ -2,40 +2,55 @@
 
 面向 **2C4G 阿里云 ECS · Gitee + Jenkins(容器) + Docker Compose** 的部署流程。
 
+本手册只覆盖**后端**。前端由另一套容器与 Nginx 提供，不属于本仓库职责。
+
 ## 架构
 
 ```
-Gitee ──Webhook──► Nginx ──► Jenkins(容器:8090) ──► mvn package
-                                     │
-                                     └──► docker build  (经 docker.sock)
-                                     └──► docker compose up -d backend
-                                     └──► 健康检查 → 失败自动回滚
-
-服务器
-├── Nginx (宿主 80/443)      ──► 127.0.0.1:8080  后端
-│                            └──► 127.0.0.1:8090  Jenkins(仅 webhook 路径)
-├── check-backend  容器  127.0.0.1:8080   镜像本地构建，tag = Jenkins 构建号
-├── check-mysql    容器  127.0.0.1:3306
-├── check-redis    容器  127.0.0.1:6379
-├── check-minio    容器  127.0.0.1:9000/9001
-└── /usr/local/check-repeat/   部署目录(.env / docker-compose.prod.yml / deploy.sh)
+Gitee ──Webhook──► Jenkins(容器, 宿主 :8081) ──► mvn package
+                        │
+                        ├──► docker build   (经挂载的 docker.sock)
+                        ├──► docker compose up -d backend
+                        └──► 健康检查 → 失败自动回滚
 ```
+
+服务器上**同时存在两套 compose，项目名刻意隔离，互不干涉**：
+
+```
+/opt/check-repeat/docker-compose.yml              项目名: check-repeat
+    中间件（既有，本仓库不管理、不要动）
+    check-repeat-mysql / -redis / -minio / -kkfileview
+    数据卷: check-repeat_mysql_data / _redis_data / _minio_data / _kkfileview_data
+
+/usr/local/check-repeat/docker-compose.prod.yml   项目名: check-repeat-backend
+    backend（本仓库的部署目标）
+    ├─ 加入外部网络 check-repeat_app-network   → 与中间件互通
+    ├─ 挂载既有卷 check-repeat_app_data → /data        （uploads/reports/临时文件）
+    └─ 挂载既有卷 check-repeat_app_logs → /app/logs
+```
+
+**为什么必须隔离项目名**：compose 以项目名给容器打标签。若两侧同名，任一侧执行 `docker compose down` 会连带删除**对方项目**的容器——中间件会跟着停。所以 `docker-compose.prod.yml` 顶部显式写了 `name: check-repeat-backend`，不要删。
+
+中间件之间靠 docker 网络别名互相访问：`mysql` / `redis` / `minio` / `kkfileview`（**不是**容器名 `check-repeat-mysql`）。`.env` 里就填这些别名。
 
 **不使用外部镜像仓库。** 镜像只在本机构建并打上构建号 tag，保留最近 3 个用于回滚。
 原因：ACR 个人版官方声明「仅限开发测试、禁止生产、无 SLA」，而 Jenkins 与后端同机时仓库本就是多余的中间环节。
 
 ## 内存预算（4GB 总量，勿随意新增服务）
 
-| 组件 | mem_limit | 关键调参 |
+| 组件 | 内存 | 关键调参 |
 |---|---|---|
-| OS + Docker daemon | — | 约 400MB |
-| mysql | 768m | `innodb_buffer_pool_size=256M`、关 `performance_schema`、关 binlog |
-| redis | 192m | `maxmemory 96mb` + `allkeys-lru` |
-| minio | 384m | `GOMEMLIMIT=256MiB` |
-| backend | 1024m | `-Xmx512m -XX:MaxMetaspaceSize=192m` |
+| OS + Docker + 阿里云 agent | ≈500MB | aegis / cloudmonitor / journald |
+| mysql | 768m | `innodb_buffer_pool_size=256M`；当前实测 ≈410MB |
+| redis | 192m | `maxmemory 256mb` + `allkeys-lru` |
+| minio | 384m | `GOMEMLIMIT=256MiB`；若 `STORAGE_TYPE=LOCAL` 则实际未被使用 |
+| kkfileview | 512m | 含内部 LibreOffice 进程 |
 | jenkins 容器 | 1536m | Jenkins JVM `-Xmx384m` + Maven JVM `-Xmx512m` |
+| **backend** | **1152m** | `-Xmx768m -XX:MaxMetaspaceSize=192m` |
 
-构建时峰值约 3.4GB。**4GB swap 是必需的**，否则一次内存抖动就会触发 OOM killer 杀掉 MySQL 或后端。
+实测基线：移除旧一体化应用后整机占用约 2.0GB，余量约 1.4GB。
+
+**4GB swap 是必需的**，否则构建期（Maven + docker build 与生产服务抢内存）一次抖动就会触发 OOM killer 杀掉 MySQL 或后端。构建期间后端变慢属预期，Jenkins 已设 `disableConcurrentBuilds()` 防止叠加。
 
 ## 一、服务器准备
 
@@ -45,6 +60,7 @@ Gitee ──Webhook──► Nginx ──► Jenkins(容器:8090) ──► mvn 
 fallocate -l 4G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
 echo '/swapfile none swap sw 0 0' >> /etc/fstab
 echo 'vm.swappiness=10' >> /etc/sysctl.conf && sysctl -w vm.swappiness=10
+free -h    # 确认 Swap 一行是 4.0Gi
 ```
 
 ### 2. 部署目录与 .env
@@ -52,27 +68,34 @@ echo 'vm.swappiness=10' >> /etc/sysctl.conf && sysctl -w vm.swappiness=10
 ```bash
 mkdir -p /usr/local/check-repeat
 cd /usr/local/check-repeat
-# 参照仓库根目录 .env 模板填写真实密钥，额外补一行：
-#   BACKEND_IMAGE=check-repeat-service:latest
-chmod 600 .env
-```
-
-`.env` 不进版本库（已在 `.gitignore` 中）。`docker-compose.prod.yml` 在**首次部署前**需要先放一份到这里：
-
-```bash
 git clone https://gitee.com/Sc0102_1129/check-repeat-service.git /tmp/crs
 cp /tmp/crs/docker-compose.prod.yml /tmp/crs/deploy.sh /usr/local/check-repeat/
 chmod +x /usr/local/check-repeat/deploy.sh
+
+# 生成强口令并写入 .env（纯十六进制，避免 JDBC/URL 转义问题）
+cp /tmp/crs/.env.example /usr/local/check-repeat/.env
+sed -i "s|<CHANGE_ME_MYSQL_PASSWORD>|$(openssl rand -hex 16)|; \
+        s|<CHANGE_ME_REDIS_PASSWORD>|$(openssl rand -hex 16)|; \
+        s|<CHANGE_ME_MINIO_PASSWORD>|$(openssl rand -hex 16)|; \
+        s|<CHANGE_ME_JWT_SECRET_32_CHARS>|$(openssl rand -base64 32 | tr -d '\n')|" \
+    /usr/local/check-repeat/.env
+# 邮件账号需手工填（QQ 邮箱 SMTP 授权码）
+vi /usr/local/check-repeat/.env
+chmod 600 /usr/local/check-repeat/.env
 ```
+
+`.env` 不进版本库（已在 `.gitignore` 中），模板见仓库根目录 `.env.example`。
+
+> 注意 `MYSQL_PASSWORD` / `REDIS_PASSWORD` / `MINIO_ROOT_PASSWORD` 的值必须与中间件容器**实际**生效的口令一致，否则 backend 连不上。中间件口令在 `/opt/check-repeat/` 那份 compose（或其 `.env`）里。
 
 ### 3. 安全组
 
 | 端口 | 策略 |
 |---|---|
 | 22 / 80 / 443 | 放行 |
-| 8090（Jenkins） | 只放行你的办公 IP，或走 SSH 隧道 |
+| 8081（Jenkins） | 只放行你的办公 IP，或走 SSH 隧道 |
 | 50000 | 不需要放行（单机 Jenkins，无 agent） |
-| 3306 / 6379 / 9000 / 9001 / 8080 | **禁止对公网开放**，已绑定 127.0.0.1 |
+| 3306 / 6379 / 9000 / 9001 / 8080 | **禁止对公网开放**，中间件只在内网 docker 网络，backend 只绑 127.0.0.1 |
 
 ## 二、Jenkins
 
@@ -85,16 +108,18 @@ cd /tmp/crs
 docker build -t jenkins-custom:lts-jdk17 jenkins/
 ```
 
-### 2. 启动容器
+### 2. 启动容器（替换既有容器，保留 Job 与插件）
+
+既有 Jenkins 容器没有 docker CLI 和 Maven，且未挂载 `docker.sock`，必须重建。**`/home/jenkins_home` 的绑定要原样保留**，Job、凭据、插件都在里面。
 
 ```bash
-docker volume create jenkins_home
+docker rm -f jenkins   # 只删容器，/home/jenkins_home 是宿主目录，数据不受影响
 
 docker run -d --name jenkins --restart unless-stopped \
-  -p 8090:8080 -p 50000:50000 \
+  -p 8081:8080 -p 50000:50000 \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /usr/local/check-repeat:/usr/local/check-repeat \
-  -v jenkins_home:/var/jenkins_home \
+  -v /home/jenkins_home:/var/jenkins_home \
   --group-add "$(getent group docker | cut -d: -f3)" \
   -e JAVA_OPTS="-Xmx384m -XX:MaxMetaspaceSize=192m" \
   -e TZ=Asia/Shanghai \
@@ -104,18 +129,17 @@ docker run -d --name jenkins --restart unless-stopped \
 
 三个关键点，漏一个就会出问题：
 
-1. **`--group-add`**：让容器内 `jenkins` 用户能读写宿主 `docker.sock`，否则构建阶段全部 permission denied。
+1. **`--group-add`**：让容器内 `jenkins` 用户能读写宿主 `docker.sock`，否则构建阶段全部 permission denied。（既有容器该项为空，是它无法构建镜像的直接原因。）
 2. **`--memory 1536m`**：必须同时容纳 Jenkins JVM（384m）和它拉起的 Maven JVM（512m）。给少了构建时容器会被 OOM。
 3. **`-v /usr/local/check-repeat:/usr/local/check-repeat` 路径必须完全一致**。Docker-out-of-Docker 下，`docker compose` 的路径是由**宿主 daemon** 解析的；路径不一致，compose 里的 bind mount 会指向容器内不存在的目录，部署静默失败。
 
 ### 3. 初始化
 
 ```bash
-docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword
 docker exec jenkins cat /var/jenkins_home/.m2/settings.xml   # 应看到阿里云镜像配置
 ```
 
-安装插件：`Pipeline`、`Git`、`Generic Webhook Trigger`、`Docker Pipeline`、`Credentials Binding`、`Workspace Cleanup`。
+若 Job 与插件是新建的，安装：`Pipeline`、`Git`、`Generic Webhook Trigger`、`Docker Pipeline`、`Credentials Binding`、`Workspace Cleanup`。
 
 ### 4. 新建 Job
 
@@ -141,20 +165,29 @@ http://<域名>/generic-webhook-trigger/invoke?token=<你的token>
 
 ## 三、首次部署
 
-backend 镜像还不存在，先起中间件：
+中间件**已经在运行**（由 `/opt/check-repeat/docker-compose.yml` 管理），不需要也不应该在本仓库的 compose 里再起一遍——那会创建空数据卷，让站点看起来正常但数据全空。
+
+直接手动触发一次 Jenkins Job。它会：Maven 打包 → 构建镜像 → 同步部署文件 → 调用 `deploy.sh <构建号>` → 健康检查。
+
+首次部署后重点核对两件事：
 
 ```bash
-cd /usr/local/check-repeat
-docker compose -f docker-compose.prod.yml up -d mysql redis minio minio-init
+# 1. 数据可见：既有上传文件与报告应在容器内 /data 下
+docker exec check-backend ls -l /data/upload | head
+
+# 2. Flyway 正确接管非空库：应显示 baseline 记录，且不重复执行 V1
+docker logs check-backend | grep -i flyway
 ```
 
-然后在 Jenkins 里手动触发一次 Job，它会构建镜像并部署 backend。
+## 四、反向代理
 
-## 四、Nginx
+后端 context-path 是 `/check`，健康检查为 `/check/actuator/health`。
+
+**若前端容器与本后端同处 `check-repeat_app-network`**，直接按容器名代理，无需暴露宿主端口：
 
 ```nginx
 location /check/ {
-    proxy_pass http://127.0.0.1:8080;          # 结尾不加 /，保留 /check 前缀
+    proxy_pass http://check-backend:8080;      # 结尾不加 /，保留 /check 前缀
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -162,12 +195,9 @@ location /check/ {
     client_max_body_size 200m;                 # 对应后端 multipart 上限
     proxy_read_timeout 3600s;                  # 对应 check.task.timeout
 }
-
-# 只暴露 webhook 路径，Jenkins 控制台不要裸奔
-location /generic-webhook-trigger/ {
-    proxy_pass http://127.0.0.1:8090;
-}
 ```
+
+**若用宿主机 Nginx**，把 `proxy_pass` 改成 `http://127.0.0.1:8080`（backend 只绑回环）。
 
 Jenkins 控制台建议走安全组限制来源 IP 或 SSH 隧道访问。不要用 `/jenkins/` 子路径反代——那需要给 Jenkins 加 `--prefix` 参数，很折腾。
 
@@ -179,7 +209,7 @@ Jenkins 控制台建议走安全组限制来源 IP 或 SSH 隧道访问。不要
 
 1. 从 `.env` 读出当前 `BACKEND_IMAGE` 作为回滚点
 2. 把新 tag 写入 `.env`
-3. `docker compose up -d backend` —— **只重建 backend 一个服务**
+3. `docker compose up -d backend` —— **只重建 backend 一个服务**（现在也只定义了这一个）
 4. 循环 `docker exec check-backend curl .../actuator/health` 探测，最多 150 秒
 5. 失败则写回旧 tag 并重新 `up -d backend`，然后以非 0 退出
 6. 成功后只保留最近 3 个数字 tag 的镜像
@@ -193,27 +223,35 @@ cd /usr/local/check-repeat && ./deploy.sh 41
 ## 六、运维命令速查
 
 ```bash
+# ---- 后端（本项目，项目名 check-repeat-backend）----
 cd /usr/local/check-repeat
+docker compose -f docker-compose.prod.yml ps
+docker compose -f docker-compose.prod.yml logs -f backend
+docker compose -f docker-compose.prod.yml up -d backend
+docker images check-repeat-service
 
-docker compose -f docker-compose.prod.yml ps                 # 服务状态
-docker compose -f docker-compose.prod.yml logs -f backend     # 后端日志
-docker compose -f docker-compose.prod.yml up -d backend       # 只重启后端
-docker stats --no-stream                                      # 各容器实际内存占用
-docker images check-repeat-service                            # 本地可用版本
-docker exec -it check-mysql mysql -uroot -p                   # 进数据库
-free -h && swapon --show                                      # 内存与 swap 水位
+# ---- 中间件（既有栈，项目名 check-repeat，务必用 -f 指向 /opt 那份）----
+docker compose -f /opt/check-repeat/docker-compose.yml ps
+docker compose -f /opt/check-repeat/docker-compose.yml logs -f mysql
+
+docker stats --no-stream          # 各容器实际内存占用
+free -h && swapon --show          # 内存与 swap 水位
+docker exec -it check-repeat-mysql mysql -uroot -p     # 进数据库
 ```
 
 ## 七、注意事项
 
-- **永远不要执行 `docker compose down`**，那会连带停掉 MySQL/Redis 造成全站停机。要重启只操作 `backend` 单个服务。
-- **不要加 `-v`**，会删除所有数据卷（数据库、上传文件、报告全部丢失）。
-- **表结构由 Flyway 管理**，见下方「八、数据库迁移」。
-- 数据卷为 Docker 命名卷，`up -d backend` 不会影响数据。备份时请针对 `mysql-data`、`upload-data`、`report-data` 等卷操作。
-- 后端日志落在容器的 `/app/logs`，已挂到 `app-logs` 卷，容器重建不丢。
+- **永远不要执行 `docker compose down`**，两侧都不要。它会连带停掉同项目容器，中间件那份更会直接导致全站停机。要重启只操作 `backend` 单个服务。
+- **不要给 `docker compose` 加 `-v`**，会删除所有数据卷（数据库、上传文件、报告全部丢失）。
+- **不要在两个目录间混用 `-f`**，也不要把 backend 的 compose 文件复制到 `/opt/check-repeat/`。两套栈靠项目名隔离，混用会破坏这个隔离。
+- **改中间件必须用 `-f /opt/check-repeat/docker-compose.yml`**，不要在 `/usr/local/check-repeat` 目录下裸跑 `docker compose`（会命中 backend 那份）。
+- **`/data` 只能挂一个卷**（`check-repeat_app_data`）。yml 里 uploads / reports / check-temp / review-attach 的默认路径都在 `/data` 下；若改成多个独立卷挂到 `/data/upload` 等子路径，既有历史文件会不可见。
+- 表结构由 Flyway 管理，见下方「八、数据库迁移」。
+- 数据卷为 Docker 命名卷，`up -d backend` 不会影响数据。备份时请针对 `check-repeat_mysql_data`、`check-repeat_app_data` 等卷操作。
+- 后端日志落在容器 `/app/logs`（已挂 `check-repeat_app_logs` 卷），容器重建不丢。
 - 后端 OOM 时会在 `/data/dumps`（`dumps` 卷）留下堆转储，排查内存问题先看这里。
-- 构建期间 2C4G 机器上后端会明显变慢，属预期现象；Jenkins 已设 `disableConcurrentBuilds()` 防止叠加。
 - 本地开发构建镜像前必须先 `mvn package`（`Dockerfile` 从 `target/` 取 jar）。
+- **`.env` 中的密钥切勿提交，也不要贴进聊天/工单**。既有部署曾把真实口令作为默认值写进 `application.yml`，这是反面教材。
 
 ## 八、数据库迁移
 
@@ -223,19 +261,44 @@ free -h && swapon --show                                      # 内存与 swap �
 - 命名规则：`V<版本>__<描述>.sql`，如 `V2__add_paper_review_comment.sql`。版本号必须递增且**已执行过的文件不能再改**，否则校验和不匹配会导致启动失败（要改就新增一个 V 版本）
 - 执行记录在 `flyway_schema_history` 表
 
-**已有数据的库如何接管**：`application.yml` 里配了 `baseline-on-migrate=true` + `baseline-version=1`。首次启动时 Flyway 会在非空库上打基线，把现状记为「V1 已应用」，不重复执行 V1；之后从 V2 开始应用。全新空库不会触发基线，会正常从 V1 建表。
+### 库名
 
-**⚠️ 迁移必须兼容新旧两个版本**——这是由 `deploy.sh` 的自动回滚决定的：迁移一旦执行就已提交且无法撤销（Flyway 社区版没有 undo），而健康检查失败会回滚应用镜像，于是旧代码会运行在新表结构上。所以：
+生产库是 **`check-repeat-system`**（注意不是 `check-repeat-service`）。代码里库名已参数化：
+
+```
+jdbc:mysql://${MYSQL_HOST}:${MYSQL_PORT}/${MYSQL_DATABASE:check-repeat-service}
+```
+
+由 `.env` 的 `MYSQL_DATABASE=check-repeat-system` 覆盖。
+
+### 接管既有非空库
+
+`application.yml` 里配了 `baseline-on-migrate=true` + `baseline-version=1`。首次启动时 Flyway 会在非空库上打基线，把现状记为「V1 已应用」，不重复执行 V1；之后从 V2 开始应用。全新空库不会触发基线，会正常从 V1 建表。
+
+> **⚠️ 写 V2+ 迁移时，要照「现网实际表结构」写，不能照 `V1__init.sql` 写。**
+> 既有库是靠基线接管的，Flyway **不会校验**它的结构是否与 `V1__init.sql` 一致。现网库是 6 周前用旧 `init.sql` 建的，期间可能存在手工改表，两者很可能已经漂移。动手前先导出实际结构：
+>
+> ```bash
+> docker exec check-repeat-mysql sh -c \
+>   'mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --no-data --skip-comments "check-repeat-system"' \
+>   > /root/schema-$(date +%F).sql
+> ```
+
+### 迁移必须兼容新旧两个版本
+
+这是由 `deploy.sh` 的自动回滚决定的：迁移一旦执行就已提交且无法撤销（Flyway 社区版没有 undo），而健康检查失败会回滚应用镜像，于是旧代码会运行在新表结构上。所以：
 
 - 加表、加**可空**字段、加索引 → 随时可以
 - **删表、删字段、改字段类型、重命名字段、加 NOT NULL 约束 → 必须拆成两次发布**：先发一个不再读写该字段的版本，下个版本再真正删除
 
-**重迁移注意**：迁移跑在应用启动阶段，而 healthcheck 的 `start_period` 是 120 秒。大表加索引这类耗时操作可能导致健康检查超时、被误判为部署失败并触发回滚。这类迁移建议上线前手工先执行，再走正常部署。
+### 重迁移注意
+
+迁移跑在应用启动阶段，而 healthcheck 的 `start_period` 是 120 秒。大表加索引这类耗时操作可能导致健康检查超时、被误判为部署失败并触发回滚。这类迁移建议上线前手工先执行，再走正常部署。
 
 手工查看迁移状态：
 
 ```bash
 docker logs check-backend | grep -i flyway
-docker exec -it check-mysql mysql -uroot -p -e \
-  "select version, description, success, installed_on from \`check-repeat-service\`.flyway_schema_history order by installed_rank"
+docker exec -it check-repeat-mysql mysql -uroot -p -e \
+  "select version, description, success, installed_on from \`check-repeat-system\`.flyway_schema_history order by installed_rank"
 ```
