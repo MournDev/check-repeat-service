@@ -52,6 +52,13 @@ spring:
     # 全新空库不会触发基线，会正常从 V1 开始执行。
     baseline-on-migrate: true
     baseline-version: 1
+    table: flyway_schema_history
+    clean-disabled: true
+    # 生产库的迁移历史领先于本仓库：库里已应用 V1(基线)+V2+V3+V4+V7，而仓库只带 V1__init.sql，
+    # 且 V7 的源文件已丢失、V2 的 checksum 为 NULL（历史表被手工改过）。
+    # 因此必须关掉校验并允许乱序，否则启动会被 Flyway 挡住。新增迁移请从 V8 起编号。
+    out-of-order: true
+    validate-on-migrate: false
 
   # 文件上传配置
   servlet:

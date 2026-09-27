@@ -287,8 +287,9 @@ docker exec -it check-repeat-mysql mysql -uroot -p     # 进数据库
 表结构由 **Flyway** 管理，迁移脚本在 `src/main/resources/db/migration/`，应用启动时自动执行。
 
 - `V1__init.sql` 是历史 mysqldump 转入的基线（结构建表，无数据）
-- 命名规则：`V<版本>__<描述>.sql`，如 `V2__add_paper_review_comment.sql`。版本号必须递增且**已执行过的文件不能再改**，否则校验和不匹配会导致启动失败（要改就新增一个 V 版本）
+- 命名规则：`V<版本>__<描述>.sql`，如 `V8__add_paper_review_comment.sql`
 - 执行记录在 `flyway_schema_history` 表
+- **新增迁移从 `V8` 起编号。** 生产库的历史已应用到 V7（见下），而仓库只带 `V1__init.sql`；从 V2 起编号会与库里已应用的版本撞车
 
 ### 库名
 
@@ -302,9 +303,20 @@ jdbc:mysql://${MYSQL_HOST}:${MYSQL_PORT}/${MYSQL_DATABASE:check-repeat-service}
 
 ### 接管既有非空库
 
-`application.yml` 里配了 `baseline-on-migrate=true` + `baseline-version=1`。首次启动时 Flyway 会在非空库上打基线，把现状记为「V1 已应用」，不重复执行 V1；之后从 V2 开始应用。全新空库不会触发基线，会正常从 V1 建表。
+`application.yml` 里配了 `baseline-on-migrate=true` + `baseline-version=1`。首次启动时 Flyway 会在非空库上打基线，把现状记为「V1 已应用」，不重复执行 V1。全新空库不会触发基线，会正常从 V1 建表。
 
-> **⚠️ 写 V2+ 迁移时，要照「现网实际表结构」写，不能照 `V1__init.sql` 写。**
+但**这套库的真实历史比仓库超前**：`flyway_schema_history` 里已有 `V1(基线) / V2 / V3 / V4 / V7`，而仓库只带 `V1__init.sql`。其中有两条不可信的证据——`V7` 的源文件在任何地方都找不到（旧源码目录里也没有），`V2` 的 `checksum` 是 `NULL`（正常应用的迁移一定写 checksum，V3/V4 就有）。说明这张历史表**被人手工改过**，别把它当可信记录。
+
+所以 `application.yml` 里显式配了下面两项，**不要"顺手修正"回去**：
+
+```yaml
+out-of-order: true          # 允许较小版本号在较大版本之后应用（V7 早于 V3/V4 就是这么产生的）
+validate-on-migrate: false  # 关掉启动校验，否则会以「Detected applied migration not resolved locally」直接失败
+```
+
+代价是：以后有人改了**已应用**的迁移脚本，Flyway 不会再报 checksum 不符。所以「已执行过的文件不能再改」这条纪律现在只能靠自觉——要改就新增一个 V 版本。
+
+> **⚠️ 写 V8+ 迁移时，要照「现网实际表结构」写，不能照 `V1__init.sql` 写。**
 > 既有库是靠基线接管的，Flyway **不会校验**它的结构是否与 `V1__init.sql` 一致。现网库是 6 周前用旧 `init.sql` 建的，期间可能存在手工改表，两者很可能已经漂移。动手前先导出实际结构：
 >
 > ```bash
