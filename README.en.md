@@ -85,11 +85,13 @@ check-repeat-service/
 ├── src/main/resources/
 │   ├── application.yml           # Application Configuration
 │   ├── application-prod.yml      # Production Environment Configuration
+│   ├── db/migration/             # Flyway database migrations
+│   │   └── V1__init.sql          # Baseline: table structures
 │   └── ...
-├── src/main/sql/
-│   └── init.sql                  # Database Initialization Script
 ├── Dockerfile                    # Docker Build File
-├── docker-compose.yml            # Docker Compose Orchestration
+├── docker-compose.yml            # Docker Compose Orchestration (dev)
+├── docker-compose.prod.yml       # Docker Compose Orchestration (prod)
+├── DEPLOY.md                     # Production deployment guide
 └── pom.xml                       # Maven Configuration
 ```
 

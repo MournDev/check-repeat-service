@@ -87,11 +87,13 @@ check-repeat-service/
 ├── src/main/resources/
 │   ├── application.yml           # 应用配置
 │   ├── application-prod.yml      # 生产环境配置
+│   ├── db/migration/             # Flyway 数据库迁移脚本
+│   │   └── V1__init.sql          # 基线：建表结构
 │   └── ...
-├── src/main/sql/
-│   └── init.sql                  # 数据库初始化脚本
 ├── Dockerfile                    # Docker构建文件
-├── docker-compose.yml            # Docker Compose编排
+├── docker-compose.yml            # Docker Compose编排（开发）
+├── docker-compose.prod.yml       # Docker Compose编排（生产）
+├── DEPLOY.md                     # 生产部署手册
 └── pom.xml                       # Maven配置
 ```
 
