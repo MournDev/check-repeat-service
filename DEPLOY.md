@@ -140,8 +140,7 @@ docker run -d --name jenkins --restart unless-stopped \
 ```
 
 > Jenkins 自身只绑 `127.0.0.1:8081`，管理界面走 SSH 隧道：`ssh -L 8081:127.0.0.1:8081 root@<服务器IP>`。
-> 但容器在网络内的名字是 `jenkins:8080`，网关的 `jenkins.check-repeat-system.xyz` vhost 整站反代到它，所以 **Generic Webhook Trigger 的 invoke 端点公网可达**，构建由 Gitee 的 Push webhook 触发（见 §5）。
-> 代价是**该域名的 Jenkins 管理界面同样对公网开放**，只能靠强口令保护。
+> 但容器在网络内的名字是 `jenkins:8080`，网关的 `jenkins.check-repeat-system.xyz` vhost **只放行 `/generic-webhook-trigger/` 一个路径**（`location /` 是 `deny all`）并反代到它，所以 invoke 端点公网可达、**管理界面在公网被 403 挡掉**。构建由 Gitee 的 Push webhook 触发（见 §5）。
 > 不发布 50000：单机 Jenkins 没有 agent，用不到。
 
 三个关键点，漏一个就会出问题：
@@ -189,9 +188,11 @@ New Item → **Pipeline** → Pipeline script from SCM：
 
 构建触发器勾 **Generic Webhook Trigger**，在展开区的 Token 里填一个自定字符串（**不要写进 Jenkinsfile**，避免泄露到版本库），其余字段（Post content parameters、Optional Filter 等）全部留空。Gitee 侧的 Push webhook 指向这个 token，见 §5。
 
+> **不要启用 Poll SCM。** Pipeline script from SCM 默认勾选 `Lightweight checkout`（`config.xml` 里 `<lightweight>true</lightweight>`），此时 Jenkins 无法为轮询记录稳定的 revision，**每次轮询都判定"有变更"**——实测 `H/5 * * * *` 曾在一小时内按 5 分钟间隔盲目重建 10 次（每次 50-60 秒服务中断）。若确实要恢复轮询，必须先取消 `Lightweight checkout`。
+
 ### 5. 用 Gitee Webhook 触发（秒级）
 
-Jenkins 自身只绑回环（见 §2），但公网入口由网关提供：`/opt/check-repeat/nginx/conf/jenkins.d/10-jenkins.conf` 里的 `server_name jenkins.check-repeat-system.xyz;` 块，把请求整站反代到 `http://jenkins:8080`（Jenkins 容器在 docker 网络内的名字）。因此 **Generic Webhook Trigger 可以直接用**，既不需要给 Jenkins 加 `--prefix`，也不需要改这份 nginx 配置。
+Jenkins 自身只绑回环（见 §2），但网关为它开了一个专用 vhost：`/opt/check-repeat/nginx/conf/jenkins.d/10-jenkins.conf` 里 `server_name jenkins.check-repeat-system.xyz;` 的块**只放行 `/generic-webhook-trigger/`**（`location /` 为 `deny all`），该路径反代到 `http://jenkins:8080`（Jenkins 容器在 docker 网络内的名字）。因此 **Generic Webhook Trigger 可以直接用**，既不需要给 Jenkins 加 `--prefix`，也不需要改这份 nginx 配置。
 
 1. Job 构建触发器勾 **Generic Webhook Trigger**，Token 填自定字符串，其余留空；同时**不要**再勾 Poll SCM（两者并存会带来无谓的轮询构建）
 2. Gitee 仓库 → 管理 → WebHooks → 添加，URL 填 `https://jenkins.check-repeat-system.xyz/generic-webhook-trigger/invoke?token=<你的token>`，事件勾 **Push**
