@@ -178,7 +178,7 @@ management:
 # 报告模块配置
 report:
   pdf:
-    font-path: fonts/SimHei.ttf
+    font-path: fonts/simhei.ttf
     page-size: A4
     margin: 50
   preview:

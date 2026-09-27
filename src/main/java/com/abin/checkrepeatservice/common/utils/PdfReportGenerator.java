@@ -292,14 +292,10 @@ public class PdfReportGenerator {
 
     // ------------------------------ 私有辅助方法 ------------------------------
     /**
-     * 加载中文字体（SimHei.ttf）
-     */
-    /**
-     * 加载中文字体（SimHei.ttf）
+     * 加载中文字体（simhei.ttf）
      */
     private PdfFont loadSimHeiFont() throws Exception {
         try {
-            // 从classpath加载字体文件
             ClassPathResource fontResource = new ClassPathResource(fontPath);
             if (!fontResource.exists()) {
                 log.error("中文字体文件不存在，请检查配置路径：{}", fontPath);
@@ -307,19 +303,11 @@ public class PdfReportGenerator {
                         "中文字体文件不存在，请检查配置路径：" + fontPath);
             }
 
-            // 检查文件是否可读
-            java.nio.file.Path fontPathObj = fontResource.getFile().toPath();
-            if (!Files.isReadable(fontPathObj)) {
-                log.error("中文字体文件不可读：{}", fontResource.getFile().getAbsolutePath());
-                throw new BusinessException(ResultCode.PARAM_ERROR,
-                        "中文字体文件不可读：" + fontResource.getFile().getAbsolutePath());
+            // 以字节流读取：打包成 fat jar 后资源在 BOOT-INF/classes 内，
+            // 无法通过 getFile() 解析为文件路径
+            try (var in = fontResource.getInputStream()) {
+                return PdfFontFactory.createFont(in.readAllBytes(), PdfEncodings.IDENTITY_H);
             }
-
-            // 初始化字体（指定编码为Identity-H以支持中文）
-            return PdfFontFactory.createFont(
-                    fontResource.getFile().getAbsolutePath(),
-                    PdfEncodings.IDENTITY_H
-            );
         } catch (IOException e) {
             log.error("加载字体文件失败，路径：{}", fontPath, e);
             throw new BusinessException(ResultCode.PARAM_ERROR,

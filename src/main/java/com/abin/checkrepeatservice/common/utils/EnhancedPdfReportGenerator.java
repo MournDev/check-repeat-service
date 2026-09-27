@@ -315,7 +315,11 @@ public class EnhancedPdfReportGenerator {
         if (!fontResource.exists()) {
             throw new RuntimeException("字体文件不存在: " + fontPath);
         }
-        return PdfFontFactory.createFont(fontResource.getFile().getAbsolutePath(), PdfEncodings.IDENTITY_H);
+        // 以字节流读取：打包成 fat jar 后资源在 BOOT-INF/classes 内，
+        // 无法通过 getFile() 解析为文件路径
+        try (var in = fontResource.getInputStream()) {
+            return PdfFontFactory.createFont(in.readAllBytes(), PdfEncodings.IDENTITY_H);
+        }
     }
     
     private PageSize getPageEnum() {
