@@ -1,5 +1,6 @@
-# Maven / Gradle
-target/
+# Maven / Gradle（保留 jar，其余不入构建上下文）
+target/*
+!target/*.jar
 !.mvn/wrapper/maven-wrapper.jar
 *.war
 
