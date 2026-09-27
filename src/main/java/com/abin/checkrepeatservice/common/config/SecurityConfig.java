@@ -83,6 +83,8 @@ public class SecurityConfig {
                                 "/api/papers/**",
                                 "/api/file/**",
                                 "/api/minio/**").permitAll()
+                        // 容器 healthcheck 与 deploy.sh 都用它做探活，必须匿名可访问
+                        .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         // 学生接口：仅学生角色可访问
                         .requestMatchers("/api/student/**").hasAuthority("STUDENT")
                         // 教师接口：仅教师角色可访问
