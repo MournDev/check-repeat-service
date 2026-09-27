@@ -82,9 +82,21 @@ sed -i "s|<CHANGE_ME_MYSQL_PASSWORD>|$(openssl rand -hex 16)|; \
 # 邮件账号需手工填（QQ 邮箱 SMTP 授权码）
 vi /usr/local/check-repeat/.env
 chmod 600 /usr/local/check-repeat/.env
+
+# 属主交给 Jenkins 容器内的用户，否则流水线写不进来（原因见下）
+chown -R 1000:1000 /usr/local/check-repeat
 ```
 
 `.env` 不进版本库（已在 `.gitignore` 中），模板见仓库根目录 `.env.example`。
+
+> **为什么必须 chown**：Jenkins 容器以官方镜像的 `jenkins` 用户运行（uid 1000），而 `/usr/local/check-repeat` 是 root 建的。流水线里有两步要**写**这个目录——同步 `deploy.sh` / compose 文件，以及 `deploy.sh` 里 `sed -i` 改 `.env`。属主不对，第一次构建就会停在「同步部署文件」阶段报 permission denied。
+> `1000:1000` 取自官方镜像的 `jenkins` 用户。构建完自定义镜像后可确认一次：
+>
+> ```bash
+> docker run --rm --entrypoint id jenkins-custom:lts-jdk17   # 期望 uid=1000 gid=1000
+> ```
+>
+> `chmod 600` 依然保留：`.env` 只有 Jenkins 用户和 root 能读。
 
 > 注意 `MYSQL_PASSWORD` / `REDIS_PASSWORD` / `MINIO_ROOT_PASSWORD` 的值必须与中间件容器**实际**生效的口令一致，否则 backend 连不上。中间件口令在 `/opt/check-repeat/` 那份 compose（或其 `.env`）里。
 
@@ -133,11 +145,28 @@ docker run -d --name jenkins --restart unless-stopped \
 2. **`--memory 1536m`**：必须同时容纳 Jenkins JVM（384m）和它拉起的 Maven JVM（512m）。给少了构建时容器会被 OOM。
 3. **`-v /usr/local/check-repeat:/usr/local/check-repeat` 路径必须完全一致**。Docker-out-of-Docker 下，`docker compose` 的路径是由**宿主 daemon** 解析的；路径不一致，compose 里的 bind mount 会指向容器内不存在的目录，部署静默失败。
 
+启动后先确认容器能真的操作 docker（不必等到构建失败才发现）：
+
+```bash
+ls -l /var/run/docker.sock              # 宿主上，确认组是 docker（GID 与 --group-add 一致）
+docker exec jenkins docker ps           # 容器内能列出容器才算通
+```
+
 ### 3. 初始化
+
+Maven 镜像配置靠官方镜像的 `ref` 机制（`/usr/share/jenkins/ref/` 复制进 `JENKINS_HOME`）落地，**但 `JENKINS_HOME` 已存在时该机制不保证生效**。所以不要只看它，直接确认；缺了就手工放一份：
 
 ```bash
 docker exec jenkins cat /var/jenkins_home/.m2/settings.xml   # 应看到阿里云镜像配置
+
+# 若上一条报 No such file，手工补：
+docker exec -u root jenkins sh -c \
+  'mkdir -p /var/jenkins_home/.m2 && \
+   cp /usr/share/jenkins/ref/.m2/settings.xml /var/jenkins_home/.m2/settings.xml && \
+   chown -R jenkins:jenkins /var/jenkins_home/.m2'
 ```
+
+漏了这一步不会构建失败，但 Maven 会走官方 central，在 2C4G 上拉依赖会明显变慢。
 
 若 Job 与插件是新建的，安装：`Pipeline`、`Git`、`Generic Webhook Trigger`、`Docker Pipeline`、`Credentials Binding`、`Workspace Cleanup`。
 
