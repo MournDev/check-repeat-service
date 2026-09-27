@@ -73,7 +73,7 @@ services:
       # 768m 堆足够且留出构建期余量。上线后用 docker stats 观察再决定是否上调。
       JAVA_OPTS: >-
         -Xms256m -Xmx768m -XX:MaxMetaspaceSize=192m
-        -XX:+UseG1GC -XX:+MaxGCPauseMillis=200
+        -XX:+UseG1GC -XX:MaxGCPauseMillis=200
         -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/data/dumps
       # 时区
       TZ: Asia/Shanghai
