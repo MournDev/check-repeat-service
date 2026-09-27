@@ -99,7 +99,7 @@ spring:
 # 查重算法配置
 check:
   task:
-    max-concurrent: 10
+    max-concurrent: 2
     timeout: 3600000
     temp-file-path: /data/check-temp/
   simhash:
@@ -134,7 +134,7 @@ admin:
     default-enabled: 1
   system-param:
     max-paper-size: 209715200
-    max-concurrent-check: 10
+    max-concurrent-check: 2
   jwt-expiration: 86400000
 
 # MyBatis-Plus配置

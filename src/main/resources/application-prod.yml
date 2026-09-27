@@ -53,7 +53,7 @@ spring:
   # Redis 缓存配置
   data:
     redis:
-      host: ${REDIS_HOST:192.168.30.130}
+      host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:123456}
       database: 0
@@ -63,14 +63,6 @@ spring:
           max-active: 16
           max-idle: 16
           min-idle: 4
-# Redisson 配置（关键！）
-redisson:
-  config: |
-    singleServerConfig:
-      address: "redis://${REDIS_HOST:192.168.30.130}:${REDIS_PORT:6379}"
-      password: "${REDIS_PASSWORD:123456}"
-      connectionPoolSize: 64
-      connectionMinimumIdleSize: 10
 
   # JWT 配置（密钥必须通过环境变量设置）
   jwt:
@@ -104,10 +96,19 @@ redisson:
       content-header: "尊敬的用户：<br><br>您有一条新的系统通知，请查收：<br><br>"
       content-footer: "<br><br>此邮件为系统自动发送，请勿回复。如需帮助，请联系管理员。<br>论文查重系统团队"
 
+# Redisson 配置（关键！）
+redisson:
+  config: |
+    singleServerConfig:
+      address: "redis://${REDIS_HOST:localhost}:${REDIS_PORT:6379}"
+      password: "${REDIS_PASSWORD:123456}"
+      connectionPoolSize: 64
+      connectionMinimumIdleSize: 10
+
 # 查重算法配置
 check:
   task:
-    max-concurrent: 10
+    max-concurrent: 2
     timeout: 3600000
     temp-file-path: /data/check-temp/
   simhash:
@@ -209,7 +210,7 @@ admin:
     default-enabled: 1
   system-param:
     max-paper-size: 209715200
-    max-concurrent-check: 10
+    max-concurrent-check: 2
   jwt-expiration: 86400000
 
 # 文件上传配置
