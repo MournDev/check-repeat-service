@@ -181,7 +181,6 @@ public class AutoAssignmentServiceImpl implements AutoAssignmentService {
             history.setStrategy(config.getStrategy());
             history.setStatus("running");
             history.setOperatorId(getCurrentOperatorId());
-            history.setCreateTime(LocalDateTime.now());
             history.setUpdateTime(LocalDateTime.now());
             history.setIsDeleted(0);
             autoAssignmentHistoryMapper.insert(history);
@@ -604,7 +603,6 @@ public class AutoAssignmentServiceImpl implements AutoAssignmentService {
         config.setDescription(description);
         config.setConfigType(type);
         config.setIsEnabled(1);
-        config.setCreateTime(LocalDateTime.now());
         config.setUpdateTime(LocalDateTime.now());
         config.setIsDeleted(0);
         autoAssignmentConfigMapper.insert(config);

@@ -37,11 +37,11 @@ public class SystemConfig {
     private String description;
     
     /**
-     * 创建时间
+     * 创建时间（由库的 DEFAULT CURRENT_TIMESTAMP 填充，调用方【不要】再 setCreateTime）
      */
-    @TableField(value = "create_time", fill = FieldFill.INSERT)
+    @TableField("create_time")
     private LocalDateTime createTime;
-    
+
     /**
      * 更新时间
      */

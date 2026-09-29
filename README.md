@@ -14,6 +14,7 @@
 - **数据统计**：论文提交趋势、查重统计、审核效率分析
 - **监控告警**：系统性能监控、安全审计、健康检查
 - **规则配置**：查重规则设置、比對库管理、系统参数配置
+- **通知管理**：站内通知的查询/筛选、已读标记、批量删除、发送测试通知（`/api/notices/*`）
 
 ### 学生功能
 - **论文管理**：论文提交、版本管理、修改申请、撤回功能
@@ -187,6 +188,7 @@ docker run -d -p 8080:8080 --name check-repeat-service check-repeat-service
 | 公共接口 | `/api/common/*` |
 | 查重检测 | `/api/detection/*` |
 | 文件操作 | `/api/file/*` |
+| 通知管理（仅 ADMIN） | `/api/notices/*` |
 
 详细API文档可通过Swagger UI访问（部署后访问 `/swagger-ui.html`）。
 
@@ -219,6 +221,8 @@ docker run -d -p 8080:8080 --name check-repeat-service check-repeat-service
 - `check_result` - 查重结果表
 - `teacher_allocation_record` - 教师分配记录表
 - `review_record` - 审核记录表
+- `sys_notice` - 站内通知表（通知管理模块，含 `priority` / `related_id` / `related_type`）
+- `sys_notice_log` - 通知邮件发送日志表
 
 ## 许可证
 

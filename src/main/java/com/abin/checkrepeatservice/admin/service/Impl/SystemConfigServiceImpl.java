@@ -56,7 +56,6 @@ public class SystemConfigServiceImpl implements SystemConfigService {
                 configEntity.setConfigKey(PERFORMANCE_CONFIG_KEY);
                 configEntity.setConfigValue(configJson);
                 configEntity.setDescription("系统性能配置");
-                configEntity.setCreateTime(LocalDateTime.now());
                 configEntity.setUpdateTime(LocalDateTime.now());
                 configEntity.setIsDeleted(0);
                 systemConfigMapper.insert(configEntity);
@@ -228,7 +227,6 @@ public class SystemConfigServiceImpl implements SystemConfigService {
                 newConfig.setConfigKey(configKey);
                 newConfig.setConfigValue(configValue);
                 newConfig.setDescription(description);
-                newConfig.setCreateTime(LocalDateTime.now());
                 newConfig.setUpdateTime(LocalDateTime.now());
                 newConfig.setIsDeleted(0);
                 systemConfigMapper.insert(newConfig);

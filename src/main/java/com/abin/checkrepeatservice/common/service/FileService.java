@@ -268,6 +268,7 @@ public class FileService {
 
         // 初始化字数为0，异步更新
         fileInfo.setWordCount(0);
+        // file_info.create_time 是 `DEFAULT NULL`（没有默认值），不能像 SysNotice 那样交给库填充
         fileInfo.setCreateTime(LocalDateTime.now());
         fileInfo.setUpdateTime(LocalDateTime.now());
 

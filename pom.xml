@@ -263,13 +263,6 @@
             <version>2.3.1</version>
         </dependency>
 
-        <!-- 文本处理工具 -->
-        <dependency>
-            <groupId>org.apache.commons</groupId>
-            <artifactId>commons-text</artifactId>
-            <version>1.11.0</version>
-        </dependency>
-
         <!-- 数学计算（余弦相似度） -->
         <dependency>
             <groupId>org.apache.commons</groupId>
@@ -304,12 +297,6 @@
     <dependency>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-aop</artifactId>
-    </dependency>
-
-    <!-- Micrometer核心依赖 -->
-    <dependency>
-        <groupId>io.micrometer</groupId>
-        <artifactId>micrometer-core</artifactId>
     </dependency>
     </dependencies>
 

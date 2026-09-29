@@ -301,6 +301,7 @@ docker exec -it check-repeat-mysql mysql -uroot -p     # 进数据库
 
 - **新搭环境**：建好空库后执行一次 `db/init.sql`，即可建齐全部表（脚本开头是 `DROP TABLE IF EXISTS`，空库直接跑）。
 - **改结构**：编辑 `db/init.sql` 保持一致，**再另出一份只含本次变更的 ALTER 脚本**手工对线上库执行——整份脚本含 `DROP TABLE IF EXISTS`，有数据的库不能重跑。
+- **`create_time` 的库默认值现在是「承重」的**：`sys_notice`、`system_config`、`auto_assignment_config`、`auto_assignment_history` 的插入不再由代码赋值，改由 `DEFAULT CURRENT_TIMESTAMP` 填充（实体上去掉了 `fill = INSERT`，理由见 `SysNotice.createTime` 注释）。后续 ALTER **不要去掉这个默认值**，否则插入会写入 NULL。例外：`file_info.create_time` 是 `DEFAULT NULL`，其插入路径仍显式赋值，不能照搬这条约定。
 
 ### 库名
 

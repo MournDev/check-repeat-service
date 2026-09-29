@@ -12,6 +12,7 @@ The Thesis Plagiarism Check Service is an academic paper management system built
 - **Data Statistics**: Paper submission trends, plagiarism check statistics, review efficiency analysis
 - **Monitoring & Alerts**: System performance monitoring, security audit, health checks
 - **Rule Configuration**: Plagiarism check rule settings, reference database management, system parameter configuration
+- **Notice Management**: Query/filter site notices, mark as read, batch delete, send test notices (`/api/notices/*`)
 
 ### Student Functions
 - **Paper Management**: Paper submission, version control, modification requests, withdrawal function
@@ -185,6 +186,7 @@ The system adopts RESTful API design. Main interface prefixes are as follows:
 | Common Interface | `/api/common/*` |
 | Plagiarism Detection | `/api/detection/*` |
 | File Operations | `/api/file/*` |
+| Notice Management (ADMIN only) | `/api/notices/*` |
 
 Detailed API documentation is accessible via Swagger UI (access `/swagger-ui.html` after deployment).
 
@@ -217,6 +219,8 @@ Main data tables:
 - `check_result` - Plagiarism Check Result Table
 - `teacher_allocation_record` - Advisor Assignment Record Table
 - `review_record` - Review Record Table
+- `sys_notice` - Site Notice Table (notice management module; includes `priority` / `related_id` / `related_type`)
+- `sys_notice_log` - Notice Email Log Table
 
 ## License
 

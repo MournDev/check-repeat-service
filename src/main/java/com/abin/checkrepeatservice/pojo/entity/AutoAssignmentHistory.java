@@ -91,11 +91,10 @@ public class AutoAssignmentHistory implements Serializable {
     private String remark;
     
     /**
-     * 创建时间
+     * 创建时间（由库的 DEFAULT CURRENT_TIMESTAMP 填充，调用方【不要】再 setCreateTime）
      */
-    @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;
-    
+
     /**
      * 更新时间
      */
