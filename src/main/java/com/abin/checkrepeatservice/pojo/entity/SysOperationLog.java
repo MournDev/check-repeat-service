@@ -78,17 +78,4 @@ public class SysOperationLog extends BaseEntity {
      */
     @TableField(value = "update_time", fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updateTime;
-    
-    // 添加审计字段
-    /**
-     * 创建人ID
-     */
-    @TableField("created_by")
-    private Long createdBy;
-
-    /**
-     * 更新人ID
-     */
-    @TableField("updated_by")
-    private Long updatedBy;
 }

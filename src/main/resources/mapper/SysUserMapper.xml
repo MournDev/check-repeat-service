@@ -18,13 +18,9 @@
         DISTINCT su.id, su.real_name, su.user_type, su.phone, su.email
         FROM
         sys_user su
-        <!-- 若传了 majorId，关联用户-专业表（筛选负责该专业的教师）；否则不关联 -->
-        <if test="majorId != null">
-            INNER JOIN sys_user_major sum ON su.id = sum.user_id
-        </if>
         WHERE
-        <!-- 1. 固定筛选：仅查询教师（user_type=2）、未删除（is_deleted=0） -->
-        su.user_type = 2
+        <!-- 1. 固定筛选：仅查询教师（user_type='TEACHER'）、未删除（is_deleted=0） -->
+        su.user_type = 'TEACHER'
         AND su.is_deleted = 0
 
         <!-- 2. 动态筛选：若传了 teacherId，优先筛选该教师（单独统计用） -->
@@ -34,7 +30,7 @@
 
         <!-- 3. 动态筛选：若传了 majorId 且未传 teacherId，筛选负责该专业的教师 -->
         <if test="majorId != null and teacherId == null">
-            AND sum.major_id = #{majorId}
+            AND su.major_id = #{majorId}
         </if>
 
         <!-- 排序：按教师姓名升序（统计展示更整齐） -->
@@ -48,7 +44,7 @@
         sys_user su
         WHERE
         <!-- 1. 固定条件：仅统计“学生”且“未删除” -->
-        su.user_type = 1  <!-- user_type=1 约定为学生 -->
+        su.user_type = 'STUDENT'
         AND su.is_deleted = 0  <!-- 排除软删除学生 -->
 
         <!-- 2. 动态条件：若传了 majorId，筛选该专业的学生 -->

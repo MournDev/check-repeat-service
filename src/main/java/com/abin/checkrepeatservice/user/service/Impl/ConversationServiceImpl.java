@@ -41,7 +41,7 @@ public class ConversationServiceImpl extends ServiceImpl<ConversationMapper, Con
 
         // 只查询用户参与的会话
         wrapper.inSql(Conversation::getId,
-                "SELECT conversation_id FROM conversation_member WHERE user_id = " + userId + " AND is_deleted = 0");
+                "SELECT conversation_id FROM conversation_members WHERE user_id = " + userId + " AND is_deleted = 0");
 
         return page(page, wrapper);
     }
@@ -133,7 +133,7 @@ public class ConversationServiceImpl extends ServiceImpl<ConversationMapper, Con
 
         // 只搜索用户参与的会话
         wrapper.inSql(Conversation::getId,
-                "SELECT conversation_id FROM conversation_member WHERE user_id = " + userId + " AND is_deleted = 0");
+                "SELECT conversation_id FROM conversation_members WHERE user_id = " + userId + " AND is_deleted = 0");
 
         return page(page, wrapper);
     }
