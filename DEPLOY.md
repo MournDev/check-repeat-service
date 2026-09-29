@@ -214,8 +214,9 @@ Jenkins 自身只绑回环（见 §2），但网关为它开了一个专用 vhos
 # 1. 数据可见：既有上传文件与报告应在容器内 /data 下
 docker exec check-backend ls -l /data/upload | head
 
-# 2. Flyway 正确接管非空库：应显示 baseline 记录，且不重复执行 V1
-docker logs check-backend | grep -i flyway
+# 2. 结构就绪：库里的表结构应与 db/init.sql 一致（Flyway 已关闭，启动日志里不该再有它）
+docker exec -it check-repeat-mysql mysql -uroot -p -e \
+  "show tables from \`check-repeat-system\`" | head
 ```
 
 ## 四、反向代理
@@ -287,21 +288,20 @@ docker exec -it check-repeat-mysql mysql -uroot -p     # 进数据库
 - **不要在两个目录间混用 `-f`**，也不要把 backend 的 compose 文件复制到 `/opt/check-repeat/`。两套栈靠项目名隔离，混用会破坏这个隔离。
 - **改中间件必须用 `-f /opt/check-repeat/docker-compose.yml`**，不要在 `/usr/local/check-repeat` 目录下裸跑 `docker compose`（会命中 backend 那份）。
 - **`/data` 只能挂一个卷**（`check-repeat_app_data`）。yml 里 uploads / reports / check-temp / review-attach 的默认路径都在 `/data` 下；若改成多个独立卷挂到 `/data/upload` 等子路径，既有历史文件会不可见。
-- 表结构由 Flyway 管理，见下方「八、数据库迁移」。
+- 表结构由 `db/init.sql` 手工执行维护，见下方「八、数据库结构」。
 - 数据卷为 Docker 命名卷，`up -d backend` 不会影响数据。备份时请针对 `check-repeat_mysql_data`、`check-repeat_app_data` 等卷操作。
 - 后端日志落在容器 `/app/logs`（已挂 `check-repeat_app_logs` 卷），容器重建不丢。
 - 后端 OOM 时会在 `/data/dumps`（`dumps` 卷）留下堆转储，排查内存问题先看这里。
 - 本地开发构建镜像前必须先 `mvn package`（`Dockerfile` 从 `target/` 取 jar）。
 - **`.env` 中的密钥切勿提交，也不要贴进聊天/工单**。既有部署曾把真实口令作为默认值写进 `application.yml`，这是反面教材。
 
-## 八、数据库迁移
+## 八、数据库结构
 
-表结构由 **Flyway** 管理，迁移脚本在 `src/main/resources/db/migration/`，应用启动时自动执行。
+表结构由**手工执行** `src/main/resources/db/init.sql` 维护，脚本已与实体类对齐。**Flyway 已关闭**（`spring.flyway.enabled: false`）——它只执行 `V<版本>__<描述>.sql` 命名的文件，`init.sql` 不在其命名规则内，所以直接关掉。
 
-- `V1__init.sql` 是历史 mysqldump 转入的基线（结构建表，无数据）
-- 命名规则：`V<版本>__<描述>.sql`，如 `V8__add_paper_review_comment.sql`
-- 执行记录在 `flyway_schema_history` 表
-- **新增迁移从 `V8` 起编号。** 生产库的历史已应用到 V7（见下），而仓库只带 `V1__init.sql`；从 V2 起编号会与库里已应用的版本撞车
+- **新搭环境**：建好空库后执行一次 `db/init.sql`，即可建齐全部表（脚本开头是 `DROP TABLE IF EXISTS`，空库直接跑）。
+- **改结构**：编辑 `db/init.sql` 保持一致，**再另出一份只含本次变更的 ALTER 脚本**手工对线上库执行——整份脚本含 `DROP TABLE IF EXISTS`，有数据的库不能重跑。
+- 库里遗留的 `flyway_schema_history` 表已无意义，忽略它，别据此判断结构状态。
 
 ### 库名
 
@@ -313,45 +313,25 @@ jdbc:mysql://${MYSQL_HOST}:${MYSQL_PORT}/${MYSQL_DATABASE:check-repeat-service}
 
 由 `.env` 的 `MYSQL_DATABASE=check-repeat-system` 覆盖。
 
-### 接管既有非空库
+### 结构以谁为准
 
-`application.yml` 里配了 `baseline-on-migrate=true` + `baseline-version=1`。首次启动时 Flyway 会在非空库上打基线，把现状记为「V1 已应用」，不重复执行 V1。全新空库不会触发基线，会正常从 V1 建表。
+`db/init.sql` 是「旧一体化系统导出的库结构 + 按实体类和 Mapper XML 校正」后的结果，线上库已按它对齐。三方（实体类 / Mapper XML / init.sql）出现不一致时，**先判断方向、不要默认哪边写错了**：历史上就出现过「实体按合并后的结构写、而库还是旧结构」这种整体漂移，当时是按代码方向改的库。
 
-但**这套库的真实历史比仓库超前**：`flyway_schema_history` 里已有 `V1(基线) / V2 / V3 / V4 / V7`，而仓库只带 `V1__init.sql`。其中有两条不可信的证据——`V7` 的源文件在任何地方都找不到（旧源码目录里也没有），`V2` 的 `checksum` 是 `NULL`（正常应用的迁移一定写 checksum，V3/V4 就有）。说明这张历史表**被人手工改过**，别把它当可信记录。
+动手改结构前，先导出线上实际结构做对照：
 
-所以 `application.yml` 里显式配了下面两项，**不要"顺手修正"回去**：
-
-```yaml
-out-of-order: true          # 允许较小版本号在较大版本之后应用（V7 早于 V3/V4 就是这么产生的）
-validate-on-migrate: false  # 关掉启动校验，否则会以「Detected applied migration not resolved locally」直接失败
+```bash
+docker exec check-repeat-mysql sh -c \
+  'mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --no-data --skip-comments "check-repeat-system"' \
+  > /root/schema-$(date +%F).sql
 ```
 
-代价是：以后有人改了**已应用**的迁移脚本，Flyway 不会再报 checksum 不符。所以「已执行过的文件不能再改」这条纪律现在只能靠自觉——要改就新增一个 V 版本。
+### 变更必须兼容新旧两个版本
 
-> **⚠️ 写 V8+ 迁移时，要照「现网实际表结构」写，不能照 `V1__init.sql` 写。**
-> 既有库是靠基线接管的，Flyway **不会校验**它的结构是否与 `V1__init.sql` 一致。现网库是 6 周前用旧 `init.sql` 建的，期间可能存在手工改表，两者很可能已经漂移。动手前先导出实际结构：
->
-> ```bash
-> docker exec check-repeat-mysql sh -c \
->   'mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --no-data --skip-comments "check-repeat-system"' \
->   > /root/schema-$(date +%F).sql
-> ```
-
-### 迁移必须兼容新旧两个版本
-
-这是由 `deploy.sh` 的自动回滚决定的：迁移一旦执行就已提交且无法撤销（Flyway 社区版没有 undo），而健康检查失败会回滚应用镜像，于是旧代码会运行在新表结构上。所以：
+这是由 `deploy.sh` 的自动回滚决定的：DDL 一旦执行就无法撤销，而健康检查失败会回滚应用镜像，于是旧代码会运行在新结构上。所以：
 
 - 加表、加**可空**字段、加索引 → 随时可以
 - **删表、删字段、改字段类型、重命名字段、加 NOT NULL 约束 → 必须拆成两次发布**：先发一个不再读写该字段的版本，下个版本再真正删除
 
-### 重迁移注意
+### 大表 DDL 先手工做
 
-迁移跑在应用启动阶段，而 healthcheck 的 `start_period` 是 120 秒。大表加索引这类耗时操作可能导致健康检查超时、被误判为部署失败并触发回滚。这类迁移建议上线前手工先执行，再走正常部署。
-
-手工查看迁移状态：
-
-```bash
-docker logs check-backend | grep -i flyway
-docker exec -it check-repeat-mysql mysql -uroot -p -e \
-  "select version, description, success, installed_on from \`check-repeat-system\`.flyway_schema_history order by installed_rank"
-```
+healthcheck 的 `start_period` 是 120 秒。大表加索引这类耗时操作会让启动变慢、可能被误判为部署失败并触发回滚，建议上线前手工先执行。
