@@ -1,14 +1,39 @@
 -- =====================================================================
--- V8: 让线上库结构追上代码（实体类 + Mapper XML）的预期
+-- 【现网库专用】存量结构对齐脚本 —— 手工在 Navicat 里对线上库执行一次
 --
--- 背景：V1 是从旧的一体化系统导出的库结构；本仓库的实体类与 Mapper 是按
---       另一套「教师/学生属性合并进 sys_user」的结构写的。两者差异会让
---       MyBatis-Plus 的 selectById/selectList（按实体拼全列）报 Unknown column。
---       V1 已打基线（checksum 会被校验），因此只能新增迁移，绝不改动 V1。
+-- 这个目录（db/）不是 Flyway 的扫描路径（配置是 classpath:db/migration），
+-- 所以本文件不会被应用自动执行，也不会进打包逻辑之外的任何流程。
+-- 千万不要把它挪进 db/migration/，否则会与 V1 里的同名建表重复。
 --
--- 本文件只做「库向代码对齐」，不含破坏性删表：
---   teacher_info / student_info 保留（本轮只做数据回填，不删除）。
+-- 背景：V1__init.sql 已把「教师/学生属性合并进 sys_user」等结构改进去了，
+--       所以：
+--         · 空库   → 直接由 V1 建好，无需本文件；
+--         · 存量库 → 缺的正是本文件里这些 DDL，需要手工执行一次。
+--
+-- 执行方式：先跑下面的「0. 自检」，确认各项都没到位，再从上往下整体执行。
+--           若自检显示某项已经生效，请把对应语句跳过（MySQL 不支持
+--           ADD COLUMN IF NOT EXISTS，重复执行会报 Duplicate column name）。
+--
+-- 无需写入 flyway_schema_history：V8 迁移文件已删除、内容并入 V1，
+-- 线上不存在"待记录"的迁移；硬塞一行 version='8' 反而会让将来真正的 V8
+-- 被 Flyway 当成"已执行"而静默跳过。
 -- =====================================================================
+
+
+-- ---------------------------------------------------------------------
+-- 0. 自检（先单独跑这一段看结果；全部符合预期再执行 1~6）
+--    预期：以下 5 条返回的行数都为 0（即这些列/表都还不存在）
+-- ---------------------------------------------------------------------
+-- SELECT COUNT(*) FROM information_schema.COLUMNS
+--  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sys_user'      AND COLUMN_NAME = 'professional_title';
+-- SELECT COUNT(*) FROM information_schema.COLUMNS
+--  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sys_user'      AND COLUMN_NAME = 'max_review_count';
+-- SELECT COUNT(*) FROM information_schema.COLUMNS
+--  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'compare_lib'   AND COLUMN_NAME = 'create_by';
+-- SELECT COUNT(*) FROM information_schema.COLUMNS
+--  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'paper_submit'  AND COLUMN_NAME = 'paper_title';
+-- SELECT COUNT(*) FROM information_schema.TABLES
+--  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'teacher_audit';
 
 
 -- ---------------------------------------------------------------------
@@ -110,7 +135,7 @@ UPDATE `paper_submit` ps
    SET ps.paper_title = pi.paper_title
  WHERE ps.paper_title IS NULL;
 
--- 回填年级：取自学生用户
+-- 回填年级：取自学生用户（依赖第 1 步已把 student_info.grade 回填进 sys_user）
 UPDATE `paper_submit` ps
   JOIN `sys_user` u ON ps.student_id = u.id
    SET ps.grade = u.grade
