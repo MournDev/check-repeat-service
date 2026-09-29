@@ -214,7 +214,7 @@ Jenkins 自身只绑回环（见 §2），但网关为它开了一个专用 vhos
 # 1. 数据可见：既有上传文件与报告应在容器内 /data 下
 docker exec check-backend ls -l /data/upload | head
 
-# 2. 结构就绪：库里的表结构应与 db/init.sql 一致（Flyway 已关闭，启动日志里不该再有它）
+# 2. 结构就绪：库里的表结构应与 db/init.sql 一致
 docker exec -it check-repeat-mysql mysql -uroot -p -e \
   "show tables from \`check-repeat-system\`" | head
 ```
@@ -297,11 +297,10 @@ docker exec -it check-repeat-mysql mysql -uroot -p     # 进数据库
 
 ## 八、数据库结构
 
-表结构由**手工执行** `src/main/resources/db/init.sql` 维护，脚本已与实体类对齐。**Flyway 已关闭**（`spring.flyway.enabled: false`）——它只执行 `V<版本>__<描述>.sql` 命名的文件，`init.sql` 不在其命名规则内，所以直接关掉。
+表结构由**手工执行** `src/main/resources/db/init.sql` 维护，脚本已与实体类对齐。项目不使用迁移框架。
 
 - **新搭环境**：建好空库后执行一次 `db/init.sql`，即可建齐全部表（脚本开头是 `DROP TABLE IF EXISTS`，空库直接跑）。
 - **改结构**：编辑 `db/init.sql` 保持一致，**再另出一份只含本次变更的 ALTER 脚本**手工对线上库执行——整份脚本含 `DROP TABLE IF EXISTS`，有数据的库不能重跑。
-- 库里遗留的 `flyway_schema_history` 表已无意义，忽略它，别据此判断结构状态。
 
 ### 库名
 

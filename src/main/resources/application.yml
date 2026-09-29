@@ -44,11 +44,6 @@ spring:
       leak-detection-threshold: 60000
       connection-test-query: SELECT 1
 
-  # 数据库结构由 src/main/resources/db/init.sql 手工执行维护，不使用 Flyway。
-  # （Flyway 只执行 V<版本>__<描述>.sql 命名的文件，init.sql 它扫不到，故直接关掉。）
-  flyway:
-    enabled: false
-
   # 文件上传配置
   servlet:
     multipart:
