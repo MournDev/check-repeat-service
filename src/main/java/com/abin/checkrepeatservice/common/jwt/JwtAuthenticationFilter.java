@@ -30,11 +30,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     @Resource
     private UserDetailsServiceImpl userDetailsService;
 
-    // 从配置文件获取JWT请求头与前缀
-    @Value("${jwt.token-header:Authorization}")
+    // 从配置文件获取JWT请求头与前缀（键与 JwtProperties 保持一致：spring.jwt.*）
+    @Value("${spring.jwt.token-header:Authorization}")
     private String tokenHeader;
 
-    @Value("${jwt.token-prefix:Bearer }")
+    @Value("${spring.jwt.token-prefix:Bearer}")
     private String tokenPrefix;
 
     @Override
@@ -83,11 +83,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private String parseJwt(HttpServletRequest request) {
         String headerAuth = request.getHeader(tokenHeader);
         if (StringUtils.hasText(headerAuth)) {
-            // 移除Bearer前缀（如果存在）
-            if (headerAuth.startsWith(tokenPrefix + " ")) {
-                headerAuth = headerAuth.substring(tokenPrefix.length() + 1);
+            // 移除前缀（如果存在）
+            // tokenPrefix 可配置：先去掉尾随空格再比较，兼容 "Bearer" 与 "Bearer " 两种写法
+            String prefix = tokenPrefix == null ? "" : tokenPrefix.trim();
+            if (!prefix.isEmpty() && headerAuth.startsWith(prefix)) {
+                headerAuth = headerAuth.substring(prefix.length());
             }
-            return headerAuth;
+            // 再去除可能残留的空格；未带前缀的裸 token 原样返回
+            return headerAuth.trim();
         }
         return null;
     }
