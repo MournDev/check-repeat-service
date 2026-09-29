@@ -48,11 +48,4 @@ public class CheckProgressWebSocket {
             log.error("STOMP 消息推送失败 - 任务 ID: {}", taskId, e);
         }
     }
-
-    /**
-     * 广播消息（用于系统通知）
-     */
-    public void broadcast(String message) {
-        messagingTemplate.convertAndSend("/topic/system-notify", message);
-    }
 }

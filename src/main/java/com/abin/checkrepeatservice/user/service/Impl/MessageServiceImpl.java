@@ -3,6 +3,8 @@ package com.abin.checkrepeatservice.user.service.Impl;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.constant.DictConstants;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
+import com.abin.checkrepeatservice.common.websocket.WebSocketMessage;
+import com.abin.checkrepeatservice.common.websocket.WebSocketSender;
 import com.abin.checkrepeatservice.pojo.entity.MessageTemplate;
 import com.abin.checkrepeatservice.pojo.entity.SystemMessage;
 import com.abin.checkrepeatservice.user.dto.MessageSendDTO;
@@ -30,6 +32,9 @@ public class MessageServiceImpl implements MessageService {
 
     @Resource
     private MessageTemplateMapper messageTemplateMapper;
+
+    @Resource
+    private WebSocketSender webSocketSender;
 
     @Override
     public Result<PageResultVO<SystemMessage>> getMessageList(Long userId, String messageType,
@@ -136,11 +141,35 @@ public class MessageServiceImpl implements MessageService {
             message.setUpdateTime(LocalDateTime.now());
 
             int result = systemMessageMapper.insert(message);
-            return result > 0 ? Result.success( "消息发送成功", true) : Result.error(ResultCode.SYSTEM_ERROR,"消息发送失败");
+            if (result > 0) {
+                pushNotification(message);
+                return Result.success("消息发送成功", true);
+            }
+            return Result.error(ResultCode.SYSTEM_ERROR,"消息发送失败");
 
         } catch (Exception e) {
             log.error("发送站内信失败 - 接收者: {}, 标题: {}", message.getReceiverId(), message.getTitle(), e);
             return Result.error(ResultCode.SYSTEM_ERROR,"消息发送异常");
+        }
+    }
+
+    /**
+     * 站内信落库后实时推送给接收者（前端订阅 /user/queue/messages）
+     *
+     * 推送只是"锦上添花"：接收者不在线时 WebSocketSender 会直接返回，
+     * 消息本身已在库里，前端下次拉未读数就能看到。因此这里的任何异常
+     * 都只记日志，绝不能影响消息发送的结果。
+     */
+    private void pushNotification(SystemMessage message) {
+        try {
+            WebSocketMessage wsMessage = new WebSocketMessage();
+            wsMessage.setType("NOTIFICATION");
+            wsMessage.setContent(message);
+            wsMessage.setSenderId(message.getSenderId());
+            wsMessage.setReceiverId(message.getReceiverId());
+            webSocketSender.sendToUser(message.getReceiverId(), "/queue/messages", wsMessage);
+        } catch (Exception e) {
+            log.warn("站内信实时推送失败（不影响消息入库）- 接收者: {}", message.getReceiverId(), e);
         }
     }
 

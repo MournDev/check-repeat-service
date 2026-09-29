@@ -91,6 +91,11 @@ public class SecurityConfig {
                         .requestMatchers("/api/teacher/**").hasAuthority("TEACHER")
                         // 管理员接口：仅管理员角色可访问
                         .requestMatchers("/api/admin/**").hasAuthority("ADMIN")
+                        // 管理端通知管理接口（不在 /api/admin/** 下，需单独列出）
+                        // 这条规则不能省、也不能只靠 NoticeController 上的 @PreAuthorize：
+                        // GlobalExceptionHandler 没有 AccessDeniedException 处理器，方法级安全
+                        // 拒绝会被 Exception 兜底成 HTTP 500；过滤器链上的规则才产生正确的 403
+                        .requestMatchers("/api/notices/**").hasAuthority("ADMIN")
                         // 其他接口需认证
                         .anyRequest().authenticated()
                 )

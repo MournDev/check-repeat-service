@@ -39,11 +39,4 @@ public class CheckProgressWebSocketHandler {
             .build();
         sendProgress(event);
     }
-
-    /**
-     * 广播系统通知
-     */
-    public void broadcast(String message) {
-        checkProgressWebSocket.broadcast(message);
-    }
 }

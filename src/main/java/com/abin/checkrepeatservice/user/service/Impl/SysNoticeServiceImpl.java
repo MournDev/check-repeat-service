@@ -5,7 +5,10 @@ import com.abin.checkrepeatservice.pojo.entity.SysNotice;
 import com.abin.checkrepeatservice.pojo.entity.SysUser;
 import com.abin.checkrepeatservice.user.mapper.SysNoticeMapper;
 import com.abin.checkrepeatservice.user.service.SysNoticeService;
-import com.abin.checkrepeatservice.user.vo.PageResultVO;
+import com.abin.checkrepeatservice.user.vo.NoticeStatsVO;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -14,10 +17,18 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
- * 站内信服务实现（完整版：含原有分页、统计、批量标记逻辑）
+ * 站内信服务实现
+ *
+ * 纪律：每一条查询与写入都必须 eq(SysNotice::getUserId, userId) —— 否则 clearAllNotices
+ * 会清空全表、deleteNotice 能删掉别人的通知。
+ *
+ * create_time 由库的 DEFAULT CURRENT_TIMESTAMP 填充，insert 前【不要】setCreateTime
+ * （原因见 SysNotice.createTime 上的注释）。
  */
 @Slf4j
 @Service
@@ -30,8 +41,13 @@ public class SysNoticeServiceImpl extends ServiceImpl<SysNoticeMapper, SysNotice
     @Resource
     private EmailService emailService;
 
-    // ------------------------------ 新增逻辑：发送通知（站内信+邮箱） ------------------------------
-    @Async("taskExecutor") // 异步执行，避免阻塞主流程
+    // ------------------------------ 发送通知（站内信+邮箱） ------------------------------
+
+    /**
+     * 注意限定符是 asyncExecutor（AsyncConfig 里只定义了 checkTaskExecutor 与 asyncExecutor）。
+     * 原先写的 "taskExecutor" 这个 bean 不存在，一旦有人调用就会因解析不到限定符而抛异常。
+     */
+    @Async("asyncExecutor")
     @Override
     public void sendNotice(Long userId, Integer noticeType, String title, String content, boolean sendEmail) {
         try {
@@ -42,6 +58,8 @@ public class SysNoticeServiceImpl extends ServiceImpl<SysNoticeMapper, SysNotice
             notice.setNoticeTitle(title);
             notice.setNoticeContent(content);
             notice.setIsRead(0); // 初始未读
+            notice.setPriority(0);
+            notice.setIsDeleted(0);
             sysNoticeMapper.insert(notice);
             log.info("站内信保存成功：userId={}, noticeId={}", userId, notice.getId());
 
@@ -67,50 +85,91 @@ public class SysNoticeServiceImpl extends ServiceImpl<SysNoticeMapper, SysNotice
         }
     }
 
+    // ------------------------------ 查询 ------------------------------
+
     @Override
-    public PageResultVO<SysNotice> getUserNoticePage(Long userId, Integer isRead, Integer pageNum, Integer pageSize) {
-        // 1. 参数校验与默认值设置
-        if (pageNum == null || pageNum < 1) pageNum = 1;
-        if (pageSize == null || pageSize < 1 || pageSize > 50) pageSize = 10; // 限制最大每页50条，避免性能问题
-        int start = (pageNum - 1) * pageSize;
+    public Page<SysNotice> getNoticePageForUser(Long userId, Integer noticeType, Integer isRead,
+                                                Integer priority, Integer pageNum, Integer pageSize) {
+        int num = (pageNum == null || pageNum < 1) ? 1 : pageNum;
+        int size = (pageSize == null || pageSize < 1 || pageSize > 100) ? 10 : pageSize;
 
-        // 2. 查询当前页数据
-        List<SysNotice> noticeList = sysNoticeMapper.selectByUserId(userId, isRead, start, pageSize);
+        Page<SysNotice> page = new Page<>(num, size);
+        LambdaQueryWrapper<SysNotice> wrapper = buildUserScopedQuery(userId, noticeType, isRead, priority);
+        // 只按 create_time 排序时，同一秒插入的多条通知顺序不稳定，翻页会重复/漏行，
+        // 所以用 id 兜底做二级排序（雪花 id 单调递增）
+        wrapper.orderByDesc(SysNotice::getCreateTime).orderByDesc(SysNotice::getId);
 
-        // 3. 查询总条数（用于分页计算）
-        Integer totalCount = sysNoticeMapper.countTotalByUserId(userId, isRead);
+        return this.page(page, wrapper);
+    }
 
-        // 4. 组装分页结果VO（前端统一接收格式）
-        return new PageResultVO<>(
-                pageNum,
-                pageSize,
-                totalCount,
-                (totalCount + pageSize - 1) / pageSize, // 总页数（向上取整）
-                noticeList
-        );
+    @Override
+    public NoticeStatsVO getNoticeStats(Long userId) {
+        long total = this.count(buildUserScopedQuery(userId, null, null, null));
+        long unread = this.count(buildUserScopedQuery(userId, null, 0, null));
+        long urgent = this.count(buildUserScopedQuery(userId, null, null, 2));
+        // 已读 = 总数 - 未读，避免再多一次 count；total 与 unread 在同一事务快照内取，
+        // 但两次 count 之间可能有并发写入，极端情况下 read 可能为负，这里兜一下
+        long read = Math.max(total - unread, 0);
+        return new NoticeStatsVO((int) total, (int) unread, (int) urgent, (int) read);
+    }
+
+    @Override
+    public List<SysNotice> getLatestNotices(Long userId, Integer limit) {
+        int size = (limit == null || limit < 1) ? 5 : Math.min(limit, 50);
+        // 第三个参数 false = 不查总数（这里用不上，能省一次 count）
+        Page<SysNotice> page = new Page<>(1, size, false);
+        LambdaQueryWrapper<SysNotice> wrapper = buildUserScopedQuery(userId, null, null, null)
+                .orderByDesc(SysNotice::getCreateTime)
+                .orderByDesc(SysNotice::getId);
+        return this.page(page, wrapper).getRecords();
+    }
+
+    @Override
+    public Map<Integer, Integer> getUnreadCountByPriority(Long userId) {
+        // 固定返回 0/1/2 三个键（无数据时为 0 而不是缺键），前端取值不用做 null 判断
+        Map<Integer, Integer> result = new LinkedHashMap<>();
+        for (int priority = 0; priority <= 2; priority++) {
+            result.put(priority, (int) this.count(buildUserScopedQuery(userId, null, 0, priority)));
+        }
+        return result;
     }
 
     @Override
     public Integer getUnreadNoticeCount(Long userId) {
-        // 直接调用Mapper统计未读数量（仅查未删除+未读的通知）
         return sysNoticeMapper.countUnreadByUserId(userId);
+    }
+
+    // ------------------------------ 标记已读 ------------------------------
+
+    @Override
+    public Integer batchMarkAsRead(List<Long> noticeIds, Long userId) {
+        if (noticeIds == null || noticeIds.isEmpty()) {
+            return 0;
+        }
+        LambdaUpdateWrapper<SysNotice> wrapper = new LambdaUpdateWrapper<>();
+        wrapper.set(SysNotice::getIsRead, 1)
+                .set(SysNotice::getReadTime, LocalDateTime.now())
+                .eq(SysNotice::getUserId, userId)      // 归属校验：只能标记自己的
+                .in(SysNotice::getId, noticeIds)
+                .eq(SysNotice::getIsRead, 0);          // 已读的不重复计入行数
+        return sysNoticeMapper.update(null, wrapper);
     }
 
     @Override
     public boolean markNoticeAsRead(Long noticeId, Long userId) {
         // 1. 先查询通知是否存在（避免无效操作）
         SysNotice notice = sysNoticeMapper.selectById(noticeId);
-        if (notice == null || notice.getIsDeleted() == 1) {
+        if (notice == null || Integer.valueOf(1).equals(notice.getIsDeleted())) {
             log.warn("标记通知已读失败：通知不存在或已删除，noticeId={}", noticeId);
             return false;
         }
         // 2. 权限校验：仅通知所属用户可标记
-        if (!notice.getUserId().equals(userId)) {
+        if (!userId.equals(notice.getUserId())) {
             log.warn("标记通知已读失败：越权操作，noticeId={}, userId={}, ownerId={}", noticeId, userId, notice.getUserId());
             return false;
         }
         // 3. 已读无需重复标记
-        if (notice.getIsRead() == 1) {
+        if (Integer.valueOf(1).equals(notice.getIsRead())) {
             log.info("通知已为已读状态，无需重复标记：noticeId={}", noticeId);
             return true;
         }
@@ -121,7 +180,81 @@ public class SysNoticeServiceImpl extends ServiceImpl<SysNoticeMapper, SysNotice
 
     @Override
     public Integer markAllUnreadAsRead(Long userId) {
-        // 调用Mapper批量更新（仅更新当前用户的未读+未删除通知）
         return sysNoticeMapper.markAllUnreadAsRead(userId, LocalDateTime.now());
+    }
+
+    // ------------------------------ 删除（逻辑删除） ------------------------------
+
+    @Override
+    public Integer deleteNotice(Long noticeId, Long userId) {
+        LambdaQueryWrapper<SysNotice> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(SysNotice::getId, noticeId)
+                .eq(SysNotice::getUserId, userId); // 归属校验：删不到别人的
+        return sysNoticeMapper.delete(wrapper);
+    }
+
+    @Override
+    public Integer batchDeleteNotices(List<Long> noticeIds, Long userId) {
+        if (noticeIds == null || noticeIds.isEmpty()) {
+            return 0;
+        }
+        LambdaQueryWrapper<SysNotice> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(SysNotice::getUserId, userId)
+                .in(SysNotice::getId, noticeIds);
+        return sysNoticeMapper.delete(wrapper);
+    }
+
+    @Override
+    public Integer clearAllNotices(Long userId) {
+        LambdaQueryWrapper<SysNotice> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(SysNotice::getUserId, userId);
+        return sysNoticeMapper.delete(wrapper);
+    }
+
+    // ------------------------------ 测试通知 ------------------------------
+
+    @Override
+    public SysNotice createTestNotice(Long userId, Integer priority) {
+        int effectivePriority = (priority == null) ? 0 : priority;
+        boolean urgent = effectivePriority == 2;
+
+        SysNotice notice = new SysNotice();
+        notice.setUserId(userId);
+        notice.setNoticeType(5); // 5 = 系统通知（与前端 NOTICE_TYPES 对应）
+        notice.setNoticeTitle(urgent ? "【测试】紧急通知" : "【测试】普通通知");
+        notice.setNoticeContent(urgent
+                ? "这是一条紧急优先级的测试通知，由管理端「通知管理」页手动触发。"
+                : "这是一条普通优先级的测试通知，由管理端「通知管理」页手动触发。");
+        notice.setIsRead(0);
+        notice.setPriority(effectivePriority);
+        notice.setIsDeleted(0);
+
+        // 同步插入（不走 sendNotice）：前端拿到 200 后会立刻 fetchList()+fetchStats()，
+        // 异步插入会变成「提示成功但列表是空的」这种竞态
+        this.save(notice);
+        log.info("测试通知写入成功：userId={}, noticeId={}, priority={}", userId, notice.getId(), effectivePriority);
+        return notice;
+    }
+
+    // ------------------------------ 内部工具 ------------------------------
+
+    /**
+     * 构造「限定在当前用户范围内」的基础查询条件。
+     * 三个筛选参数为 null 时表示不筛选，因此统计与列表可以复用同一个方法。
+     */
+    private LambdaQueryWrapper<SysNotice> buildUserScopedQuery(Long userId, Integer noticeType,
+                                                               Integer isRead, Integer priority) {
+        LambdaQueryWrapper<SysNotice> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(SysNotice::getUserId, userId); // 归属范围，任何时候都不能省
+        if (noticeType != null) {
+            wrapper.eq(SysNotice::getNoticeType, noticeType);
+        }
+        if (isRead != null) {
+            wrapper.eq(SysNotice::getIsRead, isRead);
+        }
+        if (priority != null) {
+            wrapper.eq(SysNotice::getPriority, priority);
+        }
+        return wrapper;
     }
 }
