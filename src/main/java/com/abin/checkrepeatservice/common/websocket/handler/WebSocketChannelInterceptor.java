@@ -33,7 +33,9 @@ public class WebSocketChannelInterceptor implements ChannelInterceptor {
             // 处理连接请求
             List<String> authorization = accessor.getNativeHeader("Authorization");
             if (authorization != null && !authorization.isEmpty()) {
-                String token = authorization.get(0).replace("Bearer ", "");
+                // 整头交给 JwtUtils，由它统一剥离 "Bearer " 前缀
+                // （这里原先自己 replace("Bearer ", "")，会连令牌中间的同样字串一起替换掉）
+                String token = authorization.get(0);
                 try {
                     // 验证JWT token
                     Long userId = jwtUtils.getUserIdFromToken(token);

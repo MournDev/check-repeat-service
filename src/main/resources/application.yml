@@ -69,6 +69,10 @@ spring:
     secret-key: ${JWT_SECRET_KEY:paperCheckSystem2024SecretKey123456}
     expiration: 86400000
     token-header: Authorization
+    # 令牌前缀。此前一直缺这一项，JwtProperties.tokenPrefix 连着是 null，
+    # 过滤器和 JwtUtils 各自悄悄回退到默认值 "Bearer" —— 看似能跑，实则约定没有落处。
+    # 显式写出来，两端认的才是同一个前缀。
+    token-prefix: Bearer
 
   # 邮件发送配置
   mail:

@@ -28,6 +28,43 @@ public class JwtUtils {
     }
 
     /**
+     * 归一化令牌：去掉可能存在的令牌前缀（默认 Bearer，取自 spring.jwt.token-prefix）与首尾空白。
+     *
+     * 背景：调用方有两种写法 —— 一部分直接把 Authorization 请求头整体传进来
+     * （形如 "Bearer eyJhbGci..."），另一部分已经自己剥过前缀。本类是所有调用方的
+     * 唯一入口，在这里统一归一化，两种写法就都能正常工作，也避免每个 Controller
+     * 各自手写 substring(7) / replace("Bearer ", "") 再出偏差。
+     *
+     * 注：前缀后必须是空白或字符串结束才认为是真正的前缀，
+     * 这样 "BearerXxx" 这类令牌不会被误截断。
+     */
+    public String normalizeToken(String token) {
+        if (token == null) {
+            return null;
+        }
+        String value = token.trim();
+        if (value.isEmpty()) {
+            return value;
+        }
+
+        String prefix = jwtProperties.getTokenPrefix();
+        // 配置未显式给出时与 JwtAuthenticationFilter 的默认值保持一致
+        if (!StringUtils.hasText(prefix)) {
+            prefix = "Bearer";
+        }
+        prefix = prefix.trim();
+
+        int prefixLength = prefix.length();
+        if (prefixLength > 0
+                && value.length() > prefixLength
+                && value.regionMatches(true, 0, prefix, 0, prefixLength)
+                && Character.isWhitespace(value.charAt(prefixLength))) {
+            value = value.substring(prefixLength).trim();
+        }
+        return value;
+    }
+
+    /**
      * 生成JWT token
      */
     public String generateToken(Long userId, String username, String roleCode) {
@@ -53,10 +90,11 @@ public class JwtUtils {
             SecretKey key = getSecretKey();
 
             // 2. 解析Token（校验签名、过期时间）
+            //    先归一化：调用方可能传的是整个 Authorization 头（含 "Bearer " 前缀）
             Claims claims = Jwts.parser()
                     .verifyWith(key)
                     .build()
-                    .parseSignedClaims(token)
+                    .parseSignedClaims(normalizeToken(token))
                     .getPayload();
             // 3. 从payload中获取用户ID（主题字段=用户ID，转为Long类型）
             return claims.get("userId", Long.class);
@@ -86,7 +124,7 @@ public class JwtUtils {
         return Jwts.parser()
                 .verifyWith(getSecretKey())
                 .build()
-                .parseSignedClaims(token)
+                .parseSignedClaims(normalizeToken(token))
                 .getPayload();
     }
 
@@ -147,10 +185,11 @@ public class JwtUtils {
      * 验证token格式
      */
     public boolean validateTokenFormat(String token) {
-        if (token == null || token.trim().isEmpty()) {
+        String value = normalizeToken(token);
+        if (value == null || value.isEmpty()) {
             return false;
         }
-        String[] parts = token.split("\\.");
+        String[] parts = value.split("\\.");
         return parts.length == 3; // JWT 应由三部分组成
     }
 
