@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.abin.checkrepeatservice.admin.mapper.AdminReportMapper">
+
+    <!--
+      报告列表与统计共用的关联与筛选条件。
+      check_report 自身只有 task_id/report_no/repeat_details/report_path，
+      论文标题、学生姓名、相似度、查重状态分别在 paper_info、sys_user、check_task 上。
+      筛选值一律用 #{ } 占位，禁止字符串拼接拼接 LIKE（避免 SQL 注入）。
+    -->
+    <sql id="reportJoinAndFilters">
+        FROM check_report r
+        INNER JOIN check_task t ON t.id = r.task_id AND t.is_deleted = 0
+        INNER JOIN paper_info p ON p.id = t.paper_id AND p.is_deleted = 0
+        LEFT JOIN sys_user u ON u.id = p.student_id AND u.is_deleted = 0
+        WHERE r.is_deleted = 0
+        <if test="paperTitle != null and paperTitle != ''">
+            AND p.paper_title LIKE CONCAT('%', #{paperTitle}, '%')
+        </if>
+        <if test="studentName != null and studentName != ''">
+            AND u.real_name LIKE CONCAT('%', #{studentName}, '%')
+        </if>
+        <if test="checkStatus != null and checkStatus != ''">
+            AND t.check_status = #{checkStatus}
+        </if>
+        <if test="minSimilarity != null">
+            AND t.check_rate &gt;= #{minSimilarity}
+        </if>
+        <if test="maxSimilarity != null">
+            AND t.check_rate &lt;= #{maxSimilarity}
+        </if>
+    </sql>
+
+    <!-- 报告列表（分页由 PaginationInnerInterceptor 处理） -->
+    <select id="selectReportPage" resultType="com.abin.checkrepeatservice.admin.vo.AdminReportListItemVO">
+        SELECT
+            r.id           AS id,
+            r.report_no    AS reportNo,
+            p.paper_title  AS paperTitle,
+            u.real_name    AS studentName,
+            t.check_rate   AS similarity,
+            t.end_time     AS checkTime,
+            t.check_status AS status
+        <include refid="reportJoinAndFilters"/>
+        ORDER BY r.create_time DESC
+    </select>
+
+    <!-- 报告统计（聚合无行时 SUM 返回 NULL，统一用 IFNULL 兜底为 0，避免前端 toFixed 报错） -->
+    <select id="selectReportStats" resultType="com.abin.checkrepeatservice.admin.vo.AdminReportStatsVO">
+        SELECT
+            COUNT(*) AS totalReports,
+            IFNULL(SUM(CASE WHEN t.check_status = 'completed' THEN 1 ELSE 0 END), 0) AS completedReports,
+            IFNULL(ROUND(AVG(t.check_rate), 2), 0) AS averageSimilarity,
+            IFNULL(SUM(CASE WHEN t.check_rate &gt; 30 THEN 1 ELSE 0 END), 0) AS highRiskReports
+        <include refid="reportJoinAndFilters"/>
+    </select>
+
+</mapper>

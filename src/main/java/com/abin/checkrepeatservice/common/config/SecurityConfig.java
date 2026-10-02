@@ -77,12 +77,10 @@ public class SecurityConfig {
                 // 配置URL权限规则
                 .authorizeHttpRequests(auth -> auth
                         // 放行公开接口
-                        .requestMatchers(
-                                "/api/auth/**",
-                                "/api/avatar/**",
-                                "/api/papers/**",
-                                "/api/file/**",
-                                "/api/minio/**").permitAll()
+                        // /ws/** 是 SockJS 握手入口，握手走 HTTP 请求，必须在过滤器链上放行，
+                        // 否则 /ws/info 会直接 401。握手放行不等于免鉴权：
+                        // STOMP CONNECT 帧仍由 WebSocketChannelInterceptor 校验 JWT，无有效 token 照样拒绝。
+                        .requestMatchers("/api/auth/**", "/api/avatar/**", "/api/papers/**", "/api/file/**", "/api/minio/**", "/ws/**").permitAll()
                         // 容器 healthcheck 与 deploy.sh 都用它做探活，必须匿名可访问
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         // 学生接口：仅学生角色可访问
@@ -97,8 +95,7 @@ public class SecurityConfig {
                         // 拒绝会被 Exception 兜底成 HTTP 500；过滤器链上的规则才产生正确的 403
                         .requestMatchers("/api/notices/**").hasAuthority("ADMIN")
                         // 其他接口需认证
-                        .anyRequest().authenticated()
-                )
+                        .anyRequest().authenticated())
                 // 注册认证提供者
                 .authenticationProvider(authenticationProvider())
                 // 在UsernamePasswordAuthenticationFilter之前添加JWT认证过滤器
