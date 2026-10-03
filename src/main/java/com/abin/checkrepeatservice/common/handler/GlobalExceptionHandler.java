@@ -8,6 +8,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /**
  * 全局异常处理器：基于ResultCode枚举统一响应格式
@@ -54,7 +55,28 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(result, resultCode.getHttpStatus());
     }
 
-    // -------------------------- 3. 系统异常（兜底处理） --------------------------
+    // -------------------------- 3. 未映射路径（404 而非 500） --------------------------
+    /*
+     * Spring Boot 3 / Spring 6 对匹配不到任何 handler 的请求会抛 NoResourceFoundException
+     * （消息形如 "No static resource api/admin/monitoring/metrics"）。
+     * 没有本方法时它会落到下面的 Exception 兜底，被当成系统异常返回 500 + "系统繁忙"，
+     * 掩盖了「接口不存在」这个真正的原因。此处显式映射为 404。
+     * 不要改用 spring.mvc.throw-exception-if-no-handler-found + 关闭静态资源映射的方案——
+     * 那是为一个 handler 就能解决的问题全局关掉静态资源服务。
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<Result<?>> handleNoResourceFound(NoResourceFoundException e) {
+        log.warn("资源不存在：{}", e.getMessage());
+        ResultCode resultCode = ResultCode.RESOURCE_NOT_FOUND;
+        Result<?> result = Result.error(
+                resultCode.getCode(),
+                resultCode.getDefaultMsg(),
+                null
+        );
+        return new ResponseEntity<>(result, resultCode.getHttpStatus());
+    }
+
+    // -------------------------- 4. 系统异常（兜底处理） --------------------------
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Result<?>> handleSystemException(Exception e) {
         log.error("系统异常：{}", e.getMessage(), e);
