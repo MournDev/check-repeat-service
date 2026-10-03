@@ -50,7 +50,14 @@
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-core</artifactId>
         </dependency>
-        
+
+        <!-- Prometheus 注册表：/actuator/prometheus 端点依赖它，
+             缺少此依赖时该端点 bean 根本不存在，仅配置 exposure 仍会 404 -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
         <!-- JVM系统监控 -->
         <dependency>
             <groupId>io.github.mweirauch</groupId>

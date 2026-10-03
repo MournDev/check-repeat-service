@@ -160,7 +160,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,info,metrics,prometheus
   endpoint:
     health:
       show-details: never
@@ -178,6 +178,15 @@ management:
     metrics:
       export:
         enabled: true
+
+# 响应时间采集配置（供 /api/admin/monitoring/response-time-trend）
+monitoring:
+  response-time:
+    # 分钟桶保留窗口。前端 SystemMonitoring 有 60 分钟选项，故需 >= 60。
+    # 内存上限 ≈ window-minutes × max-samples-per-bucket × 8B，调大会线性增长。
+    window-minutes: 60
+    # 每个分钟桶最多保留的原始耗时样本数（蓄水池采样上限），防止流量尖峰打满堆
+    max-samples-per-bucket: 10000
 
 # 报告模块配置
 report:

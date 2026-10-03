@@ -83,6 +83,12 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/**", "/api/avatar/**", "/api/papers/**", "/api/file/**", "/api/minio/**", "/ws/**").permitAll()
                         // 容器 healthcheck 与 deploy.sh 都用它做探活，必须匿名可访问
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
+                        // Prometheus 抓取端点：限管理员。
+                        // 不放 permitAll——它会暴露 JVM/堆/GC、全部接口路径和业务计数，
+                        // 对匿名调用方是实打实的信息泄露，也与本项目其余部分的 ADMIN-only 姿态不一致。
+                        // 代价：将来真接 Grafana 时抓取端需要带 JWT；若要走内网抓取，
+                        // 更标准的做法是另开 management.server.port 绑内网 + 网络白名单。
+                        .requestMatchers("/actuator/prometheus").hasAuthority("ADMIN")
                         // 学生接口：仅学生角色可访问
                         .requestMatchers("/api/student/**").hasAuthority("STUDENT")
                         // 教师接口：仅教师角色可访问
