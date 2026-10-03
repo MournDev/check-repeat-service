@@ -51,6 +51,17 @@ public class UserDetailsServiceImpl implements UserDetailsService {
         List<GrantedAuthority> authorities = new ArrayList<>();
         authorities.add(new SimpleGrantedAuthority(role.getRoleCode()));
 
+        // 超级管理员额外持有 ADMIN 权限：本类是全项目权限的唯一来源
+        // （JwtAuthenticationFilter 直接取 userDetails.getAuthorities()），而
+        // SecurityConfig 的 /api/admin/** 等规则与 24 处控制器上的 @PreAuthorize
+        // 一律用 hasAuthority("ADMIN") 把关。上面只加了 roleCode，于是 SUPER_ADMIN
+        // 拿不到 ADMIN —— 能登录，却进不了任何后台页面（403 权限不足）。
+        // 在这里补一次等于"超级管理员 ⊇ 管理员"，一处覆盖全部检查点；
+        // 反过来去 24 处逐个追加 SUPER_ADMIN 则漏掉任何一处都会继续 403。
+        if ("SUPER_ADMIN".equalsIgnoreCase(role.getRoleCode())) {
+            authorities.add(new SimpleGrantedAuthority("ADMIN"));
+        }
+
         // 4. 返回Spring Security的UserDetails对象（封装用户信息与权限）
         return new org.springframework.security.core.userdetails.User(
                 sysUser.getUsername(),

@@ -113,7 +113,10 @@ public class UserBusinessInfoUtils {
      */
     public static boolean isAdmin() {
         String roleCode = getCurrentUserRoleCode();
-        return "ADMIN".equals(roleCode);
+        // 超级管理员同样是管理员：它在 UserDetailsServiceImpl 里也持有 ADMIN 权限。
+        // 若这里只认 ADMIN，超管会出现"接口调得通、业务校验却说无权"的半通状态
+        // （本方法被查重报告/查重任务的访问控制使用，超管查看他人报告会被拒）。
+        return "ADMIN".equals(roleCode) || "SUPER_ADMIN".equals(roleCode);
     }
 
     /**
