@@ -44,7 +44,10 @@ public class AssignmentTimeoutTask {
             for (PaperInfo paper : timeoutPapers) {
                 try {
                     // 自动拒绝超时未确认的分配
-                    Result<Boolean> result = teacherAssignmentService.rejectAssignment(
+                    // 走 rejectAssignmentByTimeout 而非 rejectAssignment：数据改动一样，
+                    // 但给学生发的是「超时自动拒绝」那条通知（老师并未操作过，
+                    // 发「指导老师已拒绝接收」会让学生误以为是老师主动拒的）
+                    Result<Boolean> result = teacherAssignmentService.rejectAssignmentByTimeout(
                             paper.getId(),
                             paper.getTeacherId()
                     );

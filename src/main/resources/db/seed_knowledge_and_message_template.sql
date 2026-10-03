@@ -60,12 +60,17 @@ ON DUPLICATE KEY UPDATE
 --      SYSTEM_NOTICE            userName,title,content,noticeType,sendTime[,relatedId]
 --      PAPER_SYSTEM_NOTICE      paperTitle,paperId,title,content,noticeType,sendTime,studentName
 --
--- ★ TEACHER_CONFIRM_NOTICE / TEACHER_REJECT_NOTICE 各有两个发送方，原先传的变量不同：
+-- ★ TEACHER_CONFIRM_NOTICE / TEACHER_REJECT_NOTICE 原先是两个发送方、传的变量还不一样：
 --     InternalMessageNotificationService → studentName,paperTitle,teacherName,+confirmTime/rejectTime
 --     TeacherAssignmentServiceImpl       → paperTitle,teacherName,confirmed,confirmTime
 --   两者只有 paperTitle / teacherName 是共有的，所以模板一度只敢引用这两个变量。
---   现已统一：TeacherAssignmentServiceImpl 改为传与 InternalMessageNotificationService
---   完全相同的键名（并去掉用不上的 confirmed），两个模板可以放心引用上面的完整变量集。
+--   现已合并成一个发送方：TeacherAssignmentServiceImpl.sendConfirmationNoticeToStudent
+--   （传上面那套完整键名，去掉了用不上的 confirmed），
+--   InternalMessageNotificationService 里那两个重复方法已删除。
+--
+--   超时自动拒绝（AssignmentTimeoutTask 每天 2 点）原来走的是通用拒绝路径，
+--   发出去的文案是「指导老师已拒绝接收」；现已改走 rejectAssignmentByTimeout，
+--   发 TIMEOUT_REJECT_NOTICE。此前 TIMEOUT_REJECT_NOTICE 从来没有任何发送方。
 -- ---------------------------------------------------------------------------
 INSERT INTO `message_template`
   (`id`, `template_code`, `template_name`, `template_type`, `title_template`, `content_template`, `is_active`)

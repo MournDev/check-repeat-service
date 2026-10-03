@@ -109,84 +109,14 @@ public class InternalMessageNotificationService {
     }
 
     /**
-     * 发送教师确认通知 - 站内信
-     */
-    public void sendTeacherConfirmNotice(Long paperId, Long studentId, Long teacherId) {
-        try {
-            PaperInfo paper = paperInfoMapper.selectById(paperId);
-            SysUser student = sysUserMapper.selectById(studentId);
-            SysUser teacher = sysUserMapper.selectById(teacherId);
-
-            if (paper == null || student == null || teacher == null) {
-                return;
-            }
-
-            Map<String, Object> params = new HashMap<>();
-            params.put("studentName", student.getRealName());
-            params.put("paperTitle", paper.getPaperTitle());
-            params.put("teacherName", teacher.getRealName());
-            params.put("confirmTime", LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
-
-            Result<Boolean> result = messageService.sendMessageByTemplate(
-                    "TEACHER_CONFIRM_NOTICE",
-                    studentId,
-                    paperId,
-                    DictConstants.RelatedType.PAPER,
-                    params
-            );
-
-            if (result.isSuccess()) {
-                log.info("教师确认站内信通知发送成功 - 论文ID: {}, 学生ID: {}", paperId, studentId);
-            } else {
-                log.warn("教师确认站内信通知发送失败 - 论文ID: {}, 错误: {}", paperId, result.getMessage());
-            }
-
-        } catch (Exception e) {
-            log.error("发送教师确认站内信通知异常 - 论文ID: {}, 老师ID: {}", paperId, teacherId, e);
-        }
-    }
-
-    /**
-     * 发送教师拒绝通知 - 站内信
-     */
-    public void sendTeacherRejectNotice(Long paperId, Long studentId, Long teacherId, String rejectReason) {
-        try {
-            PaperInfo paper = paperInfoMapper.selectById(paperId);
-            SysUser student = sysUserMapper.selectById(studentId);
-            SysUser teacher = sysUserMapper.selectById(teacherId);
-
-            if (paper == null || student == null || teacher == null) {
-                return;
-            }
-
-            Map<String, Object> params = new HashMap<>();
-            params.put("studentName", student.getRealName());
-            params.put("paperTitle", paper.getPaperTitle());
-            params.put("teacherName", teacher.getRealName());
-            params.put("rejectReason", rejectReason != null ? rejectReason : "未提供原因");
-            params.put("rejectTime", LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
-
-            Result<Boolean> result = messageService.sendMessageByTemplate(
-                    "TEACHER_REJECT_NOTICE",
-                    studentId,
-                    paperId,
-                    DictConstants.RelatedType.PAPER,
-                    params
-            );
-
-            if (result.isSuccess()) {
-                log.info("教师拒绝站内信通知发送成功 - 论文ID: {}, 学生ID: {}", paperId, studentId);
-            } else {
-                log.warn("教师拒绝站内信通知发送失败 - 论文ID: {}, 错误: {}", paperId, result.getMessage());
-            }
-
-        } catch (Exception e) {
-            log.error("发送教师拒绝站内信通知异常 - 论文ID: {}, 老师ID: {}", paperId, teacherId, e);
-        }
-    }
-
-    /**
      * 发送超时自动拒绝通知 - 站内信
+     *
+     * 由 TeacherAssignmentServiceImpl.doRejectAssignment(byTimeout=true)（即 AssignmentTimeoutTask
+     * 每天凌晨的分配超时处理）调用。超时场景老师并没有操作过，不能复用「指导老师已拒绝接收」那条文案。
+     *
+     * 注：本类原先还有 sendTeacherConfirmNotice / sendTeacherRejectNotice 两个方法，与
+     * TeacherAssignmentServiceImpl.sendConfirmationNoticeToStudent 完全重复且全项目无调用点
+     * （类名容易被误认为是站内信的正统入口，调错会让同一事件发两条通知），已删除。
      */
     public void sendTimeoutRejectNotice(Long paperId, Long studentId, Long teacherId) {
         try {

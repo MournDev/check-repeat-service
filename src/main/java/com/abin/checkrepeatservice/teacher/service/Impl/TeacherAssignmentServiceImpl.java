@@ -10,6 +10,7 @@ import com.abin.checkrepeatservice.pojo.entity.SysUser;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
 import com.abin.checkrepeatservice.student.service.CheckTaskService;
 import com.abin.checkrepeatservice.teacher.service.TeacherAssignmentService;
+import com.abin.checkrepeatservice.user.service.Impl.InternalMessageNotificationService;
 import com.abin.checkrepeatservice.user.service.MessageService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -37,6 +38,9 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
 
     @Resource
     private CheckTaskService checkTaskService;
+
+    @Resource
+    private InternalMessageNotificationService internalMessageNotificationService;
 
     @Override
     public Result<Boolean> confirmAssignment(Long paperId, Long teacherId) {
@@ -91,6 +95,24 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
 
     @Override
     public Result<Boolean> rejectAssignment(Long paperId, Long teacherId) {
+        return doRejectAssignment(paperId, teacherId, false);
+    }
+
+    @Override
+    public Result<Boolean> rejectAssignmentByTimeout(Long paperId, Long teacherId) {
+        return doRejectAssignment(paperId, teacherId, true);
+    }
+
+    /**
+     * 拒绝接收论文的公共实现
+     *
+     * 手动拒绝与超时自动拒绝在数据上的处理完全一致（都是 REJECTED + 论文回到待分配），
+     * 唯一差别是发给学生的通知模板，所以不再各写一份。
+     *
+     * @param byTimeout true=超时自动拒绝（定时任务触发，老师并未操作）
+     */
+    private Result<Boolean> doRejectAssignment(Long paperId, Long teacherId, boolean byTimeout) {
+        String action = byTimeout ? "超时自动拒绝论文" : "教师拒绝接收论文";
         try {
             // 1. 验证权限和状态
             PaperInfo paperInfo = validateTeacherPermission(paperId, teacherId);
@@ -109,19 +131,24 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
             releaseTeacherTaskCount(teacherId);
 
             // 4. 发送拒绝通知给学生
-            sendConfirmationNoticeToStudent(paperId, teacherId, false);
+            if (byTimeout) {
+                internalMessageNotificationService.sendTimeoutRejectNotice(
+                        paperId, paperInfo.getStudentId(), teacherId);
+            } else {
+                sendConfirmationNoticeToStudent(paperId, teacherId, false);
+            }
 
             // 5. 记录拒绝操作
             //createConfirmationRecord(paperId, teacherId, DictConstants.AllocationStatus.REJECTED);
 
-            log.info("教师拒绝接收论文 - 论文ID: {}, 老师ID: {}", paperId, teacherId);
-            return Result.success( "拒绝接收成功", true);
+            log.info("{} - 论文ID: {}, 老师ID: {}", action, paperId, teacherId);
+            return Result.success(byTimeout ? "超时自动拒绝成功" : "拒绝接收成功", true);
 
         } catch (BusinessException e) {
             throw e;
         } catch (Exception e) {
-            log.error("教师拒绝接收论文异常 - 论文ID: {}, 老师ID: {}", paperId, teacherId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "拒绝接收失败");
+            log.error("{}异常 - 论文ID: {}, 老师ID: {}", action, paperId, teacherId, e);
+            return Result.error(ResultCode.SYSTEM_ERROR, byTimeout ? "超时自动拒绝失败" : "拒绝接收失败");
         }
     }
 
@@ -180,14 +207,14 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
     }
 
     /**
-     * 发送确认结果通知给学生
+     * 发送确认/拒绝结果通知给学生
      *
-     * TEACHER_CONFIRM_NOTICE / TEACHER_REJECT_NOTICE 这两个模板编码各有两个发送方，
-     * 本方法与 InternalMessageNotificationService.sendTeacherConfirmNotice /
-     * sendTeacherRejectNotice 传的变量名必须完全一致，否则模板里引用了任何一方的
-     * 私有键，另一个发送方就会渲染出未替换的占位符。统一后的变量集：
+     * 本方法是 TEACHER_CONFIRM_NOTICE / TEACHER_REJECT_NOTICE 这两个模板编码唯一的发送方
+     * （同名的 InternalMessageNotificationService.sendTeacherConfirmNotice /
+     * sendTeacherRejectNotice 已删除）。传给模板的变量集：
      *   TEACHER_CONFIRM_NOTICE：studentName、paperTitle、teacherName、confirmTime
      *   TEACHER_REJECT_NOTICE ：studentName、paperTitle、teacherName、rejectReason、rejectTime
+     * 改这里或改种子脚本里的模板时，两边要一起动。
      */
     private void sendConfirmationNoticeToStudent(Long paperId, Long teacherId, boolean confirmed) {
         try {
@@ -216,7 +243,8 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
                 params.put("confirmTime", now);
             } else {
                 templateCode = "TEACHER_REJECT_NOTICE";
-                // 拒绝原因没有入参（rejectAssignment 也没收），与 InternalMessageNotificationService 的兜底文案保持一致
+                // 拒绝原因没有入参（rejectAssignment 也没收这个参数），写句兜底文案，
+                // 免得模板里留下未替换的 {rejectReason}
                 params.put("rejectReason", "未提供原因");
                 params.put("rejectTime", now);
             }
