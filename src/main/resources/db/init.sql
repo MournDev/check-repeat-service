@@ -1687,6 +1687,34 @@ CREATE TABLE `teacher_info` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `metric_event_daily`
+--
+-- 业务事件日聚合指标表：给管理端 Dashboard 的业务指标卡片
+-- （GET /api/admin/monitoring/metrics）和 SystemMonitoring 的「待处理查重任务」供数。
+-- 按 (event, result, stat_date) 日聚合 + upsert（INSERT ... ON DUPLICATE KEY UPDATE），
+-- 不是每次事件插一行原始日志，避免无界增长并把 /metrics 变成对百万行做 GROUP BY。
+-- id 为雪花 ID，由 Java 侧 IdWorker 生成，故此处不设 AUTO_INCREMENT。
+-- 对已有数据的库请改用 db/alter_20261003_metric_event_daily.sql。
+--
+
+DROP TABLE IF EXISTS `metric_event_daily`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `metric_event_daily` (
+  `id`          bigint      NOT NULL                                    COMMENT '主键ID（雪花ID，由业务代码生成，非自增）',
+  `event`       varchar(64) NOT NULL                                    COMMENT '事件类型(user_login/user_register/paper_submit/paper_review)',
+  `result`      varchar(32) NOT NULL                                    COMMENT '结果标签(success/failure/pass/reject)',
+  `stat_date`   date        NOT NULL                                    COMMENT '统计日期',
+  `event_count` bigint      NOT NULL DEFAULT 0                          COMMENT '当日累计次数',
+  `create_time` datetime    NOT NULL DEFAULT CURRENT_TIMESTAMP          COMMENT '创建时间',
+  `update_time` datetime    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted`  tinyint     NOT NULL DEFAULT 0                          COMMENT '软删除标记(0-未删除,1-已删除)',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_event_result_date` (`event`,`result`,`stat_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='业务事件日聚合指标表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Dumping routines for database 'check-repeat-service'
 --
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;

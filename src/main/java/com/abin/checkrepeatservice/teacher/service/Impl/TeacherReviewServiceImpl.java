@@ -5,6 +5,7 @@ import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.constant.DictConstants;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.mapper.SysUserMapper;
+import com.abin.checkrepeatservice.monitor.service.BusinessMetricsService;
 import com.abin.checkrepeatservice.pojo.entity.*;
 import com.abin.checkrepeatservice.student.mapper.CheckReportMapper;
 import com.abin.checkrepeatservice.student.mapper.CheckTaskMapper;
@@ -67,6 +68,9 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
 
     @Resource
     private PaperStatusLogMapper paperStatusLogMapper;
+
+    @Resource
+    private BusinessMetricsService businessMetricsService;
 
     // 批量审核最大数量（从配置文件获取）
     @Value("${review.batch.max-count}")
@@ -212,6 +216,16 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
                 paperInfoMapper.updateById(updatePaper);
                 
                 successCount++;
+
+                // 业务指标埋点：按「篇」计（本接口是批量审核），3=审核通过 4=审核不通过
+                if (reviewStatus.equals(3)) {
+                    businessMetricsService.record(BusinessMetricsService.Event.PAPER_REVIEW,
+                            BusinessMetricsService.Outcome.PASS);
+                } else if (reviewStatus.equals(4)) {
+                    businessMetricsService.record(BusinessMetricsService.Event.PAPER_REVIEW,
+                            BusinessMetricsService.Outcome.REJECT);
+                }
+
                 log.info("论文审核成功：论文 ID={}，审核结果={}，审核记录 ID={}",
                         paperId, reviewStatus.equals(DictConstants.PaperStatus.COMPLETED) ? "通过" : "不通过", reviewRecord.getId());
                 

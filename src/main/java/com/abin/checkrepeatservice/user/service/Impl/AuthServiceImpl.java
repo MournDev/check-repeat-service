@@ -15,6 +15,7 @@ import com.abin.checkrepeatservice.pojo.dto.RefreshTokenReq;
 import com.abin.checkrepeatservice.pojo.dto.RegisterReq;
 import com.abin.checkrepeatservice.pojo.entity.SysRole;
 import com.abin.checkrepeatservice.pojo.entity.SysUser;
+import com.abin.checkrepeatservice.monitor.service.BusinessMetricsService;
 import com.abin.checkrepeatservice.pojo.entity.SysLoginLog;
 import com.abin.checkrepeatservice.user.mapper.SysLoginLogMapper;
 import com.abin.checkrepeatservice.user.service.AuthService;
@@ -66,6 +67,9 @@ public class AuthServiceImpl implements AuthService {
     @Resource
     private SysLoginLogMapper sysLoginLogMapper;
 
+    @Resource
+    private BusinessMetricsService businessMetricsService;
+
     /**
      * 用户注册（事务保证：确保用户插入成功，避免脏数据）
      */
@@ -107,6 +111,8 @@ public class AuthServiceImpl implements AuthService {
         // 4. 插入数据库（审计字段由MyBatis-Plus自动填充：createTime、createUserId等）
         sysUserMapper.insert(newUser);
         log.info("用户注册成功：用户名={}，角色={}", registerReq.getUsername(), sysRole.getRoleCode());
+        businessMetricsService.record(BusinessMetricsService.Event.USER_REGISTER,
+                BusinessMetricsService.Outcome.SUCCESS);
         return Result.success("注册成功");
     }
 
@@ -131,6 +137,8 @@ public class AuthServiceImpl implements AuthService {
             log.warn("用户登录失败：用户名={}，原因=用户名或密码错误", loginReq.getUsername());
             recordLoginLog(null, loginReq.getUsername(), loginIp, loginLocation,
                     loginDevice, 0, "用户名或密码错误");
+            businessMetricsService.record(BusinessMetricsService.Event.USER_LOGIN,
+                    BusinessMetricsService.Outcome.FAILURE);
             return Result.error(ResultCode.PARAM_ERROR, "用户名或密码错误");
         }
 
@@ -146,6 +154,8 @@ public class AuthServiceImpl implements AuthService {
         // 兜底：理论上认证通过后用户必存在，避免极端情况（如认证后用户被删除）
         if (sysUser == null) {
             log.error("用户登录异常：用户名={}，认证通过但用户不存在", loginReq.getUsername());
+            businessMetricsService.record(BusinessMetricsService.Event.USER_LOGIN,
+                    BusinessMetricsService.Outcome.FAILURE);
             return Result.error(ResultCode.RESOURCE_NOT_FOUND, "登录用户不存在，请联系管理员");
         }
 
@@ -153,6 +163,8 @@ public class AuthServiceImpl implements AuthService {
         SysRole sysRole = sysRoleMapper.selectById(sysUser.getRoleId());
         if (sysRole == null || sysRole.getIsDeleted() == 1) {
             log.error("用户登录异常：用户名={}，角色ID={}无效", loginReq.getUsername(), sysUser.getRoleId());
+            businessMetricsService.record(BusinessMetricsService.Event.USER_LOGIN,
+                    BusinessMetricsService.Outcome.FAILURE);
             return Result.error(ResultCode.PARAM_ERROR, "用户未分配有效角色，无法登录");
         }
         recordLoginLog(sysUser.getId(), loginReq.getUsername(), loginIp, loginLocation,
@@ -204,6 +216,8 @@ public class AuthServiceImpl implements AuthService {
 
         log.info("用户登录成功：用户名={}，角色={}，令牌过期时间={}",
                 loginReq.getUsername(), sysRole.getRoleCode(), loginVO.getExpireTime());
+        businessMetricsService.record(BusinessMetricsService.Event.USER_LOGIN,
+                BusinessMetricsService.Outcome.SUCCESS);
         return Result.success("登录成功", loginVO);
     }
 

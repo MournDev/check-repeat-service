@@ -13,6 +13,7 @@ import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
 import com.abin.checkrepeatservice.student.service.PaperInfoService;
 import com.abin.checkrepeatservice.student.service.StudentReviewService;
 import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
+import com.abin.checkrepeatservice.monitor.service.BusinessMetricsService;
 import com.abin.checkrepeatservice.student.vo.PaperQueryRequest;
 import com.abin.checkrepeatservice.student.vo.PaperSubmitRequest;
 import com.abin.checkrepeatservice.student.vo.PaperReSubmitReq;
@@ -58,6 +59,9 @@ public class StudentPaperController {
     @Resource
     private FileService fileService;
 
+    @Resource
+    private BusinessMetricsService businessMetricsService;
+
     /**
      * 1. 论文提交接口（推荐方式）- 只接收文件ID，不处理文件上传
      *
@@ -101,6 +105,11 @@ public class StudentPaperController {
                     request.getFileMd5(),
                     studentId
             );
+            // 埋点刻意放在 controller 层而非 service 内：
+            // submitPaperByFileId 里的 asyncAllocateTeacherAndCheck 是自调用，
+            // @Async 代理被绕过，实际同步跑在提交事务内，service 层无法区分是否真的提交成功。
+            businessMetricsService.record(BusinessMetricsService.Event.PAPER_SUBMIT,
+                    BusinessMetricsService.Outcome.SUCCESS);
             return Result.success("论文提交成功", paperInfo);
 
         } catch (Exception e) {

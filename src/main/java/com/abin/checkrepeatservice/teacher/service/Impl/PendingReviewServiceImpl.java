@@ -5,6 +5,7 @@ import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.common.service.FileService;
 import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
+import com.abin.checkrepeatservice.monitor.service.BusinessMetricsService;
 import com.abin.checkrepeatservice.pojo.entity.*;
 import com.abin.checkrepeatservice.teacher.dto.*;
 import com.abin.checkrepeatservice.teacher.mapper.PendingReviewMapper;
@@ -52,7 +53,10 @@ public class PendingReviewServiceImpl implements PendingReviewService {
 
     @Resource
     private PendingReviewMapper pendingReviewMapper;
-    
+
+    @Resource
+    private BusinessMetricsService businessMetricsService;
+
     @Resource
     private MessageService messageService;
     
@@ -282,6 +286,19 @@ public class PendingReviewServiceImpl implements PendingReviewService {
                     detail.setStatus("success");
                     details.add(detail);
                     successCount++;
+
+                    // 业务指标埋点：按「篇」计（本接口是批量审核），
+                    // reviewStatus 1=通过 2=驳回；3(需要修改) 既非通过也非驳回，不计数
+                    Integer reviewStatus = reviewDTO.getReviewStatus();
+                    if (reviewStatus != null) {
+                        if (reviewStatus == 1) {
+                            businessMetricsService.record(BusinessMetricsService.Event.PAPER_REVIEW,
+                                    BusinessMetricsService.Outcome.PASS);
+                        } else if (reviewStatus == 2) {
+                            businessMetricsService.record(BusinessMetricsService.Event.PAPER_REVIEW,
+                                    BusinessMetricsService.Outcome.REJECT);
+                        }
+                    }
 
                     log.info("论文{}审核成功", paperId);
 
