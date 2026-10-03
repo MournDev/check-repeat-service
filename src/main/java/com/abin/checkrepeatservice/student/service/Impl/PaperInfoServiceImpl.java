@@ -19,7 +19,7 @@ import com.abin.checkrepeatservice.student.service.PaperInfoService;
 import com.abin.checkrepeatservice.student.vo.PaperQueryRequest;
 import com.abin.checkrepeatservice.student.dto.*;
 import com.abin.checkrepeatservice.user.service.AdvisorAssignService;
-import com.abin.checkrepeatservice.user.service.Impl.InternalMessageNotificationService;
+import com.abin.checkrepeatservice.notification.service.NotificationService;
 import com.abin.checkrepeatservice.user.service.Impl.NotificationFacadeService;
 import com.abin.checkrepeatservice.user.service.MessageService;
 import com.alibaba.fastjson.JSON;
@@ -79,7 +79,7 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
     private SysUserMapper sysUserMapper;
 
     @Resource
-    private InternalMessageNotificationService internalMessageNotificationService;
+    private NotificationService notificationService;
     
     @Resource
     private NotificationFacadeService notificationFacadeService;
@@ -649,12 +649,12 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
             String content = String.format("您的论文《%s》已成功%s，系统将自动分配指导老师并进行查重检测。",
                     paperInfo.getPaperTitle(), isNewPaper ? "提交" : "重新提交");
 
-            internalMessageNotificationService.sendSystemNotice(
+            notificationService.sendSystemNotice(
                     studentId,
                     title,
                     content,
                     PaperNoticeConstants.NOTICE_TYPE_PAPER_SUBMIT_SUCCESS,
-                    paperInfo.getId().toString()
+                    paperInfo.getId()
             );
             log.info("论文提交成功通知发送成功 - 论文ID: {}, 学生ID: {}", paperInfo.getId(), studentId);
         } catch (Exception e) {
@@ -672,7 +672,7 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
                     paperTitle,
                     StringUtils.hasText(errorMsg) ? "原因：" + errorMsg : "请稍后重试或联系管理员。");
 
-            internalMessageNotificationService.sendSystemNotice(
+            notificationService.sendSystemNotice(
                     studentId,
                     title,
                     content,
@@ -699,12 +699,12 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
             String content = String.format("您的论文《%s》已成功分配指导老师，系统将开始进行查重检测。",
                     paperInfo.getPaperTitle());
 
-            internalMessageNotificationService.sendSystemNotice(
+            notificationService.sendSystemNotice(
                     studentId,
                     title,
                     content,
                     PaperNoticeConstants.NOTICE_TYPE_ADVISOR_ASSIGN_SUCCESS,
-                    paperId.toString()
+                    paperId
             );
             log.info("指导老师分配成功通知发送成功 - 论文ID: {}", paperId);
         } catch (Exception e) {
@@ -725,12 +725,12 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
                     paperInfo.getPaperTitle(),
                     StringUtils.hasText(errorMsg) ? "原因：" + errorMsg : "请稍后重试或联系管理员。");
 
-            internalMessageNotificationService.sendSystemNotice(
+            notificationService.sendSystemNotice(
                     studentId,
                     title,
                     content,
                     PaperNoticeConstants.NOTICE_TYPE_ADVISOR_ASSIGN_FAILED,
-                    paperId.toString()
+                    paperId
             );
             log.info("指导老师分配失败通知发送成功 - 论文ID: {}", paperId);
         } catch (Exception e) {
@@ -1442,12 +1442,12 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
                 paperInfo.getPaperTitle(),
                 StringUtils.hasText(reason) ? "撤回原因：" + reason : "");
             
-            internalMessageNotificationService.sendSystemNotice(
+            notificationService.sendSystemNotice(
                 studentId,
                 title,
                 content,
                 PaperNoticeConstants.NOTICE_TYPE_PAPER_WITHDRAW_SUCCESS,
-                paperInfo.getId().toString()
+                paperInfo.getId()
             );
         } catch (Exception e) {
             log.error("发送论文撤回成功通知失败", e);
@@ -1464,12 +1464,12 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
                 paperInfo.getPaperTitle(),
                 StringUtils.hasText(reason) ? "申请原因：" + reason : "");
             
-            internalMessageNotificationService.sendSystemNotice(
+            notificationService.sendSystemNotice(
                 studentId,
                 title,
                 content,
                 PaperNoticeConstants.NOTICE_TYPE_PAPER_MODIFY_REQUEST,
-                paperInfo.getId().toString()
+                paperInfo.getId()
             );
         } catch (Exception e) {
             log.error("发送申请修改论文通知失败", e);

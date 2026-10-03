@@ -3,7 +3,9 @@ package com.abin.checkrepeatservice.student.listener;
 import com.abin.checkrepeatservice.admin.mapper.CheckResultMapper;
 import com.abin.checkrepeatservice.common.constant.DictConstants;
 import com.abin.checkrepeatservice.common.statemachine.CheckTaskStateMachine;
+import com.abin.checkrepeatservice.common.utils.RiskLevelUtils;
 import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
+import com.abin.checkrepeatservice.notification.service.NotificationService;
 import com.abin.checkrepeatservice.pojo.entity.CheckReport;
 import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
 import com.abin.checkrepeatservice.student.dto.ReportPreviewDTO;
@@ -60,6 +62,9 @@ public class CheckTaskEventListener {
 
     @Resource
     private CheckProgressWebSocketHandler webSocketHandler;
+
+    @Resource
+    private NotificationService notificationService;
 
     @Value("${file.upload.base-path}")
     private String basePath;
@@ -163,6 +168,19 @@ public class CheckTaskEventListener {
 
             // 13. 推送进度：完成
             publishProgress(taskId, paperId, "COMPLETED", 100, "查重完成！", 0);
+
+            // 14. 告知学生结果（相似度 + 风险等级）
+            // 放在报告与明细都落库之后，学生点进通知能看到数据。
+            // sendSimilarityCheckResultNotification 自带 catch 兜底、从不抛异常，
+            // 所以它失败不会把这次成功的查重翻成 FAILURE。
+            if (paperInfo.getStudentId() != null) {
+                notificationService.sendSimilarityCheckResultNotification(
+                        paperInfo.getStudentId(),
+                        paperId,
+                        paperInfo.getPaperTitle(),
+                        maxSimilarity,
+                        RiskLevelUtils.of(maxSimilarity));
+            }
 
             log.info("查重任务执行成功 - 任务 ID: {}, 相似度：{}%", taskId, maxSimilarity);
 

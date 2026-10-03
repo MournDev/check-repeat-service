@@ -2,6 +2,7 @@ package com.abin.checkrepeatservice.detection.service;
 
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
+import com.abin.checkrepeatservice.common.utils.RiskLevelUtils;
 import com.abin.checkrepeatservice.common.utils.TextSimilarityUtils;
 import com.abin.checkrepeatservice.detection.dto.SimilarityDetectionResult;
 import com.abin.checkrepeatservice.detection.dto.SimilaritySegment;
@@ -288,12 +289,11 @@ public class EnhancedSimilarityDetectionService {
 
     /**
      * 评估风险等级
+     *
+     * 分档表统一放在 RiskLevelUtils（通知里那份也用它），这里不再自己写一遍。
      */
     private String evaluateRiskLevel(double similarity) {
-        if (similarity <= 15) return "低风险";
-        if (similarity <= 30) return "中等风险";
-        if (similarity <= 50) return "高风险";
-        return "极高风险";
+        return RiskLevelUtils.of(similarity);
     }
 
     /**

@@ -5,12 +5,12 @@ import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.constant.DictConstants;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.mapper.SysUserMapper;
+import com.abin.checkrepeatservice.notification.service.NotificationService;
 import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
 import com.abin.checkrepeatservice.pojo.entity.SysUser;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
 import com.abin.checkrepeatservice.student.service.CheckTaskService;
 import com.abin.checkrepeatservice.teacher.service.TeacherAssignmentService;
-import com.abin.checkrepeatservice.user.service.Impl.InternalMessageNotificationService;
 import com.abin.checkrepeatservice.user.service.MessageService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -40,7 +40,7 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
     private CheckTaskService checkTaskService;
 
     @Resource
-    private InternalMessageNotificationService internalMessageNotificationService;
+    private NotificationService notificationService;
 
     @Override
     public Result<Boolean> confirmAssignment(Long paperId, Long teacherId) {
@@ -132,7 +132,7 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
 
             // 4. 发送拒绝通知给学生
             if (byTimeout) {
-                internalMessageNotificationService.sendTimeoutRejectNotice(
+                notificationService.sendTimeoutRejectNotice(
                         paperId, paperInfo.getStudentId(), teacherId);
             } else {
                 sendConfirmationNoticeToStudent(paperId, teacherId, false);
@@ -210,8 +210,8 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
      * 发送确认/拒绝结果通知给学生
      *
      * 本方法是 TEACHER_CONFIRM_NOTICE / TEACHER_REJECT_NOTICE 这两个模板编码唯一的发送方
-     * （同名的 InternalMessageNotificationService.sendTeacherConfirmNotice /
-     * sendTeacherRejectNotice 已删除）。传给模板的变量集：
+     * （原先另有一套同名的确认/拒绝通知方法，与这里完全重复且无调用点，已随
+     * InternalMessageNotificationService 一并删除）。传给模板的变量集：
      *   TEACHER_CONFIRM_NOTICE：studentName、paperTitle、teacherName、confirmTime
      *   TEACHER_REJECT_NOTICE ：studentName、paperTitle、teacherName、rejectReason、rejectTime
      * 改这里或改种子脚本里的模板时，两边要一起动。

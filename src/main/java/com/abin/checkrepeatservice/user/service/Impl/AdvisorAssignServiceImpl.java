@@ -7,6 +7,7 @@ import com.abin.checkrepeatservice.common.constant.DictConstants;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
 import com.abin.checkrepeatservice.mapper.SysUserMapper;
+import com.abin.checkrepeatservice.notification.service.NotificationService;
 import com.abin.checkrepeatservice.pojo.entity.*;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
 import com.abin.checkrepeatservice.user.mapper.TeacherAllocationRecordMapper;
@@ -51,7 +52,7 @@ public class AdvisorAssignServiceImpl implements AdvisorAssignService {
     private NotificationFacadeService notificationFacadeService;
 
     @Resource
-    private InternalMessageNotificationService internalMessageNotificationService;
+    private NotificationService notificationService;
 
     @Resource
     private EmailNotificationService emailNotificationService;
@@ -224,8 +225,8 @@ public class AdvisorAssignServiceImpl implements AdvisorAssignService {
             //emailNotificationService.sendTeacherAssignmentEmail(paperId, paperTitle, studentId, advisorId);
 
             // 2. 发送站内信通知（独立发送，互不影响）
-            internalMessageNotificationService.sendTeacherAssignmentNotice(paperId, paperTitle, studentId, advisorId);
-            internalMessageNotificationService.sendStudentAssignmentNotice(paperId, paperTitle, studentId, advisorId);
+            notificationService.sendTeacherAssignmentNotice(paperId, paperTitle, studentId, advisorId);
+            notificationService.sendStudentAssignmentNotice(paperId, paperTitle, studentId, advisorId);
 
             log.info("分配通知发送完成 - 论文ID: {}, 学生ID: {}, 老师ID: {}",
                     paperId, studentId, advisorId);

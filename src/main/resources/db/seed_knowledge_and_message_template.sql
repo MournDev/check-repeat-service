@@ -7,8 +7,9 @@
 --
 -- 为什么需要这份数据：
 --   1) knowledge_category 为空时，知识库管理页/帮助中心的分类下拉与分类徽标全空。
---   2) message_template 为空时，代码里硬编码引用的 11 个模板编码
---      （PAPER_STATUS_CHANGE、NEW_PAPER_SUBMISSION、TEACHER_REJECT_NOTICE 等）
+--   2) message_template 为空时，代码里硬编码引用的模板编码
+--      （PAPER_STATUS_CHANGE、TEACHER_REJECT_NOTICE、SIMILARITY_CHECK_RESULT 等 9 个，
+--      另有 2 个当前无发送方，见第 2 节开头的说明）
 --      在 MessageServiceImpl.sendMessageByTemplate 里全部走到「消息模板不存在」，
 --      论文状态变更 / 审核结果 / 查重完成 / 指导分配等通知一条都发不出去。
 --
@@ -60,13 +61,26 @@ ON DUPLICATE KEY UPDATE
 --      SYSTEM_NOTICE            userName,title,content,noticeType,sendTime[,relatedId]
 --      PAPER_SYSTEM_NOTICE      paperTitle,paperId,title,content,noticeType,sendTime,studentName
 --
+-- ⚠️ 其中 NEW_PAPER_SUBMISSION 与 PAPER_SYSTEM_NOTICE 当前【没有任何发送方】：
+--    对应的调用方法已在通知服务合并时作为死代码删除。行先留着（本脚本只 INSERT 不 DELETE，
+--    从文件里删掉并不会从已执行过的库里删掉，只会让新老环境分叉）；要真正停用请单独执行
+--    UPDATE message_template SET is_active = 0 WHERE template_code IN (...)。
+--    SIMILARITY_CHECK_RESULT 原先也无发送方，现已由 CheckTaskEventListener 在查重完成时发出。
+--
+--   SIMILARITY_CHECK_RESULT 的 {riskLevel} 直接就是「低/中等/高/极高风险」整词
+--   （来自 RiskLevelUtils.of），所以模板里不要再补一个「风险」字，否则会渲染成「中等风险风险」。
+--
 -- ★ TEACHER_CONFIRM_NOTICE / TEACHER_REJECT_NOTICE 原先是两个发送方、传的变量还不一样：
---     InternalMessageNotificationService → studentName,paperTitle,teacherName,+confirmTime/rejectTime
---     TeacherAssignmentServiceImpl       → paperTitle,teacherName,confirmed,confirmTime
+--     原 InternalMessageNotificationService → studentName,paperTitle,teacherName,+confirmTime/rejectTime
+--     TeacherAssignmentServiceImpl          → paperTitle,teacherName,confirmed,confirmTime
 --   两者只有 paperTitle / teacherName 是共有的，所以模板一度只敢引用这两个变量。
 --   现已合并成一个发送方：TeacherAssignmentServiceImpl.sendConfirmationNoticeToStudent
 --   （传上面那套完整键名，去掉了用不上的 confirmed），
---   InternalMessageNotificationService 里那两个重复方法已删除。
+--   原类里那两个重复方法已删除。
+--
+--   原 InternalMessageNotificationService（在 user/service/Impl 下，包名像是站内信的正统入口，
+--   实际是个重复实现）整个类已并入 notification.service.NotificationServiceImpl，
+--   现在全项目发站内信只有这一个入口。
 --
 --   超时自动拒绝（AssignmentTimeoutTask 每天 2 点）原来走的是通用拒绝路径，
 --   发出去的文案是「指导老师已拒绝接收」；现已改走 rejectAssignmentByTimeout，
@@ -92,7 +106,7 @@ VALUES
 
   (4, 'SIMILARITY_CHECK_RESULT', '论文查重结果通知', 'notice',
    '论文查重结果通知',
-   '您的论文《{paperTitle}》查重已完成。\n相似度：{similarityRate}%（{riskLevel}风险）\n查重时间：{checkTime}\n请及时查看详细报告。',
+   '您的论文《{paperTitle}》查重已完成。\n相似度：{similarityRate}%（{riskLevel}）\n查重时间：{checkTime}\n请及时查看详细报告。',
    1),
 
   (5, 'TEACHER_ASSIGNMENT_NOTICE', '指导任务分配通知（发给教师）', 'assignment',
