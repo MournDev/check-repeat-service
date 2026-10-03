@@ -68,9 +68,17 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                         new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
                 authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                 SecurityContextHolder.getContext().setAuthentication(authentication);
+            } else if (jwt != null) {
+                // 令牌过期是"带着 token 却被当成匿名"的最常见原因，
+                // 但走到这里会静默继续，最终只表现为一个 401，看不出是过期还是别的。
+                // 注：logger 来自 GenericFilterBean（commons-logging），只有 warn(Object) /
+                // warn(Object, Throwable)，没有 slf4j 的占位符重载，所以这里用字符串拼接。
+                logger.warn("JWT 已过期，按匿名请求处理: " + request.getRequestURI());
             }
         } catch (Exception e) {
-            logger.error("无法设置用户认证信息: {}", e);
+            // 带上堆栈：这里吞掉的异常（签名不匹配 / 用户不存在 / 令牌格式错）正是
+            // "401 但查不出原因"的源头，只打 e.toString() 会把定位信息丢干净。
+            logger.error("无法设置用户认证信息，按匿名请求处理", e);
         }
 
         // 继续执行过滤链
