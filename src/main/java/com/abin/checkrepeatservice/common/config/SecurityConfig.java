@@ -3,6 +3,7 @@ package com.abin.checkrepeatservice.common.config;
 import com.abin.checkrepeatservice.common.jwt.JwtAuthenticationEntryPoint;
 import com.abin.checkrepeatservice.common.jwt.JwtAuthenticationFilter;
 import com.abin.checkrepeatservice.user.service.Impl.UserDetailsServiceImpl;
+import jakarta.servlet.DispatcherType;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -76,6 +77,17 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 // 配置URL权限规则
                 .authorizeHttpRequests(auth -> auth
+                        // 放行容器的 ERROR 转发（/error）。
+                        // 这一条不能省：AccessDeniedHandlerImpl 是用 response.sendError(403)
+                        // 回复的，sendError 会让容器再向 /error 转发一次。而 JwtAuthenticationFilter
+                        // 继承 OncePerRequestFilter 且未重写 shouldNotFilterErrorDispatch()（默认 true），
+                        // ERROR 转发时它不执行，SecurityContext 又已在首次 dispatch 结束时清空 ——
+                        // 于是这次转发是匿名的，若 /error 自己也要鉴权，就会被 entry point 改成 401。
+                        // 结果：任何「已登录但权限不足」都返回 401 而非 403，前端再把 401 当成登录过期
+                        // 直接清 token 踢下线。放行 /error 后，403 才能原样到达调用方。
+                        // 注：/ws/info 与 /actuator/health 那两次 401 也是同一类问题的不同表现。
+                        .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
+                        .requestMatchers("/error").permitAll()
                         // 放行公开接口
                         // /ws/** 是 SockJS 握手入口，握手走 HTTP 请求，必须在过滤器链上放行，
                         // 否则 /ws/info 会直接 401。握手放行不等于免鉴权：
