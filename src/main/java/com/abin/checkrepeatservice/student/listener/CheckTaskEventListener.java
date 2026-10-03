@@ -2,6 +2,7 @@ package com.abin.checkrepeatservice.student.listener;
 
 import com.abin.checkrepeatservice.admin.mapper.CheckResultMapper;
 import com.abin.checkrepeatservice.common.constant.DictConstants;
+import com.abin.checkrepeatservice.common.service.SimilarityThresholdResolver;
 import com.abin.checkrepeatservice.common.statemachine.CheckTaskStateMachine;
 import com.abin.checkrepeatservice.common.utils.RiskLevelUtils;
 import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
@@ -69,8 +70,9 @@ public class CheckTaskEventListener {
     @Value("${file.upload.base-path}")
     private String basePath;
 
-    @Value("${admin.check-rule.default-threshold}")
-    private BigDecimal defaultThreshold;
+    // 合格判定阈值改为按学生所属学院/专业解析（专业 > 学院 > 全局 > yml 兜底）
+    @Resource
+    private SimilarityThresholdResolver similarityThresholdResolver;
 
     @Value("${check.task.timeout:3600000}")
     private long taskTimeout;
@@ -308,7 +310,8 @@ public class CheckTaskEventListener {
      * 更新论文状态为成功
      */
     private void updatePaperSuccess(PaperInfo paperInfo, double similarity) {
-        boolean qualified = similarity <= defaultThreshold.doubleValue();
+        BigDecimal threshold = similarityThresholdResolver.resolveForPaper(paperInfo);
+        boolean qualified = similarity <= threshold.doubleValue();
         PaperInfo updatePaper = new PaperInfo();
         updatePaper.setId(paperInfo.getId());
         updatePaper.setPaperStatus(qualified

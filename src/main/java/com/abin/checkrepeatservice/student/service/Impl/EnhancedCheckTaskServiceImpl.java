@@ -6,6 +6,7 @@ import com.abin.checkrepeatservice.common.engine.CheckEngineManager;
 import com.abin.checkrepeatservice.common.enums.CheckEngineTypeEnum;
 import com.abin.checkrepeatservice.common.enums.CheckTaskStatusEnum;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
+import com.abin.checkrepeatservice.common.service.SimilarityThresholdResolver;
 import com.abin.checkrepeatservice.common.utils.PdfReportGenerator;
 import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
 import com.abin.checkrepeatservice.pojo.entity.*;
@@ -70,8 +71,9 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
     @Value("${check.task.timeout:3600000}")
     private long taskTimeout;
     
-    @Value("${admin.check-rule.default-threshold:20.00}")
-    private BigDecimal defaultThreshold;
+    // 合格判定阈值改为按学生所属学院/专业解析（专业 > 学院 > 全局 > yml 兜底）
+    @Resource
+    private SimilarityThresholdResolver similarityThresholdResolver;
     
     private final Tika tika = new Tika();
     
@@ -425,7 +427,8 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
     }
     
     private void updatePaperStatus(PaperInfo paperInfo, BigDecimal similarity) {
-        String newStatus = similarity.compareTo(defaultThreshold) <= 0 ?
+        BigDecimal threshold = similarityThresholdResolver.resolveForPaper(paperInfo);
+        String newStatus = similarity.compareTo(threshold) <= 0 ?
                 com.abin.checkrepeatservice.common.constant.DictConstants.PaperStatus.AUDITING :
                 com.abin.checkrepeatservice.common.constant.DictConstants.PaperStatus.REJECTED;
         

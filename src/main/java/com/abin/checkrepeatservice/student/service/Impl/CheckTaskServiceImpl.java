@@ -12,6 +12,7 @@ import com.abin.checkrepeatservice.common.engine.CheckEngineManager;
 import com.abin.checkrepeatservice.common.enums.CheckEngineTypeEnum;
 import com.abin.checkrepeatservice.common.enums.CheckTaskStatusEnum;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
+import com.abin.checkrepeatservice.common.service.SimilarityThresholdResolver;
 import com.abin.checkrepeatservice.common.statemachine.CheckTaskStateMachine;
 import com.abin.checkrepeatservice.common.utils.PdfReportGenerator;
 import com.abin.checkrepeatservice.common.utils.TextSimilarityUtils;
@@ -102,8 +103,11 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
     @Value("${check.task.timeout}")
     private long taskTimeout;
 
-    @Value("${admin.check-rule.default-threshold}")
-    private BigDecimal defaultThreshold;
+    // 合格判定阈值改为按学生所属学院/专业解析（专业 > 学院 > 全局 > yml 兜底）。
+    // 此前这里注入的是全局常量 admin.check-rule.default-threshold，
+    // 无法按学院/专业区分；真值源现为 similarity_threshold 两张表。
+    @Resource
+    private SimilarityThresholdResolver similarityThresholdResolver;
 
     @Resource
     private CheckTaskValidationService validationService;
@@ -454,7 +458,7 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
             // 10. 记录论文状态变更日志
             recordPaperStatusLog(paperInfo.getId(), 
                 DictConstants.PaperStatus.CHECKING, 
-                getFinalPaperStatus(maxSimilarity), 
+                getFinalPaperStatus(paperInfo, maxSimilarity),
                 "查重完成，根据重复率自动更新状态");
         
             log.info("查重任务执行成功 - 任务 ID: {}, 相似度：{}%", taskId, maxSimilarity);
@@ -490,7 +494,8 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
      * 更新论文状态为成功（独立事务）
      */
     private void updatePaperSuccess(PaperInfo paperInfo, double similarity) {
-        boolean qualified = similarity <= defaultThreshold.doubleValue();
+        BigDecimal threshold = similarityThresholdResolver.resolveForPaper(paperInfo);
+        boolean qualified = similarity <= threshold.doubleValue();
         PaperInfo updatePaper = new PaperInfo();
         updatePaper.setId(paperInfo.getId());
         updatePaper.setPaperStatus(qualified
@@ -512,9 +517,10 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
     /**
      * 获取最终论文状态
      */
-    private String getFinalPaperStatus(double similarity) {
-        return similarity <= defaultThreshold.doubleValue() 
-            ? DictConstants.PaperStatus.AUDITING 
+    private String getFinalPaperStatus(PaperInfo paperInfo, double similarity) {
+        BigDecimal threshold = similarityThresholdResolver.resolveForPaper(paperInfo);
+        return similarity <= threshold.doubleValue()
+            ? DictConstants.PaperStatus.AUDITING
             : DictConstants.PaperStatus.REJECTED;
     }
         

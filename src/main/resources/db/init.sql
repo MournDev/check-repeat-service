@@ -232,7 +232,11 @@ CREATE TABLE `category_similarity_threshold` (
   `create_time` datetime DEFAULT NULL COMMENT '创建时间',
   `update_by` bigint DEFAULT NULL COMMENT '更新人ID',
   `update_time` datetime DEFAULT NULL COMMENT '更新时间',
-  `is_deleted` int DEFAULT NULL COMMENT '软删除标记（0-未删除，1-已删除）',
+  -- 必须是 DEFAULT '0'。BaseEntity.isDeleted 只标了 @TableLogic、没有 fill 注解，
+  -- MyMetaObjectHandler 用的 strictInsertFill 不会补它，应用侧插入时不写这一列。
+  -- 若这里是 DEFAULT NULL，行会带着 NULL 落库，而 MyBatis-Plus 查询恒拼 `is_deleted = 0`，
+  -- NULL = 0 不成立 —— 数据插进去就读不回来（保存成功但列表恒为空，且无报错）。
+  `is_deleted` int DEFAULT '0' COMMENT '软删除标记（0-未删除，1-已删除）',
   `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
   `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
   PRIMARY KEY (`id`)
