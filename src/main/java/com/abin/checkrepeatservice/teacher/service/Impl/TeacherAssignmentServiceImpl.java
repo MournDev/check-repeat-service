@@ -181,6 +181,13 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
 
     /**
      * 发送确认结果通知给学生
+     *
+     * TEACHER_CONFIRM_NOTICE / TEACHER_REJECT_NOTICE 这两个模板编码各有两个发送方，
+     * 本方法与 InternalMessageNotificationService.sendTeacherConfirmNotice /
+     * sendTeacherRejectNotice 传的变量名必须完全一致，否则模板里引用了任何一方的
+     * 私有键，另一个发送方就会渲染出未替换的占位符。统一后的变量集：
+     *   TEACHER_CONFIRM_NOTICE：studentName、paperTitle、teacherName、confirmTime
+     *   TEACHER_REJECT_NOTICE ：studentName、paperTitle、teacherName、rejectReason、rejectTime
      */
     private void sendConfirmationNoticeToStudent(Long paperId, Long teacherId, boolean confirmed) {
         try {
@@ -191,12 +198,28 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
                 return;
             }
 
+            SysUser student = sysUserMapper.selectById(paper.getStudentId());
+            if (student == null) {
+                return;
+            }
+
+            String now = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
+
             Map<String, Object> params = new HashMap<>();
+            params.put("studentName", student.getRealName());
             params.put("paperTitle", paper.getPaperTitle());
             params.put("teacherName", teacher.getRealName());
-            params.put("confirmed", confirmed ? "已确认接收" : "已拒绝接收");
-            params.put("confirmTime", LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
-            String templateCode = confirmed ? "TEACHER_CONFIRM_NOTICE" : "TEACHER_REJECT_NOTICE";
+
+            String templateCode;
+            if (confirmed) {
+                templateCode = "TEACHER_CONFIRM_NOTICE";
+                params.put("confirmTime", now);
+            } else {
+                templateCode = "TEACHER_REJECT_NOTICE";
+                // 拒绝原因没有入参（rejectAssignment 也没收），与 InternalMessageNotificationService 的兜底文案保持一致
+                params.put("rejectReason", "未提供原因");
+                params.put("rejectTime", now);
+            }
 
             Result<Boolean> sendResult = messageService.sendMessageByTemplate(
                     templateCode,

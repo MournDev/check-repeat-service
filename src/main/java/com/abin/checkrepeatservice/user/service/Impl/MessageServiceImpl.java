@@ -5,6 +5,7 @@ import com.abin.checkrepeatservice.common.constant.DictConstants;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.common.websocket.WebSocketMessage;
 import com.abin.checkrepeatservice.common.websocket.WebSocketSender;
+import com.abin.checkrepeatservice.common.utils.TemplateRenderUtils;
 import com.abin.checkrepeatservice.pojo.entity.MessageTemplate;
 import com.abin.checkrepeatservice.pojo.entity.SystemMessage;
 import com.abin.checkrepeatservice.user.dto.MessageSendDTO;
@@ -228,19 +229,12 @@ public class MessageServiceImpl implements MessageService {
 
     /**
      * 渲染模板
+     *
+     * 实现已收敛到 TemplateRenderUtils（同一份逻辑也给「消息模板管理」页的预览接口用）。
+     * 占位符统一为 {key} 写法。
      */
     private String renderTemplate(String template, Map<String, Object> params) {
-        if (params == null || params.isEmpty()) {
-            return template;
-        }
-
-        String result = template;
-        for (Map.Entry<String, Object> entry : params.entrySet()) {
-            String placeholder = "{" + entry.getKey() + "}";
-            String value = entry.getValue() != null ? entry.getValue().toString() : "";
-            result = result.replace(placeholder, value);
-        }
-        return result;
+        return TemplateRenderUtils.render(template, params);
     }
 
     @Override

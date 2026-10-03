@@ -1,0 +1,126 @@
+package com.abin.checkrepeatservice.knowledge.controller;
+
+import com.abin.checkrepeatservice.common.Result;
+import com.abin.checkrepeatservice.common.enums.ResultCode;
+import com.abin.checkrepeatservice.knowledge.service.KnowledgeArticleService;
+import com.abin.checkrepeatservice.knowledge.service.KnowledgeCategoryService;
+import com.abin.checkrepeatservice.pojo.entity.KnowledgeArticle;
+import com.abin.checkrepeatservice.pojo.entity.KnowledgeCategory;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import jakarta.annotation.Resource;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
+
+/**
+ * 知识库「学生端」控制器
+ *
+ * 对应前端 src/api/knowledge.js 的学生端部分（页面 views/student/HelpCenter.vue）。
+ *
+ * ⚠️ 路径保持 /api/knowledge/**，与前端既有 api 封装一致；管理端在同一前缀下的
+ * /api/knowledge/admin/**（见 KnowledgeAdminController），并在 SecurityConfig 里
+ * 单独加了一条 ADMIN 规则 —— /api/knowledge/** 本身不在 /api/admin/** 之下，
+ * 靠 anyRequest().authenticated() 只能保证「登录可见」，不是管理员专属。
+ *
+ * ⚠️ 参数名 page / size 是 admin 系接口的主流约定，本模块统一沿用。
+ */
+@RestController
+@RequestMapping("/api/knowledge")
+@Slf4j
+public class KnowledgeController {
+
+    @Resource
+    private KnowledgeArticleService knowledgeArticleService;
+
+    @Resource
+    private KnowledgeCategoryService knowledgeCategoryService;
+
+    /**
+     * 分类列表（含每个分类下已发布文章数）
+     */
+    @GetMapping("/categories")
+    public Result<List<KnowledgeCategory>> getCategories() {
+        try {
+            return Result.success(knowledgeCategoryService.listActiveWithArticleCount());
+        } catch (Exception e) {
+            log.error("查询知识库分类失败: {}", e.getMessage(), e);
+            return Result.error(ResultCode.SYSTEM_ERROR, "查询知识库分类失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 已发布文章分页列表（不含正文）
+     *
+     * @param category 分类编码（对应 knowledge_category.code），不是分类ID
+     */
+    @GetMapping("/articles")
+    public Result<Page<KnowledgeArticle>> getArticles(
+            @RequestParam(defaultValue = "1") Integer page,
+            @RequestParam(defaultValue = "10") Integer size,
+            @RequestParam(required = false) String category,
+            @RequestParam(required = false) String keyword) {
+        log.info("接收知识库文章列表请求: page={}, size={}, category={}, keyword={}", page, size, category, keyword);
+        try {
+            return Result.success(knowledgeArticleService.getPublishedArticlePage(category, keyword, page, size));
+        } catch (Exception e) {
+            log.error("查询知识库文章列表失败: {}", e.getMessage(), e);
+            return Result.error(ResultCode.SYSTEM_ERROR, "查询知识库文章列表失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 热门文章（按浏览次数倒序）
+     */
+    @GetMapping("/articles/popular")
+    public Result<List<KnowledgeArticle>> getPopularArticles(@RequestParam(defaultValue = "5") Integer limit) {
+        try {
+            return Result.success(knowledgeArticleService.getPopularArticles(limit));
+        } catch (Exception e) {
+            log.error("查询知识库热门文章失败: {}", e.getMessage(), e);
+            return Result.error(ResultCode.SYSTEM_ERROR, "查询知识库热门文章失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 文章详情（仅已发布可见），并累加浏览次数
+     *
+     * 注意与 /articles/popular 的关系：两条都是 4 段路径，Spring 的路径匹配会优先
+     * 命中字面量 popular，不会走到这里把 "popular" 当成 id 解析。
+     */
+    @GetMapping("/articles/{id}")
+    public Result<KnowledgeArticle> getArticle(@PathVariable("id") Long id) {
+        try {
+            KnowledgeArticle article = knowledgeArticleService.getPublishedArticleDetail(id);
+            if (article == null) {
+                return Result.error(ResultCode.RESOURCE_NOT_FOUND, "文章不存在或未发布");
+            }
+            return Result.success(article);
+        } catch (Exception e) {
+            log.error("查询知识库文章详情失败: id={}, {}", id, e.getMessage(), e);
+            return Result.error(ResultCode.SYSTEM_ERROR, "查询知识库文章详情失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 文章搜索（标题或摘要命中，仅已发布）
+     */
+    @GetMapping("/search")
+    public Result<Page<KnowledgeArticle>> searchArticles(
+            @RequestParam(defaultValue = "1") Integer page,
+            @RequestParam(defaultValue = "10") Integer size,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String category) {
+        log.info("接收知识库文章搜索请求: page={}, size={}, keyword={}, category={}", page, size, keyword, category);
+        try {
+            return Result.success(knowledgeArticleService.getPublishedArticlePage(category, keyword, page, size));
+        } catch (Exception e) {
+            log.error("搜索知识库文章失败: {}", e.getMessage(), e);
+            return Result.error(ResultCode.SYSTEM_ERROR, "搜索知识库文章失败: " + e.getMessage());
+        }
+    }
+}

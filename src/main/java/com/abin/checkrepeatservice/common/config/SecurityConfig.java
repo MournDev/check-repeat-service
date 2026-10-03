@@ -94,6 +94,12 @@ public class SecurityConfig {
                         // GlobalExceptionHandler 没有 AccessDeniedException 处理器，方法级安全
                         // 拒绝会被 Exception 兜底成 HTTP 500；过滤器链上的规则才产生正确的 403
                         .requestMatchers("/api/notices/**").hasAuthority("ADMIN")
+                        // 知识库管理端（同样不在 /api/admin/** 下）。只圈 admin 子路径：
+                        // /api/knowledge/** 的其余部分（categories/articles/search）是学生端要用的，
+                        // 圈大了会把学生挡在帮助中心外面。理由同 /api/notices/**
+                        .requestMatchers("/api/knowledge/admin/**").hasAuthority("ADMIN")
+                        // 消息模板管理端（同上，不在 /api/admin/** 下）
+                        .requestMatchers("/api/message-templates/**").hasAuthority("ADMIN")
                         // 其他接口需认证
                         .anyRequest().authenticated())
                 // 注册认证提供者

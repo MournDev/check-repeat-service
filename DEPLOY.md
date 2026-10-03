@@ -299,7 +299,8 @@ docker exec -it check-repeat-mysql mysql -uroot -p     # 进数据库
 
 表结构由**手工执行** `src/main/resources/db/init.sql` 维护，脚本已与实体类对齐。项目不使用迁移框架。
 
-- **新搭环境**：建好空库后执行一次 `db/init.sql`，即可建齐全部表（脚本开头是 `DROP TABLE IF EXISTS`，空库直接跑）。
+- **新搭环境**：建好空库后执行一次 `db/init.sql`，即可建齐全部表（脚本开头是 `DROP TABLE IF EXISTS`，空库直接跑）。再执行一次 `db/seed_knowledge_and_message_template.sql` 补初始数据（见下条）。
+- **种子数据**：`db/seed_knowledge_and_message_template.sql` 只有 INSERT、没有 DDL，用 `ON DUPLICATE KEY UPDATE` 做成幂等，**新旧库都能反复执行**。它提供知识库分类，以及代码里硬编码引用的 11 个消息模板编码——**不执行它，论文状态变更 / 审核结果 / 查重完成 / 指导分配这些通知都会因「消息模板不存在」而发送失败**（`message_template` 表为空时 `MessageServiceImpl.sendMessageByTemplate` 一律返回该错误）。
 - **改结构**：编辑 `db/init.sql` 保持一致，**再另出一份只含本次变更的 ALTER 脚本**手工对线上库执行——整份脚本含 `DROP TABLE IF EXISTS`，有数据的库不能重跑。
 - **`create_time` 的库默认值现在是「承重」的**：`sys_notice`、`system_config`、`auto_assignment_config`、`auto_assignment_history` 的插入不再由代码赋值，改由 `DEFAULT CURRENT_TIMESTAMP` 填充（实体上去掉了 `fill = INSERT`，理由见 `SysNotice.createTime` 注释）。后续 ALTER **不要去掉这个默认值**，否则插入会写入 NULL。例外：`file_info.create_time` 是 `DEFAULT NULL`，其插入路径仍显式赋值，不能照搬这条约定。
 
