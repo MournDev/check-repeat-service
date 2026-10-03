@@ -1,6 +1,5 @@
 package com.abin.checkrepeatservice.admin.vo;
 
-import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -35,12 +34,15 @@ public class CheckRuleOperateReq {
     private String ruleCode; // 前端传参：ruleCode=UNDERGRADUATE
 
     /**
-     * 合格重复率阈值（必传，0-100）
+     * 合格重复率阈值（0-100）
+     *
+     * @deprecated 前端已不再提交该字段（查重规则页的"通过阈值"表单项已移除），
+     * 合格线请到「相似度阈值设置」页配置。这里**刻意去掉了 @NotNull / @DecimalMin / @DecimalMax**：
+     * 字段缺失时不再拦截请求，否则 GlobalExceptionHandler 没有
+     * MethodArgumentNotValidException 处理器，会把缺字段打成 HTTP 500 而不是 400。
      */
-    @NotNull(message = "合格重复率阈值不能为空")
-    @DecimalMin(value = "0.00", message = "重复率阈值不能小于0%")
-    @DecimalMax(value = "100.00", message = "重复率阈值不能大于100%")
-    private BigDecimal passThreshold; // 前端传参：passThreshold=20.00
+    @Deprecated
+    private BigDecimal passThreshold; // 已废弃：仅兼容可能存在的旧调用方
 
     /**
      * 关联比对库ID列表（必传，至少1个）

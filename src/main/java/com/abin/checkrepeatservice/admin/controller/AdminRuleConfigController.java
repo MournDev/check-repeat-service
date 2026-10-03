@@ -214,15 +214,19 @@ public class AdminRuleConfigController {
         try {
             SystemConfig config = systemConfigService.getConfigByKey("plagiarism_config");
             if (config != null) {
-                return JSON.parseObject(config.getConfigValue(), Map.class);
+                Map<String, Object> stored = JSON.parseObject(config.getConfigValue(), Map.class);
+                // 「校内查重阈值」不再是合格线（真值源是 similarity_threshold /
+                // category_similarity_threshold 两张表），但历史配置行里可能还留着这个键。
+                // 返回前摘掉，免得前端又从一个不生效的数字里读出"当前阈值"。
+                stored.remove("internalThreshold");
+                return stored;
             }
         } catch (Exception e) {
             log.warn("获取查重配置失败: {}", e.getMessage());
         }
-        
+
         // 返回默认配置
         Map<String, Object> defaultConfig = new HashMap<>();
-        defaultConfig.put("internalThreshold", 25);
         defaultConfig.put("thirdPartyThreshold", 20);
         defaultConfig.put("algorithm", "combined");
         defaultConfig.put("minMatchLength", 15);
@@ -502,7 +506,6 @@ public class AdminRuleConfigController {
             
             // 查重配置
             Map<String, Object> plagiarismConfig = new HashMap<>();
-            plagiarismConfig.put("internalThreshold", 25);
             plagiarismConfig.put("thirdPartyThreshold", 20);
             plagiarismConfig.put("algorithm", "combined");
             plagiarismConfig.put("minMatchLength", 15);

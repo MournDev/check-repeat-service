@@ -26,6 +26,11 @@ public class RuleLibRelationDTO {
         private Long ruleId;
         private String ruleName;
         private String ruleCode;
+        /**
+         * @deprecated 不参与合格判定，仅为兼容既有调用方而保留。
+         * 阈值真值源见 SimilarityThresholdResolver。
+         */
+        @Deprecated
         private BigDecimal passThreshold;
         private Integer isDefault;
         private String description;

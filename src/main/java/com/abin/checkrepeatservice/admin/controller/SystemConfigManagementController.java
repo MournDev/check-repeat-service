@@ -349,12 +349,16 @@ public class SystemConfigManagementController {
     private Map<String, Object> getPlagiarismConfig() {
         SystemConfig config = systemConfigService.getConfigByKey("plagiarism_config");
         if (config != null) {
-            return JSON.parseObject(config.getConfigValue(), Map.class);
+            Map<String, Object> stored = JSON.parseObject(config.getConfigValue(), Map.class);
+            // 「校内查重阈值」不再是合格线（真值源是 similarity_threshold /
+            // category_similarity_threshold 两张表），历史配置行里的这个键在返回前摘掉。
+            // thirdPartyThreshold 保留：它是第三方引擎的预警线，与本系统的合格判定无关。
+            stored.remove("internalThreshold");
+            return stored;
         }
-        
+
         // 返回默认配置
         Map<String, Object> defaultConfig = new HashMap<>();
-        defaultConfig.put("internalThreshold", 25);
         defaultConfig.put("thirdPartyThreshold", 20);
         defaultConfig.put("algorithm", "combined");
         defaultConfig.put("minMatchLength", 15);

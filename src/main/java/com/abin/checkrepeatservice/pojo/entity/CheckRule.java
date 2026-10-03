@@ -31,7 +31,14 @@ public class CheckRule extends BaseEntity {
 
     /**
      * 通过阈值（百分比，如80表示80%）
+     *
+     * @deprecated 不参与合格判定，只是历史遗留列。真正的阈值真值源是
+     * {@code similarity_threshold} / {@code category_similarity_threshold} 两张表，
+     * 由 {@code SimilarityThresholdResolver} 按「专业 &gt; 学院 &gt; 全局」解析。
+     * 新增分支写入的值仅用于回显，编辑分支根本不赋值，故不可作为判定依据。
+     * 列本身保留（schema 不动），请勿在新代码里读取。
      */
+    @Deprecated
     @TableField("pass_threshold")
     private BigDecimal passThreshold;
 

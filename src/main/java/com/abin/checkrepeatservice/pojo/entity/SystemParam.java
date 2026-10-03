@@ -2,6 +2,7 @@ package com.abin.checkrepeatservice.pojo.entity;
 
 
 import com.baomidou.mybatisplus.annotation.*;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
@@ -40,7 +41,15 @@ public class SystemParam extends BaseEntity{
     /**
      * 默认重复率阈值（非空，单位：百分比，默认20.00）
      * 对应表字段：default_threshold
+     *
+     * @deprecated 不参与合格判定，也从不出现在任何查重逻辑里。真值源是
+     * {@code similarity_threshold} / {@code category_similarity_threshold} 两张表
+     * （见 SimilarityThresholdResolver）。列本身保留以兼容既有数据，但接口不再暴露：
+     * 加 @JsonIgnore 后 /system-param/current 与 /system 的 systemParams 都不会带上它，
+     * 免得管理员以为改这里能调合格线。仅用于响应，反序列化走 SystemParamReq。
      */
+    @Deprecated
+    @JsonIgnore
     @TableField("default_threshold")
     private Double defaultThreshold;
     

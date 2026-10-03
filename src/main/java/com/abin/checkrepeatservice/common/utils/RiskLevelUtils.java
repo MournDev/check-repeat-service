@@ -7,7 +7,8 @@ package com.abin.checkrepeatservice.common.utils;
  * 学生看到的和通知里写的不会打架。
  *
  * 注意本工具只覆盖「风险等级」，不要和「合格线」混为一谈：合格与否由
- * admin.check-rule.default-threshold（默认 20.00）判定，落在论文的 checkResult 上，
+ * SimilarityThresholdResolver 按「专业 &gt; 学院 &gt; 全局」解析出的阈值判定（两表为空时
+ * 回退到 yml 的 admin.check-rule.default-threshold，默认 20.00），落在论文的 checkResult 上，
  * 与这里的四档无关。
  *
  * 已知未收敛的同名逻辑（本次未动，改动会影响既有可见文案）：

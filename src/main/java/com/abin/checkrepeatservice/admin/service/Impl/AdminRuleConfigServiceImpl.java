@@ -10,6 +10,7 @@ import com.abin.checkrepeatservice.admin.mapper.SystemParamMapper;
 import com.abin.checkrepeatservice.admin.service.AdminRuleConfigService;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
+import com.abin.checkrepeatservice.common.service.SimilarityThresholdResolver;
 import com.abin.checkrepeatservice.pojo.entity.*;
 import com.abin.checkrepeatservice.student.mapper.CheckRuleMapper;
 import com.abin.checkrepeatservice.student.mapper.CheckTaskMapper;
@@ -52,9 +53,13 @@ public class AdminRuleConfigServiceImpl extends ServiceImpl<CheckRuleMapper, Che
     @Resource
     private SystemParamMapper systemParamMapper;
 
+    // 合格线真值源（专业 > 学院 > 全局 > yml 兜底）。
+    // 原先这里注入的是 admin.check-rule.default-threshold 常量，写进 check_rule.pass_threshold
+    // 后既不参与判定、编辑分支也不更新，留着会让"通过阈值"看着像能配置的合格线。
+    @Resource
+    private SimilarityThresholdResolver similarityThresholdResolver;
+
     // 默认配置（从配置文件获取）
-    @Value("${admin.check-rule.default-threshold}")
-    private BigDecimal defaultThreshold;
     @Value("${admin.check-rule.default-interval}")
     private Integer defaultInterval;
     @Value("${admin.check-rule.default-max-count}")
@@ -156,8 +161,10 @@ public class AdminRuleConfigServiceImpl extends ServiceImpl<CheckRuleMapper, Che
                 return Result.error(ResultCode.RESOURCE_NOT_FOUND, "待编辑的规则不存在或已删除");
             }
         } else {
-            // 新增：设置默认值
-            checkRule.setPassThreshold(operateReq.getPassThreshold() != null ? operateReq.getPassThreshold() : defaultThreshold);
+            // 新增：设置默认值。
+            // pass_threshold 不参与合格判定，这里只镜像当前真正生效的全局阈值，
+            // 让旧接口的返回值不至于和「相似度阈值设置」页显示的数字打架。
+            checkRule.setPassThreshold(BigDecimal.valueOf(similarityThresholdResolver.getEffectiveGlobalThreshold()));
             checkRule.setCheckInterval(operateReq.getCheckInterval() != null ? operateReq.getCheckInterval() : defaultInterval);
             checkRule.setMaxCheckCount(operateReq.getMaxCheckCount() != null ? operateReq.getMaxCheckCount() : defaultMaxCount);
             checkRule.setIsDefault(operateReq.getIsDefault() != null ? operateReq.getIsDefault() : 0);
