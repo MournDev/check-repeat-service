@@ -47,14 +47,14 @@ public class MessageTemplateReq implements Serializable {
     private String templateType;
 
     /**
-     * 标题模板（支持 {变量} 与 ${变量} 两种占位符写法）
+     * 标题模板（占位符写法为 {变量}，见 TemplateRenderUtils）
      */
     @NotBlank(message = "标题模板不能为空")
     @Size(max = 200, message = "标题模板长度不能超过200字符")
     private String titleTemplate;
 
     /**
-     * 内容模板（支持 {变量} 与 ${变量} 两种占位符写法）
+     * 内容模板（占位符写法为 {变量}，见 TemplateRenderUtils）
      */
     @NotBlank(message = "内容模板不能为空")
     private String contentTemplate;

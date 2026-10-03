@@ -76,7 +76,7 @@ public interface MessageTemplateService extends IService<MessageTemplate> {
     /**
      * 按编码渲染模板（仅预览，不发送）
      *
-     * @param variables 变量表，键对应模板里的 {key} / ${key}
+     * @param variables 变量表，键对应模板里的 {key}
      * @return 渲染结果；模板不存在返回 null
      */
     TemplateRenderVO renderTemplate(String templateCode, Map<String, Object> variables);
