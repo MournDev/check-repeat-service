@@ -2,6 +2,8 @@ package com.abin.checkrepeatservice.admin.controller;
 
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
+import com.abin.checkrepeatservice.monitor.service.BusinessMetricsService;
+import com.abin.checkrepeatservice.monitor.service.ResponseTimeStore;
 import com.abin.checkrepeatservice.monitor.service.SystemMonitorService;
 import com.abin.checkrepeatservice.monitor.service.DatabaseMonitorService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -28,9 +30,15 @@ public class MonitoringController {
 
     @Resource
     private SystemMonitorService systemMonitorService;
-    
+
     @Resource
     private DatabaseMonitorService databaseMonitorService;
+
+    @Resource
+    private BusinessMetricsService businessMetricsService;
+
+    @Resource
+    private ResponseTimeStore responseTimeStore;
 
     /**
      * 获取系统性能监控数据
@@ -153,38 +161,93 @@ public class MonitoringController {
     }
 
     /**
+     * 获取业务指标：业务事件计数 + 查重任务队列深度
+     *
+     * 响应形状与前端 Dashboard 的约定一致：
+     *   data.counters      全量累计计数
+     *   data.todayCounters 今日计数
+     *   data.gauges        瞬时值，目前只有 check.task.queue.depth
+     * 计数键形如 business.event.count[event=user_login,result=success]
+     */
+    @GetMapping("/metrics")
+    @Operation(summary = "业务指标监控", description = "获取全量累计与今日的业务事件计数、查重任务队列深度")
+    public Result<Map<String, Object>> getBusinessMetrics() {
+
+        log.info("接收获取业务指标请求");
+
+        try {
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("counters", businessMetricsService.getAllTimeCounters());
+            data.put("todayCounters", businessMetricsService.getTodayCounters());
+
+            Map<String, Object> gauges = new LinkedHashMap<>();
+            gauges.put(BusinessMetricsService.QUEUE_DEPTH_KEY, businessMetricsService.getQueueDepth());
+            data.put("gauges", gauges);
+
+            log.info("业务指标获取成功");
+            return Result.success("业务指标获取成功", data);
+
+        } catch (Exception e) {
+            log.error("获取业务指标失败: {}", e.getMessage(), e);
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取业务指标失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 获取响应时间趋势（按分钟聚合）
+     *
+     * 数据来自内存中的逐请求耗时采集（ResponseTimeStore），进程重启即清零。
+     *
+     * minutes 超出采集窗口时【裁剪】到窗口上限而非报错：
+     * 否则一旦有人调小 monitoring.response-time.window-minutes，
+     * 前端 SystemMonitoring 的 60 分钟选项会直接 500。
+     */
+    @GetMapping("/response-time-trend")
+    @Operation(summary = "响应时间趋势", description = "获取最近N分钟按分钟聚合的平均/最小/最大/P95/P99响应时间与请求数")
+    public Result<Map<String, Object>> getResponseTimeTrend(
+            @RequestParam(value = "minutes", defaultValue = "15") Integer minutes) {
+
+        log.info("接收获取响应时间趋势请求: minutes={}", minutes);
+
+        try {
+            if (minutes == null || minutes < 1) {
+                return Result.error(ResultCode.PARAM_VALUE_INVALID, "minutes 必须为正整数");
+            }
+
+            int window = responseTimeStore.getWindowMinutes();
+            int effective = Math.min(minutes, window);
+            if (effective != minutes) {
+                log.warn("minutes={} 超出采集窗口 {} 分钟，已裁剪为 {}", minutes, window, effective);
+            }
+
+            return Result.success("响应时间趋势获取成功", responseTimeStore.snapshot(effective));
+
+        } catch (Exception e) {
+            log.error("获取响应时间趋势失败: {}", e.getMessage(), e);
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取响应时间趋势失败: " + e.getMessage());
+        }
+    }
+
+    /**
      * 获取API响应时间统计
-     * 返回详细的API响应时间指标
+     *
+     * 语义收缩说明：原先 24h/7d 分支返回的是 Random 造的假数据，现已统一委托
+     * ResponseTimeStore 的真实采集数据，因此受采集窗口限制（默认 60 分钟），
+     * 三个 period 实际都会返回最近 window 分钟的数据。保留 period 入参仅为兼容既有调用方。
      */
     @GetMapping("/response-times")
     @Operation(summary = "API响应时间统计", description = "获取API平均响应时间、最小/最大响应时间、95百分位响应时间等详细指标")
     public Result<Map<String, Object>> getApiResponseTimes(
             @RequestParam(defaultValue = "1h") String period) {
-        
-        log.info("接收获取API响应时间统计请求: period={}", period);
-        
+
+        log.info("接收获取API响应时间统计请求: period={}（实际受采集窗口限制）", period);
+
         try {
-            Map<String, Object> responseTimes = new HashMap<>();
-            
-            // 获取真实的响应时间数据
-            switch (period.toLowerCase()) {
-                case "1h":
-                    responseTimes.putAll(getHourlyResponseTimes());
-                    break;
-                case "24h":
-                    responseTimes.putAll(getDailyResponseTimes());
-                    break;
-                case "7d":
-                    responseTimes.putAll(getWeeklyResponseTimes());
-                    break;
-                default:
-                    responseTimes.putAll(getHourlyResponseTimes());
-                    break;
-            }
-            
+            Map<String, Object> responseTimes = responseTimeStore.snapshot(responseTimeStore.getWindowMinutes());
+
             log.info("API响应时间统计获取成功");
             return Result.success("API响应时间统计获取成功", responseTimes);
-            
+
         } catch (Exception e) {
             log.error("获取API响应时间统计失败: {}", e.getMessage(), e);
             return Result.error(ResultCode.SYSTEM_ERROR, "获取API响应时间统计失败: " + e.getMessage());
@@ -387,167 +450,5 @@ public class MonitoringController {
             case "7d": return 1440; // 1天
             default: return 5;
         }
-    }
-
-    // ===== 响应时间统计方法 =====
-
-    /**
-     * 获取小时级响应时间统计
-     */
-    private Map<String, Object> getHourlyResponseTimes() {
-        Map<String, Object> data = new HashMap<>();
-        List<Long> avgResponseTimes = new ArrayList<>();
-        List<Long> minResponseTimes = new ArrayList<>();
-        List<Long> maxResponseTimes = new ArrayList<>();
-        List<Long> p95ResponseTimes = new ArrayList<>();
-        List<String> timestamps = new ArrayList<>();
-        
-        try {
-            int pointCount = 12; // 12个5分钟间隔
-            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("HH:mm");
-            Random random = new Random();
-            
-            // 基于当前系统负载估算响应时间
-            double currentCpu = getCurrentCpuUsage();
-            double currentMemory = getCurrentMemoryUsage();
-            
-            for (int i = 0; i < pointCount; i++) {
-                // 基础响应时间 50-150ms
-                long baseTime = 50L + random.nextInt(100);
-                
-                // 根据系统负载调整
-                double loadFactor = (currentCpu + currentMemory) / 200.0; // 0-1
-                long adjustedTime = (long) (baseTime * (1 + loadFactor * 2));
-                
-                avgResponseTimes.add(adjustedTime);
-                minResponseTimes.add(Math.max(10L, adjustedTime - random.nextInt(30)));
-                maxResponseTimes.add(adjustedTime + random.nextInt(100));
-                p95ResponseTimes.add(adjustedTime + random.nextInt(50));
-                
-                LocalDateTime timePoint = LocalDateTime.now().minusMinutes((pointCount - i - 1) * 5);
-                timestamps.add(timePoint.format(formatter));
-            }
-        } catch (Exception e) {
-            log.warn("获取小时级响应时间统计失败: {}", e.getMessage());
-            // 返回默认值
-            for (int i = 0; i < 12; i++) {
-                avgResponseTimes.add(100L);
-                minResponseTimes.add(50L);
-                maxResponseTimes.add(200L);
-                p95ResponseTimes.add(150L);
-                timestamps.add("00:00");
-            }
-        }
-        
-        data.put("avgResponseTime", avgResponseTimes);
-        data.put("minResponseTime", minResponseTimes);
-        data.put("maxResponseTime", maxResponseTimes);
-        data.put("p95ResponseTime", p95ResponseTimes);
-        data.put("timestamps", timestamps);
-        
-        return data;
-    }
-
-    /**
-     * 获取天级响应时间统计
-     */
-    private Map<String, Object> getDailyResponseTimes() {
-        Map<String, Object> data = new HashMap<>();
-        List<Long> avgResponseTimes = new ArrayList<>();
-        List<String> timestamps = new ArrayList<>();
-        
-        try {
-            int pointCount = 24;
-            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("HH:00");
-            Random random = new Random();
-            
-            for (int i = 0; i < pointCount; i++) {
-                // 日间响应时间通常较低
-                long baseTime = 80L + random.nextInt(60);
-                avgResponseTimes.add(baseTime);
-                
-                LocalDateTime timePoint = LocalDateTime.now().minusHours(pointCount - i - 1);
-                timestamps.add(timePoint.format(formatter));
-            }
-        } catch (Exception e) {
-            log.warn("获取天级响应时间统计失败: {}", e.getMessage());
-        }
-        
-        data.put("avgResponseTime", avgResponseTimes);
-        data.put("timestamps", timestamps);
-        return data;
-    }
-
-    /**
-     * 获取周级响应时间统计
-     */
-    private Map<String, Object> getWeeklyResponseTimes() {
-        Map<String, Object> data = new HashMap<>();
-        List<Long> avgResponseTimes = new ArrayList<>();
-        List<String> timestamps = new ArrayList<>();
-        
-        try {
-            int pointCount = 7;
-            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("MM-dd");
-            Random random = new Random();
-            
-            for (int i = 0; i < pointCount; i++) {
-                long baseTime = 100L + random.nextInt(80);
-                avgResponseTimes.add(baseTime);
-                
-                LocalDateTime timePoint = LocalDateTime.now().minusDays(pointCount - i - 1);
-                timestamps.add(timePoint.format(formatter));
-            }
-        } catch (Exception e) {
-            log.warn("获取周级响应时间统计失败: {}", e.getMessage());
-        }
-        
-        data.put("avgResponseTime", avgResponseTimes);
-        data.put("timestamps", timestamps);
-        return data;
-    }
-
-    /**
-     * 获取当前CPU使用率
-     */
-    private double getCurrentCpuUsage() {
-        try {
-            var systemStatus = systemMonitorService.getSystemStatus();
-            if (systemStatus.isSuccess()) {
-                Map<String, Object> statusData = (Map<String, Object>) systemStatus.getData();
-                Map<String, Object> cpuInfo = (Map<String, Object>) statusData.get("cpu");
-                if (cpuInfo != null) {
-                    Double cpuUsage = (Double) cpuInfo.get("processCpuUsage");
-                    if (cpuUsage != null && cpuUsage >= 0) {
-                        return cpuUsage;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            log.debug("获取CPU使用率失败: {}", e.getMessage());
-        }
-        return 50.0; // 默认值
-    }
-
-    /**
-     * 获取当前内存使用率
-     */
-    private double getCurrentMemoryUsage() {
-        try {
-            var systemStatus = systemMonitorService.getSystemStatus();
-            if (systemStatus.isSuccess()) {
-                Map<String, Object> statusData = (Map<String, Object>) systemStatus.getData();
-                Map<String, Object> memoryInfo = (Map<String, Object>) statusData.get("memory");
-                if (memoryInfo != null) {
-                    Double heapUsage = (Double) memoryInfo.get("heapUsagePercent");
-                    if (heapUsage != null) {
-                        return heapUsage;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            log.debug("获取内存使用率失败: {}", e.getMessage());
-        }
-        return 60.0; // 默认值
     }
 }
