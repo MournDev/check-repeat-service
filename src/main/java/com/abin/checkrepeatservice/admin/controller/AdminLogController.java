@@ -4,6 +4,7 @@ import com.abin.checkrepeatservice.admin.mapper.SysOperationLogMapper;
 import com.abin.checkrepeatservice.admin.vo.LoginLogExcelVO;
 import com.abin.checkrepeatservice.admin.vo.OperationLogExcelVO;
 import com.abin.checkrepeatservice.common.Result;
+import com.abin.checkrepeatservice.common.utils.DateTimeUtils;
 import com.abin.checkrepeatservice.pojo.entity.SysLoginLog;
 import com.abin.checkrepeatservice.pojo.entity.SysOperationLog;
 import com.abin.checkrepeatservice.user.mapper.SysLoginLogMapper;
@@ -55,99 +56,60 @@ public class AdminLogController {
             @RequestParam(defaultValue = "1") Integer page,
             @RequestParam(defaultValue = "10") Integer size,
             @RequestParam(required = false) String operationType,
+            @RequestParam(required = false) String userType,
             @RequestParam(required = false) String startDate,
             @RequestParam(required = false) String endDate,
             @RequestParam(required = false) String keyword) {
-        
+
         Page<SysOperationLog> logPage = new Page<>(page, size);
         LambdaQueryWrapper<SysOperationLog> wrapper = new LambdaQueryWrapper<>();
-        
+
         // 操作类型筛选
         if (operationType != null && !operationType.isEmpty()) {
             wrapper.eq(SysOperationLog::getOperationType, operationType);
         }
-        
-        // 时间范围筛选
-        if (startDate != null && !startDate.isEmpty()) {
-            wrapper.ge(SysOperationLog::getOperationTime, LocalDateTime.parse(startDate));
+
+        // 用户类型筛选（前端一直在传，此前后端未声明该参数，被 Spring 静默忽略）
+        if (userType != null && !userType.isEmpty()) {
+            wrapper.eq(SysOperationLog::getUserType, userType);
         }
-        if (endDate != null && !endDate.isEmpty()) {
-            wrapper.le(SysOperationLog::getOperationTime, LocalDateTime.parse(endDate));
+
+        // 时间范围筛选（endDate 为开区间上界，见 DateTimeUtils.parseEndExclusive）
+        LocalDateTime start = DateTimeUtils.parseStart(startDate);
+        LocalDateTime endExclusive = DateTimeUtils.parseEndExclusive(endDate);
+        if (start != null) {
+            wrapper.ge(SysOperationLog::getOperationTime, start);
         }
-        
+        if (endExclusive != null) {
+            wrapper.lt(SysOperationLog::getOperationTime, endExclusive);
+        }
+
         // 关键字搜索
         if (keyword != null && !keyword.isEmpty()) {
             wrapper.and(w -> w.like(SysOperationLog::getUserName, keyword)
                     .or()
                     .like(SysOperationLog::getDescription, keyword));
         }
-        
+
         // 按操作时间倒序
         wrapper.orderByDesc(SysOperationLog::getOperationTime);
-        
+
         Page<SysOperationLog> resultPage = sysOperationLogMapper.selectPage(logPage, wrapper);
         return Result.success("操作日志列表获取成功", resultPage);
     }
 
-    /**
-     * 导出操作日志
+    /*
+     * 原 GET /operations/export（导出操作日志）已删除。
+     *
+     * 它是死接口：前端从未调用过。前端 LogCenter 的「导出日志」用的是
+     * /api/admin/operation-logs/export（logs.js 里的 exportOperationLogsNew），
+     * 本控制器对应的 wrapper `exportOperationLogs`（logs.js:39）没有任何 import，
+     * 该 URL 在整个前端仓库只出现在它自己的定义里。
+     *
+     * 两个导出端点功能重复，且导出语义（日期用 startDate/endDate 半开区间、
+     * keyword 匹配用户名或描述）已在 /api/admin/operation-logs/export 上对齐，
+     * 故移除本处，避免留下一个无人调用、却与在用的那个行为不同的副本。
      */
-    @GetMapping("/operations/export")
-    public void exportOperationLogs(HttpServletResponse response,
-                                  @RequestParam(required = false) String operationType,
-                                  @RequestParam(required = false) String startDate,
-                                  @RequestParam(required = false) String endDate,
-                                  @RequestParam(required = false) String keyword) throws IOException {
-        
-        try {
-            LambdaQueryWrapper<SysOperationLog> wrapper = new LambdaQueryWrapper<>();
-            
-            // 应用筛选条件
-            if (operationType != null && !operationType.isEmpty()) {
-                wrapper.eq(SysOperationLog::getOperationType, operationType);
-            }
-            if (startDate != null && !startDate.isEmpty()) {
-                wrapper.ge(SysOperationLog::getOperationTime, LocalDateTime.parse(startDate));
-            }
-            if (endDate != null && !endDate.isEmpty()) {
-                wrapper.le(SysOperationLog::getOperationTime, LocalDateTime.parse(endDate));
-            }
-            if (keyword != null && !keyword.isEmpty()) {
-                wrapper.and(w -> w.like(SysOperationLog::getUserName, keyword)
-                        .or()
-                        .like(SysOperationLog::getDescription, keyword));
-            }
-            
-            wrapper.orderByDesc(SysOperationLog::getOperationTime);
-            List<SysOperationLog> logs = sysOperationLogMapper.selectList(wrapper);
-            
-            // 转换为Excel VO
-            List<OperationLogExcelVO> excelData = logs.stream().map(log -> {
-                OperationLogExcelVO vo = new OperationLogExcelVO();
-                vo.setId(log.getId());
-                vo.setUsername(log.getUserName());
-                vo.setOperationType(log.getOperationType());
-                vo.setDescription(log.getDescription());
-                vo.setIpAddress(log.getIpAddress());
-                vo.setOperationTime(log.getOperationTime());
-                return vo;
-            }).collect(Collectors.toList());
-            
-            // 设置响应头
-            setExcelResponseHeader(response, "操作日志");
-            
-            // 使用EasyExcel写入数据
-            EasyExcel.write(response.getOutputStream(), OperationLogExcelVO.class)
-                    .sheet("操作日志")
-                    .doWrite(excelData);
-                    
-        } catch (Exception e) {
-            log.error("导出操作日志失败", e);
-            response.reset();
-            response.setContentType("application/json;charset=UTF-8");
-            response.getWriter().write("{\"code\":500,\"message\":\"导出失败：" + e.getMessage() + "\"}");
-        }
-    }
 
     /**
      * 导出登录日志
@@ -165,11 +127,13 @@ public class AdminLogController {
             if (ip != null && !ip.isEmpty()) {
                 wrapper.like(SysLoginLog::getLoginIp, ip);
             }
-            if (startDate != null && !startDate.isEmpty()) {
-                wrapper.ge(SysLoginLog::getLoginTime, LocalDateTime.parse(startDate));
+            LocalDateTime start = DateTimeUtils.parseStart(startDate);
+            LocalDateTime endExclusive = DateTimeUtils.parseEndExclusive(endDate);
+            if (start != null) {
+                wrapper.ge(SysLoginLog::getLoginTime, start);
             }
-            if (endDate != null && !endDate.isEmpty()) {
-                wrapper.le(SysLoginLog::getLoginTime, LocalDateTime.parse(endDate));
+            if (endExclusive != null) {
+                wrapper.lt(SysLoginLog::getLoginTime, endExclusive);
             }
             
             wrapper.orderByDesc(SysLoginLog::getLoginTime);
@@ -254,13 +218,15 @@ public class AdminLogController {
         if (ip != null && !ip.isEmpty()) {
             wrapper.like(SysLoginLog::getLoginIp, ip);
         }
-        
-        // 时间范围筛选
-        if (startDate != null && !startDate.isEmpty()) {
-            wrapper.ge(SysLoginLog::getLoginTime, LocalDateTime.parse(startDate));
+
+        // 时间范围筛选（endDate 为开区间上界）
+        LocalDateTime start = DateTimeUtils.parseStart(startDate);
+        LocalDateTime endExclusive = DateTimeUtils.parseEndExclusive(endDate);
+        if (start != null) {
+            wrapper.ge(SysLoginLog::getLoginTime, start);
         }
-        if (endDate != null && !endDate.isEmpty()) {
-            wrapper.le(SysLoginLog::getLoginTime, LocalDateTime.parse(endDate));
+        if (endExclusive != null) {
+            wrapper.lt(SysLoginLog::getLoginTime, endExclusive);
         }
         
         // 按登录时间倒序
@@ -280,29 +246,32 @@ public class AdminLogController {
             @RequestParam(required = false) String endDate) {
         
         Map<String, Object> stats = new HashMap<>();
-        
+
+        LocalDateTime start = DateTimeUtils.parseStart(startDate);
+        LocalDateTime endExclusive = DateTimeUtils.parseEndExclusive(endDate);
+
         // 获取操作日志统计
         LambdaQueryWrapper<SysOperationLog> operationWrapper = new LambdaQueryWrapper<>();
         if (level != null && !level.isEmpty()) {
             operationWrapper.eq(SysOperationLog::getOperationType, level);
         }
-        if (startDate != null && !startDate.isEmpty()) {
-            operationWrapper.ge(SysOperationLog::getOperationTime, LocalDateTime.parse(startDate));
+        if (start != null) {
+            operationWrapper.ge(SysOperationLog::getOperationTime, start);
         }
-        if (endDate != null && !endDate.isEmpty()) {
-            operationWrapper.le(SysOperationLog::getOperationTime, LocalDateTime.parse(endDate));
+        if (endExclusive != null) {
+            operationWrapper.lt(SysOperationLog::getOperationTime, endExclusive);
         }
-        
+
         Long operationCount = sysOperationLogMapper.selectCount(operationWrapper);
         stats.put("operationLogCount", operationCount);
-        
+
         // 获取登录日志统计
         LambdaQueryWrapper<SysLoginLog> loginWrapper = new LambdaQueryWrapper<>();
-        if (startDate != null && !startDate.isEmpty()) {
-            loginWrapper.ge(SysLoginLog::getLoginTime, LocalDateTime.parse(startDate));
+        if (start != null) {
+            loginWrapper.ge(SysLoginLog::getLoginTime, start);
         }
-        if (endDate != null && !endDate.isEmpty()) {
-            loginWrapper.le(SysLoginLog::getLoginTime, LocalDateTime.parse(endDate));
+        if (endExclusive != null) {
+            loginWrapper.lt(SysLoginLog::getLoginTime, endExclusive);
         }
         
         Long loginCount = sysLoginLogMapper.selectCount(loginWrapper);

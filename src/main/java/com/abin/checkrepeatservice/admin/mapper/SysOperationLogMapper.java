@@ -23,7 +23,9 @@ public interface SysOperationLogMapper extends BaseMapper<SysOperationLog> {
      * @param username 用户名（可选）
      * @param status 状态（可选）
      * @param startTime 开始时间（可选）
-     * @param endTime 结束时间（可选）
+     * @param endTime 结束时间（可选，开区间上界，配合 < 比较）
+     * @param userType 用户类型（可选）
+     * @param keyword 关键字，匹配用户名或操作描述（可选）
      * @return 分页结果
      */
     Page<SysOperationLog> selectOperationLogPage(Page<SysOperationLog> page,
@@ -31,7 +33,9 @@ public interface SysOperationLogMapper extends BaseMapper<SysOperationLog> {
                                                  @Param("username") String username,
                                                  @Param("status") Integer status,
                                                  @Param("startTime") LocalDateTime startTime,
-                                                 @Param("endTime") LocalDateTime endTime);
+                                                 @Param("endTime") LocalDateTime endTime,
+                                                 @Param("userType") String userType,
+                                                 @Param("keyword") String keyword);
 
     /**
      * 获取操作统计信息

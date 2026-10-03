@@ -2,6 +2,15 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.abin.checkrepeatservice.admin.mapper.SysOperationLogMapper">
 
+    <!--
+      注意：本文件里所有统计查询的 resultType 都是 map。
+      MyBatis 的 MapWrapper.findProperty 会原样返回列名，**不受**
+      map-underscore-to-camel-case 开关影响，所以列别名必须直接写成
+      前端要的驼峰键名（totalCount / successCount / failCount / dailyAvg /
+      avgExecutionTime / operationType / userName / userType / moduleName / count），
+      写 operation_count 这类下划线别名前端会全部读不到值。
+    -->
+
     <!-- 通用查询映射结果 -->
     <resultMap id="BaseResultMap" type="com.abin.checkrepeatservice.pojo.entity.SysOperationLog">
         <id column="id" property="id"/>
@@ -10,8 +19,11 @@
         <result column="operation_param" property="requestParams"/>
         <result column="user_id" property="userId"/>
         <result column="user_name" property="userName"/>
+        <result column="user_type" property="userType"/>
         <result column="ip_address" property="ipAddress"/>
         <result column="operation_time" property="operationTime"/>
+        <result column="execution_time" property="executionTime"/>
+        <result column="status" property="status"/>
         <result column="is_deleted" property="isDeleted"/>
         <result column="create_time" property="createTime"/>
         <result column="update_time" property="updateTime"/>
@@ -19,13 +31,14 @@
 
     <!-- 通用查询结果列 -->
     <sql id="Base_Column_List">
-        id, operation_type, operation_desc, operation_param, user_id, 
-        user_name, ip_address, operation_time, is_deleted, create_time, update_time
+        id, operation_type, operation_desc, operation_param, user_id,
+        user_name, user_type, ip_address, operation_time, execution_time,
+        status, is_deleted, create_time, update_time
     </sql>
 
     <!-- 分页查询操作日志 -->
     <select id="selectOperationLogPage" parameterType="map" resultType="com.abin.checkrepeatservice.pojo.entity.SysOperationLog">
-        SELECT 
+        SELECT
         <include refid="Base_Column_List"/>
         FROM sys_operation_log
         WHERE is_deleted = 0
@@ -35,23 +48,39 @@
         <if test="username != null and username != ''">
             AND user_name LIKE CONCAT('%', #{username}, '%')
         </if>
+        <if test="userType != null and userType != ''">
+            AND user_type = #{userType}
+        </if>
+        <if test="status != null">
+            AND status = #{status}
+        </if>
         <if test="startTime != null">
             AND operation_time >= #{startTime}
         </if>
         <if test="endTime != null">
-            AND operation_time &lt;= #{endTime}
+            AND operation_time &lt; #{endTime}
+        </if>
+        <!--
+          关键字：与 AdminLogController.getOperationLogs 的口径保持一致（用户名或描述）。
+          描述列在库里叫 operation_desc（实体属性名 description 是映射后的名字），
+          这里必须写 operation_desc。
+        -->
+        <if test="keyword != null and keyword != ''">
+            AND (user_name LIKE CONCAT('%', #{keyword}, '%')
+                 OR operation_desc LIKE CONCAT('%', #{keyword}, '%'))
         </if>
         ORDER BY operation_time DESC
     </select>
 
     <!-- 获取操作统计信息 -->
     <select id="getOperationStatistics" parameterType="map" resultType="map">
-        SELECT 
-            COUNT(*) as total_count,
-            SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) as success_count,
-            SUM(CASE WHEN status = 0 THEN 1 ELSE 0 END) as fail_count,
-            AVG(execution_time) as avg_execution_time,
-            MAX(operation_time) as last_operation_time
+        SELECT
+            COUNT(*) AS totalCount,
+            COALESCE(SUM(status = 1), 0) AS successCount,
+            COALESCE(SUM(status = 0), 0) AS failCount,
+            ROUND(COUNT(*) / #{days}, 1) AS dailyAvg,
+            AVG(execution_time) AS avgExecutionTime,
+            MAX(operation_time) AS lastOperationTime
         FROM sys_operation_log
         WHERE is_deleted = 0
         AND operation_time >= DATE_SUB(NOW(), INTERVAL #{days} DAY)
@@ -59,48 +88,57 @@
 
     <!-- 获取热门操作统计 -->
     <select id="getHotOperations" parameterType="map" resultType="map">
-        SELECT 
-            operation_type,
-            description,
-            COUNT(*) as operation_count,
-            SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) as success_count,
-            AVG(execution_time) as avg_time
+        SELECT
+            operation_type AS operationType,
+            COUNT(*) AS `count`
         FROM sys_operation_log
         WHERE is_deleted = 0
         AND operation_time >= DATE_SUB(NOW(), INTERVAL #{days} DAY)
-        GROUP BY operation_type, description
-        ORDER BY operation_count DESC
+        GROUP BY operation_type
+        ORDER BY `count` DESC
         LIMIT #{limit}
     </select>
 
     <!-- 获取用户活跃度统计 -->
     <select id="getUserActivityStatistics" parameterType="map" resultType="map">
-        SELECT 
-            user_name,
-            user_id,
-            COUNT(*) as operation_count,
-            SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) as success_count,
-            MIN(operation_time) as first_operation,
-            MAX(operation_time) as last_operation
+        SELECT
+            user_name AS userName,
+            user_id AS userId,
+            MAX(user_type) AS userType,
+            COUNT(*) AS `count`
         FROM sys_operation_log
         WHERE is_deleted = 0
         AND operation_time >= DATE_SUB(NOW(), INTERVAL #{days} DAY)
         GROUP BY user_name, user_id
-        ORDER BY operation_count DESC
+        ORDER BY `count` DESC
     </select>
 
-    <!-- 获取模块使用统计 -->
+    <!--
+      获取模块使用统计。
+      sys_operation_log 没有 module 列，模块名来自 sys_operation_type.module。
+
+      ⚠️ JOIN 条件上的 COLLATE 不能删：两张表的排序规则不同——
+         sys_operation_log 是 utf8mb4_0900_ai_ci，
+         sys_operation_type 是 utf8mb4_unicode_ci，
+         直接 ON t.type = l.operation_type 会抛
+           Illegal mix of collations (utf8mb4_unicode_ci,IMPLICIT) and
+           (utf8mb4_0900_ai_ci,IMPLICIT) for operation '='
+         整个接口 500。统一到左表的排序规则即可。
+
+      未被字典收录的 type 会落到 '未知'；缺失的条目由
+      db/seed_sys_operation_type.sql 补全。
+    -->
     <select id="getModuleUsageStatistics" parameterType="map" resultType="map">
-        SELECT 
-            COALESCE(module, 'unknown') as module_name,
-            COUNT(*) as operation_count,
-            SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) as success_count,
-            AVG(execution_time) as avg_execution_time
-        FROM sys_operation_log
-        WHERE is_deleted = 0
-        AND operation_time >= DATE_SUB(NOW(), INTERVAL #{days} DAY)
-        GROUP BY module_name
-        ORDER BY operation_count DESC
+        SELECT
+            COALESCE(t.module, '未知') AS moduleName,
+            COUNT(*) AS `count`
+        FROM sys_operation_log l
+        LEFT JOIN sys_operation_type t
+               ON t.type COLLATE utf8mb4_0900_ai_ci = l.operation_type
+        WHERE l.is_deleted = 0
+        AND l.operation_time >= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+        GROUP BY t.module
+        ORDER BY `count` DESC
     </select>
 
     <!-- 批量删除操作日志 -->

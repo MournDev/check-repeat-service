@@ -248,3 +248,7 @@ advisor-assign:
 # 兼容性配置
 upload:
   base-path: ${UPLOAD_BASE_PATH:/data/upload/}
+
+# 数据库备份目录（落在 docker-compose 已挂载的 app_data:/data 卷内）
+backup:
+  dir: ${BACKUP_DIR:/data/backup/}

@@ -89,11 +89,14 @@ public interface SysOperationLogService {
      * @param operationType 操作类型
      * @param username 用户名
      * @param status 状态
+     * @param userType 用户类型
      * @param startTime 开始时间
-     * @param endTime 结束时间
+     * @param endTime 结束时间（开区间上界，配合 &lt; 比较）
+     * @param keyword 关键字，匹配用户名或操作描述
      * @return 导出的数据列表
      */
     List<SysOperationLog> exportOperationLogs(String operationType, String username,
-                                              Integer status, LocalDateTime startTime,
-                                              LocalDateTime endTime);
+                                              Integer status, String userType,
+                                              LocalDateTime startTime,
+                                              LocalDateTime endTime, String keyword);
 }

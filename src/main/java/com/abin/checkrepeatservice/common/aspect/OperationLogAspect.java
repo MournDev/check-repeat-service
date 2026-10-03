@@ -65,13 +65,17 @@ public class OperationLogAspect {
                           Object result, String errorMsg, long executeTime) {
         try {
             SysOperationLog logEntity = new SysOperationLog();
-            
-            // 获取当前用户信息
-            String username = getCurrentUsername();
-            Long userId = getCurrentUserId();
-            
+
+            // 获取当前用户信息（token 只解析一次，避免用户名/ID/角色各解析一遍）
+            String token = getBearerToken();
+            String username = extractUsername(token);
+            Long userId = extractUserId(token);
+
             logEntity.setUserId(userId);
             logEntity.setUserName(username);
+            // 用户类型取 token 里的 roleCode，与前端 STUDENT/TEACHER/ADMIN 字典一致；
+            // 不写则走库默认值 '未知用户'，操作日志页「用户类型」列会显示为空
+            logEntity.setUserType(extractRoleCode(token));
             logEntity.setOperationType(operationLog.type());
             logEntity.setDescription(buildDescription(operationLog, joinPoint));
             
@@ -84,9 +88,15 @@ public class OperationLogAspect {
             // 记录IP地址
             logEntity.setIpAddress(getClientIpAddress());
             
-            // 记录执行时间
+            // 记录操作时间
             logEntity.setOperationTime(LocalDateTime.now());
-            
+
+            // 记录执行耗时（毫秒）——统计分析的「平均执行耗时」依赖此列
+            logEntity.setExecutionTime(executeTime);
+
+            // 记录操作结果状态——不显式写入会走库默认值 1，「失败操作」将恒为 0
+            logEntity.setStatus(errorMsg == null ? 1 : 0);
+
             // 保存到数据库
             sysOperationLogMapper.insert(logEntity);
             
@@ -98,38 +108,61 @@ public class OperationLogAspect {
         }
     }
 
-    private String getCurrentUsername() {
+    /**
+     * 从当前请求头取出 Bearer token（无则返回 null）
+     */
+    private String getBearerToken() {
         try {
             ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
             if (attributes != null) {
                 HttpServletRequest request = attributes.getRequest();
-                String token = request.getHeader("Authorization");
-                if (token != null && token.startsWith("Bearer ")) {
-                    token = token.substring(7);
-                    return jwtUtils.extractUsername(token);
+                String header = request.getHeader("Authorization");
+                if (header != null && header.startsWith("Bearer ")) {
+                    return header.substring(7);
                 }
             }
         } catch (Exception e) {
-            log.warn("获取当前用户名失败: {}", e.getMessage());
+            log.warn("获取请求token失败: {}", e.getMessage());
         }
-        return "anonymous";
+        return null;
     }
 
-    private Long getCurrentUserId() {
-        try {
-            ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
-            if (attributes != null) {
-                HttpServletRequest request = attributes.getRequest();
-                String token = request.getHeader("Authorization");
-                if (token != null && token.startsWith("Bearer ")) {
-                    token = token.substring(7);
-                    return jwtUtils.extractUserId(token);
-                }
-            }
-        } catch (Exception e) {
-            log.warn("获取当前用户ID失败: {}", e.getMessage());
+    private String extractUsername(String token) {
+        if (token == null) {
+            return "anonymous";
         }
-        return 0L;
+        try {
+            String username = jwtUtils.extractUsername(token);
+            return username != null ? username : "anonymous";
+        } catch (Exception e) {
+            log.warn("从token解析用户名失败: {}", e.getMessage());
+            return "anonymous";
+        }
+    }
+
+    private Long extractUserId(String token) {
+        if (token == null) {
+            return 0L;
+        }
+        try {
+            Long userId = jwtUtils.extractUserId(token);
+            return userId != null ? userId : 0L;
+        } catch (Exception e) {
+            log.warn("从token解析用户ID失败: {}", e.getMessage());
+            return 0L;
+        }
+    }
+
+    private String extractRoleCode(String token) {
+        if (token == null) {
+            return null;
+        }
+        try {
+            return jwtUtils.extractRoleCode(token);
+        } catch (Exception e) {
+            log.warn("从token解析角色编码失败: {}", e.getMessage());
+            return null;
+        }
     }
 
     private String getClientIpAddress() {

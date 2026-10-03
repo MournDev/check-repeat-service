@@ -9,6 +9,7 @@ import com.abin.checkrepeatservice.student.mapper.CheckTaskMapper;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -36,10 +37,25 @@ public class DataIntegrityChecker {
     private PaperInfoMapper paperInfoMapper;
 
     /**
+     * 数据完整性检查开关，默认关。
+     *
+     * <p>本任务在加上 {@code @EnableScheduling} 之前从未执行过，
+     * 而它会插查重结果、并改写论文的重复率与完成标记（见下方各 fix* 方法），
+     * 属"会按历史数据自动修库"的一类。上线不应是它第一次跑，
+     * 需要显式打开 {@code schedule.data-integrity.enabled} 并先观察一遍输出。</p>
+     */
+    @Value("${schedule.data-integrity.enabled:false}")
+    private boolean integrityCheckEnabled;
+
+    /**
      * 每天凌晨 3 点执行数据完整性检查
      */
     @Scheduled(cron = "0 0 3 * * ?")
     public void checkDataIntegrity() {
+        if (!integrityCheckEnabled) {
+            log.debug("数据完整性检查已关闭（schedule.data-integrity.enabled=false），跳过");
+            return;
+        }
         log.info("开始执行数据完整性检查任务");
         
         int fixedCount = 0;

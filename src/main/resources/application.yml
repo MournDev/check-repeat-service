@@ -244,3 +244,28 @@ advisor-assign:
 # 兼容性配置
 upload:
   base-path: ${UPLOAD_BASE_PATH:/data/upload/}
+
+# 数据库备份
+# 注意：enabled / retention-days 只是"库里取不到时的兜底默认值"，
+# 运行时以 system_param 表的 backup_enabled / backup_retention_days 为准
+# （由「系统配置」页的备份设置读写），避免两个真相源。
+backup:
+  dir: ${BACKUP_DIR:/data/backup/}
+  enabled: true
+  retention-days: 30
+
+# 定时任务开关
+# 本应用此前**没有** @EnableScheduling，因此下面这些 @Scheduled 方法虽然写了，
+# 却从未执行过。补上注解后它们会立刻生效，其中两个会按库里的历史数据改数据：
+# 与其让"上线"成为它们第一次运行，不如默认关闭，确认过输出再逐个打开。
+# （AutoBackupScheduler 不在这里，它由 system_param.backup_enabled 控制，
+#   也就是「系统配置」页上的那个开关。）
+schedule:
+  check-task:
+    # 把 check_status='checking' 且已超 1 小时的任务标记为失败 —— 会写库
+    timeout-scan-enabled: false
+    # 清理 30 天前的已完成/失败/取消任务 —— 当前实现只打日志，未真删
+    cleanup-enabled: false
+  data-integrity:
+    # 每天 3:00 校验并修复一致性：插入查重结果、改写论文重复率与完成标记 —— 会写库
+    enabled: false

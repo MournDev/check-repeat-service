@@ -64,7 +64,9 @@ public class SysOperationLogServiceImpl extends ServiceImpl<SysOperationLogMappe
                                                      LocalDateTime endTime) {
         try {
             Page<SysOperationLog> pageObj = new Page<>(page, size);
-            return sysOperationLogMapper.selectOperationLogPage(pageObj, operationType, username, status, startTime, endTime);
+            // userType / keyword 传 null：/page 端点不接受这两个参数，行为与改动前一致
+            return sysOperationLogMapper.selectOperationLogPage(
+                    pageObj, operationType, username, status, startTime, endTime, null, null);
         } catch (Exception e) {
             log.error("分页查询操作日志失败: {}", e.getMessage(), e);
             throw new RuntimeException("分页查询操作日志失败", e);
@@ -172,13 +174,14 @@ public class SysOperationLogServiceImpl extends ServiceImpl<SysOperationLogMappe
 
     @Override
     public List<SysOperationLog> exportOperationLogs(String operationType, String username,
-                                                     Integer status, LocalDateTime startTime,
-                                                     LocalDateTime endTime) {
+                                                     Integer status, String userType,
+                                                     LocalDateTime startTime,
+                                                     LocalDateTime endTime, String keyword) {
         try {
             // 使用大分页获取所有数据
             Page<SysOperationLog> page = new Page<>(1, 10000); // 最多导出1万条
             Page<SysOperationLog> result = sysOperationLogMapper.selectOperationLogPage(
-                page, operationType, username, status, startTime, endTime);
+                page, operationType, username, status, startTime, endTime, userType, keyword);
             return result.getRecords();
         } catch (Exception e) {
             log.error("导出操作日志失败: {}", e.getMessage(), e);

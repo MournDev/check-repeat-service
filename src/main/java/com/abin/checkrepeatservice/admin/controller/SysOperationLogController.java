@@ -4,6 +4,7 @@ import com.abin.checkrepeatservice.admin.service.SysOperationLogService;
 import com.abin.checkrepeatservice.admin.vo.OperationLogExcelVO;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
+import com.abin.checkrepeatservice.common.utils.DateTimeUtils;
 import com.abin.checkrepeatservice.pojo.entity.SysOperationLog;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.extern.slf4j.Slf4j;
@@ -47,9 +48,9 @@ public class SysOperationLogController {
                 page, size, operationType, username, status);
         
         try {
-            LocalDateTime start = parseDateTime(startTime);
-            LocalDateTime end = parseDateTime(endTime);
-            
+            LocalDateTime start = DateTimeUtils.parseStart(startTime);
+            LocalDateTime end = DateTimeUtils.parseEndExclusive(endTime);
+
             Page<SysOperationLog> result = sysOperationLogService.getOperationLogPage(
                 page, size, operationType, username, status, start, end);
             
@@ -216,18 +217,31 @@ public class SysOperationLogController {
                                     @RequestParam(required = false) String operationType,
                                     @RequestParam(required = false) String username,
                                     @RequestParam(required = false) Integer status,
+                                    @RequestParam(required = false) String userType,
+                                    @RequestParam(required = false) String keyword,
+                                    @RequestParam(required = false) String startDate,
+                                    @RequestParam(required = false) String endDate,
                                     @RequestParam(required = false) String startTime,
                                     @RequestParam(required = false) String endTime) {
-        
-        log.info("接收导出操作日志请求");
-        
+
+        // 日期参数有两套叫法，都必须收：前端 LogCenter 的「导出日志」传的是
+        // startDate / endDate，而本方法原先只声明了 startTime / endTime。
+        // Spring 对未声明的查询参数一律静默忽略，所以日期筛选一直没生效——
+        // 用户选了时间范围导出，拿到的却是全量，且没有任何报错。
+        // 新名字优先，保留下划线旧名兼容既有调用方。
+        String startText = startDate != null ? startDate : startTime;
+        String endText = endDate != null ? endDate : endTime;
+
+        log.info("接收导出操作日志请求: operationType={}, userType={}, keyword={}, start={}, end={}",
+                operationType, userType, keyword, startText, endText);
+
         try {
-            LocalDateTime start = parseDateTime(startTime);
-            LocalDateTime end = parseDateTime(endTime);
-            
+            LocalDateTime start = DateTimeUtils.parseStart(startText);
+            LocalDateTime end = DateTimeUtils.parseEndExclusive(endText);
+
             List<SysOperationLog> logs = sysOperationLogService.exportOperationLogs(
-                operationType, username, status, start, end);
-            
+                operationType, username, status, userType, start, end, keyword);
+
             // 设置响应头
             response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
             response.setCharacterEncoding("utf-8");
@@ -264,26 +278,9 @@ public class SysOperationLogController {
         }
     }
 
-    /**
-     * 解析日期时间字符串
+    /*
+     * 原私有方法 parseDateTime 已删除：其兜底分支用 "yyyy-MM-dd" 去解析
+     * "x 00:00:00"，多出的时间部分是 unparsed text，必然抛异常返回 null，
+     * 导致纯日期输入的过滤条件被静默忽略。现已统一改用 DateTimeUtils。
      */
-    private LocalDateTime parseDateTime(String dateTimeStr) {
-        if (dateTimeStr == null || dateTimeStr.isEmpty()) {
-            return null;
-        }
-        
-        try {
-            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-            return LocalDateTime.parse(dateTimeStr, formatter);
-        } catch (Exception e) {
-            log.warn("日期时间格式解析失败: {}, 使用默认格式尝试", dateTimeStr);
-            try {
-                DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd");
-                return LocalDateTime.parse(dateTimeStr + " 00:00:00", formatter);
-            } catch (Exception ex) {
-                log.error("日期时间解析完全失败: {}", dateTimeStr);
-                return null;
-            }
-        }
-    }
 }

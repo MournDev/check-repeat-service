@@ -336,3 +336,76 @@ docker exec check-repeat-mysql sh -c \
 ### 大表 DDL 先手工做
 
 healthcheck 的 `start_period` 是 120 秒。大表加索引这类耗时操作会让启动变慢、可能被误判为部署失败并触发回滚，建议上线前手工先执行。
+
+### 本轮上线前必须手工执行的两条 SQL
+
+顺序不能颠倒：**先 DDL，再 seed**，两条都在发版之前完成。
+
+```bash
+# 1. 给 sys_operation_log 加「执行耗时」列。
+#    不执行的话，日志中心「统计分析」页的四个接口会全部 500：
+#    Unknown column 'execution_time' in 'field list'。
+#    列可空，旧代码忽略它，所以「先 DDL 后发版」对新旧两个版本都安全。
+docker exec -i check-repeat-mysql sh -c \
+  'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "check-repeat-system"' \
+  < src/main/resources/db/alter_20261003_sys_operation_log_execution_time.sql
+
+# 2. 补操作类型字典里缺的 5 个 type（幂等，含 ON DUPLICATE KEY UPDATE，可重复执行）
+docker exec -i check-repeat-mysql sh -c \
+  'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "check-repeat-system"' \
+  < src/main/resources/db/seed_sys_operation_type.sql
+```
+
+执行后自检：
+
+```sql
+SHOW COLUMNS FROM `sys_operation_log` LIKE 'execution_time';  -- 应返回一行
+SELECT COUNT(*) FROM `sys_operation_type`;                     -- 应 > 0
+```
+
+**为什么 seed 是必须的**：`sys_operation_type` 此前**不是空表**（实际有 134 行），
+但日志里出现的操作类型并不都在字典里。「模块使用率」饼图靠
+`LEFT JOIN sys_operation_type` 取模块名，字典里没有的 type 会落到 `'未知'`。
+截至 2026-10-03，2369 行日志中有 83 行（3.5%）未命中，恰好是
+`admin_auto_assign`、`check_task_create`、`check_task_delete`、`user_update_info`、
+`teacher_update_info` 这 5 个；补齐后覆盖率为 100%。seed 只补这 5 个，
+其余 2286 行已由字典中既有条目命中，不改动。（另注：`init.sql` 里
+`sys_operation_type` 只有建表、没有 INSERT，所以新建空库时这张表是空的。）
+
+**不要删模块统计 JOIN 上的 `COLLATE`**：两张表的排序规则不同
+（`sys_operation_log` 是 `utf8mb4_0900_ai_ci`，`sys_operation_type` 是
+`utf8mb4_unicode_ci`），`SysOperationLogMapper.xml` 里的
+`ON t.type COLLATE utf8mb4_0900_ai_ci = l.operation_type` 是必需的，
+去掉会抛 `Illegal mix of collations ... for operation '='` 使接口 500。
+
+### 定时任务开关（本轮新增，默认全关）
+
+本轮给 `CheckRepeatServiceApplication` 补上了 `@EnableScheduling`。在此之前
+应用上**没有**这个注解，因此 `CheckTaskScheduler` 与 `DataIntegrityChecker` 里的
+`@Scheduled` 方法虽然一直存在，却从未执行过。补上注解后它们会立即开始生效，
+其中两个会按库里的历史数据改动数据。为了不让「上线」成为它们第一次运行，
+这几个开关默认全部关闭，确认过行为再逐个打开：
+
+| 配置项 | 默认 | 打开后的行为 |
+|---|---|---|
+| `schedule.check-task.timeout-scan-enabled` | `false` | **启动即执行**，之后每 5 分钟一次：把 `check_status='checking'` 且已超 1 小时的任务标记为失败（**写库**） |
+| `schedule.check-task.cleanup-enabled` | `false` | 每天 2:00：清理 30 天前的已完成/失败/取消任务（当前实现只打日志，未真删除） |
+| `schedule.data-integrity.enabled` | `false` | 每天 3:00：插入缺失的查重结果、改写论文的重复率与完成标记（**写库**） |
+
+第一项是 `fixedRate`，**启动时就会跑第一次**，不是等 5 分钟——所以「先启动看看、
+有问题再关」这个顺序不可行，要关必须在启动前关。打开前建议先查影响面：
+
+```sql
+SELECT COUNT(*) FROM `check_task`
+ WHERE check_status = 'checking' AND start_time < DATE_SUB(NOW(), INTERVAL 1 HOUR);
+```
+
+`AutoBackupScheduler` 不在这张表里：它由「系统配置」页的
+`system_param.backup_enabled` 控制（每天 2:00 执行），属本轮新功能，随页面开关走。
+
+### 备份文件的落点
+
+备份写在 `${BACKUP_DIR}`，生产为 `/data/backup/`。该路径已在
+`docker-compose.prod.yml` 的 `app_data:/data` 卷内（`app_data` 是 external 的既有卷
+`check-repeat_app_data`），**compose 无需改动**。导出用纯 JDBC 实现，不依赖
+容器内的 `mysqldump`（生产镜像 `eclipse-temurin:17-jre` 里没有）。

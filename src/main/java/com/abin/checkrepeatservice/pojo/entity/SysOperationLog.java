@@ -61,6 +61,24 @@ public class SysOperationLog extends BaseEntity {
     private LocalDateTime operationTime;
 
     /**
+     * 执行耗时（毫秒）
+     */
+    @TableField("execution_time")
+    private Long executionTime;
+
+    /**
+     * 操作状态（1成功，0失败）
+     */
+    @TableField("status")
+    private Integer status;
+
+    /**
+     * 操作用户类型（STUDENT/TEACHER/ADMIN/SUPER_ADMIN）
+     */
+    @TableField("user_type")
+    private String userType;
+
+    /**
      * 是否删除（0-未删除，1-已删除）
      */
     @TableLogic

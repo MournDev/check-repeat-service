@@ -79,5 +79,20 @@ public class SystemParam extends BaseEntity{
     @TableField("maintenance_notice")
     private String maintenanceNotice;
 
+    /**
+     * 是否启用自动备份（0-禁用，1-启用）
+     * 对应表字段：backup_enabled
+     * 运行时以本字段为准，yml 的 backup.enabled 仅作取不到时的兜底默认值
+     */
+    @TableField("backup_enabled")
+    private Integer backupEnabled;
+
+    /**
+     * 备份文件保留天数
+     * 对应表字段：backup_retention_days
+     */
+    @TableField("backup_retention_days")
+    private Integer backupRetentionDays;
+
 
 }

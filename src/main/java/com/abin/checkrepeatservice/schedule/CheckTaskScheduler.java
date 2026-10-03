@@ -4,29 +4,53 @@ import com.abin.checkrepeatservice.common.enums.CheckTaskStatusEnum;
 import com.abin.checkrepeatservice.common.statemachine.CheckTaskStateMachine;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
  * 查重任务定时任务
  * 负责清理超时任务、状态监控等
+ *
+ * <p><b>关于开关：</b>本类原有的两个写库任务在加上 {@code @EnableScheduling}
+ * 之前从未执行过（应用上没有该注解）。为了不让上线瞬间就开始按历史数据改库，
+ * 它们默认关闭，需要显式打开：</p>
+ * <ul>
+ *   <li>{@code schedule.check-task.timeout-scan-enabled}（默认 false）——会把
+ *       {@code check_status='checking'} 且已超 1 小时的任务判为失败，**会写库**</li>
+ *   <li>{@code schedule.check-task.cleanup-enabled}（默认 false）——目前只打日志，
+ *       但语义是清理旧任务，同样先关着</li>
+ * </ul>
+ * <p>{@link #taskStatusStatistics()} 只打 debug 日志、不碰库，未加开关。</p>
  */
 @Component
 @Slf4j
 public class CheckTaskScheduler {
-    
+
     @Autowired
     private CheckTaskStateMachine stateMachine;
-    
+
+    /** 超时任务扫描开关，默认关：开启后会把超时任务标记为失败（写库） */
+    @Value("${schedule.check-task.timeout-scan-enabled:false}")
+    private boolean timeoutScanEnabled;
+
+    /** 旧任务清理开关，默认关 */
+    @Value("${schedule.check-task.cleanup-enabled:false}")
+    private boolean cleanupEnabled;
+
     /**
      * 每5分钟检查一次超时的查重任务
      * 将超过1小时仍在执行中的任务标记为失败
      */
     @Scheduled(fixedRate = 300000) // 5分钟执行一次
     public void checkTimeoutTasks() {
+        if (!timeoutScanEnabled) {
+            log.debug("超时任务扫描已关闭（schedule.check-task.timeout-scan-enabled=false），跳过");
+            return;
+        }
         try {
             log.info("开始检查超时查重任务...");
-            
+
             String condition = "check_status = '" + CheckTaskStatusEnum.CHECKING.getCode() + 
                              "' AND start_time < DATE_SUB(NOW(), INTERVAL 1 HOUR)";
             
@@ -51,6 +75,10 @@ public class CheckTaskScheduler {
      */
     @Scheduled(cron = "0 0 2 * * ?") // 每天凌晨2点执行
     public void cleanupOldTasks() {
+        if (!cleanupEnabled) {
+            log.debug("旧任务清理已关闭（schedule.check-task.cleanup-enabled=false），跳过");
+            return;
+        }
         try {
             log.info("开始清理旧查重任务数据...");
             

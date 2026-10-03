@@ -1363,6 +1363,7 @@ CREATE TABLE `sys_operation_log` (
   `ip_address` varchar(50) NOT NULL COMMENT '操作IP地址',
   `description` varchar(255) DEFAULT NULL COMMENT '描述',
   `operation_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '操作时间',
+  `execution_time` bigint DEFAULT NULL COMMENT '执行耗时(毫秒)',
   `create_by` bigint NOT NULL COMMENT '创建人ID（关联sys_user.id，即操作人ID）',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '数据创建时间',
   `update_by` bigint NOT NULL COMMENT '更新人ID（关联sys_user.id，与create_by一致）',
