@@ -74,6 +74,8 @@ public interface StudentMessageService {
 
     /**
      * 获取导师信息
+     *
+     * @return 学生的指导老师；学生还没有导师时返回 null（正常状态，不抛异常）
      */
     AdvisorInfoVO getAdvisorInfo(Long studentId);
 }

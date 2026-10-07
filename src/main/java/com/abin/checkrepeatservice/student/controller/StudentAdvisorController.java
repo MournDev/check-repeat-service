@@ -37,6 +37,8 @@ public class StudentAdvisorController {
             Long studentId = UserBusinessInfoUtils.getCurrentUserId();
             log.info("获取导师信息 - 学生ID: {}", studentId);
             
+            // advisorInfo 为 null 表示该学生还没有导师：正常状态，照样 200 返回，
+            // 前端按空态渲染，不要当成错误。
             AdvisorInfoVO advisorInfo = studentMessageService.getAdvisorInfo(studentId);
             return Result.success("获取导师信息成功", advisorInfo);
         } catch (Exception e) {

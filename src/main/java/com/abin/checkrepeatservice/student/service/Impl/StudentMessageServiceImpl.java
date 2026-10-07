@@ -669,16 +669,23 @@ public class StudentMessageServiceImpl implements StudentMessageService {
                        .isNotNull(PaperInfo::getTeacherId);
             List<PaperInfo> papers = paperInfoMapper.selectList(paperWrapper);
             
+            // 没有导师是正常状态（刚注册、还没被分配），不是故障：返回 null 让调用方走空态。
+            // 原来抛异常，会被下面的 catch 再包一层，前端只收到一句红字，连"没导师"都读不出来。
             if (papers.isEmpty()) {
-                throw new RuntimeException("未找到指导老师信息");
+                log.info("学生暂未分配指导老师 - 学生 ID: {}", studentId);
+                return null;
             }
-            
+
             // 获取第一个论文的导师信息
             PaperInfo paper = papers.get(0);
             SysUser teacher = sysUserMapper.selectById(paper.getTeacherId());
-            
+
+            // paper_info 挂着 teacher_id、sys_user 里却没这个人：数据不一致。
+            // 对学生来说同样是"没导师可看"，记 warn 便于排查，仍然按空处理。
             if (teacher == null) {
-                throw new RuntimeException("导师信息不存在");
+                log.warn("论文 {} 的 teacher_id={} 在 sys_user 中查不到，按未分配导师处理",
+                        paper.getId(), paper.getTeacherId());
+                return null;
             }
             
             //构建导师信息 VO
