@@ -15,7 +15,11 @@ kkfileview:
 
 # 对象存储
 minio:
+  # 后端连 MinIO 用（SDK 连接地址）。容器部署下是 compose 网络别名，只有容器内能解析。
   endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+  # 拼给浏览器用的地址（如头像的 <img src>）。不配则回退成 endpoint。
+  # 生产必须填浏览器可达的地址：http://<公网IP>:9000 或 https://<域名>/minio
+  public-endpoint: ${MINIO_PUBLIC_ENDPOINT:${MINIO_ENDPOINT:http://localhost:9000}}
   accesskey: ${MINIO_ACCESSKEY:minioadmin}
   secretkey: ${MINIO_SECRETKEY:minioadmin}
   bucket:

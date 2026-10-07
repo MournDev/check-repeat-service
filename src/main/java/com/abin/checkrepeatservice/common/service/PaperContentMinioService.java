@@ -25,8 +25,13 @@ public class PaperContentMinioService {
     @Value("${minio.bucket.paper_content:paper-content}")
     private String bucketName;
 
-    @Value("${minio.endpoint}")
-    private String minioEndpoint;
+    /**
+     * 拼存库路径用的地址，必须是浏览器可达的。
+     * 不能用 {@code minio.endpoint}：那是 SDK 的连接地址，容器部署下是网络别名，
+     * 存进库的 URL 浏览器打不开。未配置 public-endpoint 时回退成 endpoint。
+     */
+    @Value("${minio.public-endpoint:${minio.endpoint}}")
+    private String minioPublicEndpoint;
 
     /**
      * 存储论文正文内容到MinIO
@@ -58,7 +63,7 @@ public class PaperContentMinioService {
                         .build());
             }
             
-            String fullPath = minioEndpoint + "/" + bucketName + "/" + fileName;
+            String fullPath = minioPublicEndpoint + "/" + bucketName + "/" + fileName;
             log.info("论文正文存储成功: paperId={}, path={}", paperId, fullPath);
             return fullPath;
         } catch (Exception e) {
@@ -86,7 +91,7 @@ public class PaperContentMinioService {
                         .build());
             }
             
-            String fullPath = minioEndpoint + "/" + bucketName + "/" + fileName;
+            String fullPath = minioPublicEndpoint + "/" + bucketName + "/" + fileName;
             log.info("论文分词结果存储成功: paperId={}, path={}", paperId, fullPath);
             return fullPath;
         } catch (Exception e) {

@@ -62,6 +62,17 @@ public class InfoServiceImpl implements InfoService {
     @Value("${minio.endpoint}")
     private String minioEndpoint;
 
+    /**
+     * 浏览器直连用的 MinIO 地址，只用来拼存库的 URL（头像的 &lt;img src&gt;）。
+     *
+     * <p>必须和 {@link #minioEndpoint} 分开：后者是后端 SDK 的连接地址，容器部署下
+     * 通常是 compose 里的网络别名（如 {@code http://minio:9000}），只有同网络容器能解析 ——
+     * 拿它拼出来的 URL 存进 sys_user.avatar，浏览器打不开，头像永远裂图。
+     * 没配 MINIO_PUBLIC_ENDPOINT 时回退成 endpoint，行为和以前一致。</p>
+     */
+    @Value("${minio.public-endpoint:${minio.endpoint}}")
+    private String minioPublicEndpoint;
+
     @Value("${spring.mail.username}")
     private String fromEmail;
 
@@ -236,8 +247,8 @@ public class InfoServiceImpl implements InfoService {
                         .build());
             }
 
-            // 6. 构建可访问的头像URL
-            String avatarUrl = minioEndpoint + "/" + avatarBucket + "/" + uniqueFileName;
+            // 6. 构建可访问的头像URL（给浏览器用的那个地址，不是 SDK 的连接地址）
+            String avatarUrl = minioPublicEndpoint + "/" + avatarBucket + "/" + uniqueFileName;
 
             // 7. 更新用户头像路径
             currentUser.setAvatar(avatarUrl);

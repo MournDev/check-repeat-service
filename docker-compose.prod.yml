@@ -43,7 +43,14 @@ services:
       REDIS_PORT: ${REDIS_PORT:-6379}
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       # MinIO
+      # MINIO_ENDPOINT 是容器内的连接地址（网络别名），后端 SDK 用
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
+      # MINIO_PUBLIC_ENDPOINT 是拼给浏览器的地址（头像 <img src>、论文正文路径），
+      # 必须在 .env 里显式配成浏览器可达的地址。当前线上走网关反代，
+      # 配 MINIO_PUBLIC_ENDPOINT=https://check-repeat-system.xyz/minio
+      # （对应 deploy/nginx-gateway.conf 里的 location /minio/，二者前缀必须一致）。
+      # 不配的话头像 URL 会是 http://minio:9000/... —— 浏览器解析不了，头像裂图。
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-http://minio:9000}
       MINIO_ACCESSKEY: ${MINIO_ROOT_USER:-admin}
       MINIO_SECRETKEY: ${MINIO_ROOT_PASSWORD}
       # KKFileView 在线预览（缺失时 yml 会回退到 http://localhost:8080，即后端自身，预览必然 404）
