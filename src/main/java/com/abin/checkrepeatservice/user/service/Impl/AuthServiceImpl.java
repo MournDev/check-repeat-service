@@ -3,8 +3,8 @@ package com.abin.checkrepeatservice.user.service.Impl;
 
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
+import com.abin.checkrepeatservice.common.service.IpLocationService;
 import com.abin.checkrepeatservice.common.utils.HttpIpUtils;
-import com.abin.checkrepeatservice.common.utils.IpLocationUtils;
 import com.abin.checkrepeatservice.common.utils.JwtUtils;
 import com.abin.checkrepeatservice.common.utils.UserAgentUtils;
 import com.abin.checkrepeatservice.mapper.SysRoleMapper;
@@ -68,6 +68,9 @@ public class AuthServiceImpl implements AuthService {
     private SysLoginLogMapper sysLoginLogMapper;
 
     @Resource
+    private IpLocationService ipLocationService;
+
+    @Resource
     private BusinessMetricsService businessMetricsService;
 
     /**
@@ -123,7 +126,7 @@ public class AuthServiceImpl implements AuthService {
     public Result<LoginVO> login(LoginReq loginReq) {
         String loginIp = HttpIpUtils.getRealIp(request);           // IP地址
         String loginDevice = UserAgentUtils.parseDevice(request);   // 设备信息
-        String loginLocation = IpLocationUtils.getLocationByIp(loginIp); // 地理位置
+        String loginLocation = ipLocationService.getLocationByIp(loginIp); // 属地（离线库 ip2region）
         // 1. 执行Spring Security认证（用户名+密码校验）
         Authentication authentication;
         try {

@@ -305,6 +305,13 @@
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-aop</artifactId>
     </dependency>
+
+    <!-- 登录 IP 属地（离线库，不依赖外部接口；数据文件见 resources/ip2region/） -->
+    <dependency>
+        <groupId>org.lionsoul</groupId>
+        <artifactId>ip2region</artifactId>
+        <version>3.3.7</version>
+    </dependency>
     </dependencies>
 
     <build>
