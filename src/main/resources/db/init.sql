@@ -1,3 +1,17 @@
+-- ============================================================================
+-- 建表脚本 —— 本仓库唯一的表结构来源（59 张表）。
+--
+-- 由「旧一体化系统导出的库结构 + 按实体类和 Mapper XML 校正」而来，与 Java 实体 /
+-- MyBatis-Plus 的约定对齐（逻辑删除列 is_deleted、create_*/update_* 审计列、字典取值）。
+-- 实体类 / Mapper XML / 本文件三方不一致时，先判断方向、不要默认哪边写错了。
+--
+-- 执行约定：
+--   · 开头是 DROP TABLE IF EXISTS，**只能对空库整份执行**；
+--   · 已有数据的库要改结构，请照本文件写一份只含本次变更的 ALTER 脚本手工跑，
+--     不要整份重跑（会清数据）；
+--   · 初始数据见同目录 种子数据.sql；存量库的结构/数据补救见 存量修复.sql。
+-- ============================================================================
+
 -- MySQL dump 10.13  Distrib 8.0.23, for Win64 (x86_64)
 --
 -- Host: localhost    Database: check-repeat-service
@@ -239,7 +253,12 @@ CREATE TABLE `category_similarity_threshold` (
   `is_deleted` int DEFAULT '0' COMMENT '软删除标记（0-未删除，1-已删除）',
   `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
   `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
-  PRIMARY KEY (`id`)
+  PRIMARY KEY (`id`),
+  -- 解析阈值固定按 category_type + college_id / major_id 取单行
+  -- （SimilarityThresholdResolver.categoryThreshold），每篇论文查两次：
+  -- 先专业、未命中再学院。表本身小，但查重每次调用都会走到，故建索引。
+  KEY `idx_type_college` (`category_type`,`college_id`),
+  KEY `idx_type_major`   (`category_type`,`major_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='学科/专业相似度阈值设置表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -1698,7 +1717,8 @@ CREATE TABLE `teacher_info` (
 -- 按 (event, result, stat_date) 日聚合 + upsert（INSERT ... ON DUPLICATE KEY UPDATE），
 -- 不是每次事件插一行原始日志，避免无界增长并把 /metrics 变成对百万行做 GROUP BY。
 -- id 为雪花 ID，由 Java 侧 IdWorker 生成，故此处不设 AUTO_INCREMENT。
--- 对已有数据的库请改用 db/alter_20261003_metric_event_daily.sql。
+-- 对已有数据的库（本表可能还不存在）请改用 db/存量修复.sql 段 1.7，
+-- 那段是 CREATE TABLE IF NOT EXISTS，可重复执行。
 --
 
 DROP TABLE IF EXISTS `metric_event_daily`;

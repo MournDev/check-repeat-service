@@ -74,7 +74,7 @@ public class SimilarityThresholdServiceImpl implements SimilarityThresholdServic
                 entity.setCollegeId(item.getCollegeId());
                 entity.setMajorId(item.getMajorId());
                 entity.setThreshold(item.getThreshold());
-                // DDL 默认值不足恃（见 db/alter_20261003_category_similarity_threshold_is_deleted.sql）：
+                // DDL 默认值不足恃（存量库的 NULL 行见 db/存量修复.sql 段 2）：
                 // BaseEntity.isDeleted 没有 fill 注解，MyMetaObjectHandler 的 strictInsertFill 不会补，
                 // 落 NULL 的话后续查询恒拼 `is_deleted = 0` 就再也读不回这一行。这里显式兜底。
                 entity.setIsDeleted(0);

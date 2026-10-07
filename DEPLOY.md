@@ -299,9 +299,15 @@ docker exec -it check-repeat-mysql mysql -uroot -p     # 进数据库
 
 表结构由**手工执行** `src/main/resources/db/init.sql` 维护，脚本已与实体类对齐。项目不使用迁移框架。
 
-- **新搭环境**：建好空库后执行一次 `db/init.sql`，即可建齐全部表（脚本开头是 `DROP TABLE IF EXISTS`，空库直接跑）。再执行一次 `db/seed_knowledge_and_message_template.sql` 补初始数据（见下条）。
-- **种子数据**：`db/seed_knowledge_and_message_template.sql` 只有 INSERT、没有 DDL，用 `ON DUPLICATE KEY UPDATE` 做成幂等，**新旧库都能反复执行**。它提供知识库分类，以及代码里硬编码引用的 11 个消息模板编码——**不执行它，论文状态变更 / 审核结果 / 查重完成 / 指导分配这些通知都会因「消息模板不存在」而发送失败**（`message_template` 表为空时 `MessageServiceImpl.sendMessageByTemplate` 一律返回该错误）。
+- **新搭环境**：建好空库后按顺序跑两个脚本——先 `db/init.sql` 建齐全部表（开头是 `DROP TABLE IF EXISTS`，空库直接跑），再 `db/种子数据.sql` 灌初始数据。两步之后系统即可用。
+- **种子数据**：`db/种子数据.sql` 是本仓库唯一的初始数据来源，可重复执行（每段按各自唯一键做 `ON DUPLICATE KEY UPDATE`），**新旧库都能反复跑**。内容按依赖顺序排：学院/专业基础数据（整表替换 + 全库引用改绑，20 学院 114 专业）→ 操作类型字典 `sys_operation_type`（139 条，日志中心「模块使用率」靠它分类，**只有这份文件有**，导不出来新环境就全是「未知」）→ 知识库分类 → 消息模板。
+  消息模板这一段是重点：**不跑它，论文状态变更 / 审核结果 / 查重完成 / 指导分配这些通知都会因「消息模板不存在」而发送失败**（`MessageServiceImpl.sendMessageByTemplate` 查库拿不到模板就返回该错误，只在日志里留一句告警）。它含代码正在用的全部 9 个模板编码，其中 `PAPER_STATUS_CHANGE`、`PAPER_REVIEW_RESULT`、`SIMILARITY_CHECK_RESULT` 是 2026-10-07 补的——此前库里没有这三个 code，那三类通知一直发不出去。
 - **改结构**：编辑 `db/init.sql` 保持一致，**再另出一份只含本次变更的 ALTER 脚本**手工对线上库执行——整份脚本含 `DROP TABLE IF EXISTS`，有数据的库不能重跑。
+- **存量库补齐历史欠账**：`db/存量修复.sql` 是一次性的增量脚本（结构对齐 + 历史数据修复），专门给「结构和数据落后于 `init.sql`」的库用——典型特征是库里 `flyway_schema_history` 有 V1~V7 但**没有 V8**。症状：对 `SysUserMapper` 的**任何**查询都报 `Unknown column 'college_name'`（`SysUser` 把 `college_name` / `major_id` 声明成真的 `@TableField`，MyBatis-Plus 会把它们拼进每一条自动生成的 SELECT），于是登录、管理端用户管理、学生/教师列表、各类 dashboard 全挂。脚本自带前置（「0. 自检」）和后置（「5. 执行后自检」）两段，跑完列差异归零即算对齐。**空库不要跑它**，直接 `init.sql` 一次建好。
+  - **用 `mysql --force` 跑**。`mysql` 客户端默认遇错即停，部分对齐过的库会在第一条 `1060 Duplicate column name` 处中断，**后面的段一条都不执行**（含段 1.7~1.9 的三个结构补齐）。加 `--force` 后逐条尝试，此时 `1060`（列已加）/`1061`（索引已建）/`1054`（审计列已改名）都是「已执行过」的预期信号，**成败只看「5. 执行后自检」的数值，不看有没有 ERROR 行**。
+  - 顺序依赖：**必须 `种子数据.sql` 先跑、`存量修复.sql` 后跑**。因为后者第 1 段会从 `teacher_info` / `student_info` 回填 `sys_user.major_id`；种子先跑则那两张表的 `major_id` 已是新 id，回填进去才对。跑反了 `sys_user.major_id` 会指向已不存在的旧 id（段 5.4 的悬空检查会非 0），补救 SQL 在该文件末尾的附录里。
+  - 该文件的前身（`align_existing_db.sql`）2026-09-29 被删过一次（`2b387cb`，判断依据是「线上库已手工执行过 V8，该脚本无用了」），2026-10-07 因本机库从未吃过这批变更而恢复，同日又并进本文件。**别再按「某台库跑过了」推断「所有库都不需要它」**——这个判断漏掉了那些更早建的库。（判据：本机库 `sys_user` 至今没有 `major_id` 列，所以这些是**待执行**，不是历史欠账。）
+  - 2026-10-07 重组：`db/` 从 11 个脚本收敛成 `init.sql` / `种子数据.sql` / `存量修复.sql` 三个，内容全部并入、没有丢弃。同日 4 个 `alter_*` 的处置是：结构部分并入 `init.sql`（含 `category_similarity_threshold` 的两个索引——此前只存在于 `alter_20261003_..._index.sql`，`init.sql` 漏了）和本文件段 1.7~1.9（`metric_event_daily` / `execution_time` / 两个索引，**存量库仍需要**，本机库实测就缺这两个索引），数据修复部分并入段 2、3。
 - **`create_time` 的库默认值现在是「承重」的**：`sys_notice`、`system_config`、`auto_assignment_config`、`auto_assignment_history` 的插入不再由代码赋值，改由 `DEFAULT CURRENT_TIMESTAMP` 填充（实体上去掉了 `fill = INSERT`，理由见 `SysNotice.createTime` 注释）。后续 ALTER **不要去掉这个默认值**，否则插入会写入 NULL。例外：`file_info.create_time` 是 `DEFAULT NULL`，其插入路径仍显式赋值，不能照搬这条约定。
 
 ### 库名
@@ -316,7 +322,7 @@ jdbc:mysql://${MYSQL_HOST}:${MYSQL_PORT}/${MYSQL_DATABASE:check-repeat-service}
 
 ### 结构以谁为准
 
-`db/init.sql` 是「旧一体化系统导出的库结构 + 按实体类和 Mapper XML 校正」后的结果，线上库已按它对齐。三方（实体类 / Mapper XML / init.sql）出现不一致时，**先判断方向、不要默认哪边写错了**：历史上就出现过「实体按合并后的结构写、而库还是旧结构」这种整体漂移，当时是按代码方向改的库。
+`db/init.sql` 是「旧一体化系统导出的库结构 + 按实体类和 Mapper XML 校正」后的结果，**它才是权威目标**；具体某台线上库是否已经对齐，要实测、不要假设（见上条 `存量修复.sql` 的两次反复）。三方（实体类 / Mapper XML / init.sql）出现不一致时，**先判断方向、不要默认哪边写错了**：历史上就出现过「实体按合并后的结构写、而库还是旧结构」这种整体漂移，当时是按代码方向改的库。
 
 动手改结构前，先导出线上实际结构做对照：
 
@@ -337,40 +343,31 @@ docker exec check-repeat-mysql sh -c \
 
 healthcheck 的 `start_period` 是 120 秒。大表加索引这类耗时操作会让启动变慢、可能被误判为部署失败并触发回滚，建议上线前手工先执行。
 
-### 本轮上线前必须手工执行的两条 SQL
+### 某轮上线前手工执行过的两条 SQL（内容已归档进常规脚本）
 
-顺序不能颠倒：**先 DDL，再 seed**，两条都在发版之前完成。
+2026-10-03 那轮上线前手工跑过两条 SQL，**现在都已并入下面的常规脚本**，
+新环境不用再单独执行；存量库走 `存量修复.sql`：
 
-```bash
-# 1. 给 sys_operation_log 加「执行耗时」列。
-#    不执行的话，日志中心「统计分析」页的四个接口会全部 500：
-#    Unknown column 'execution_time' in 'field list'。
-#    列可空，旧代码忽略它，所以「先 DDL 后发版」对新旧两个版本都安全。
-docker exec -i check-repeat-mysql sh -c \
-  'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "check-repeat-system"' \
-  < src/main/resources/db/alter_20261003_sys_operation_log_execution_time.sql
+| 当时单独跑的脚本 | 现在在哪 |
+|---|---|
+| `alter_20261003_sys_operation_log_execution_time.sql` | 空库：`init.sql`；存量库：`存量修复.sql` 段 1.8 |
+| `seed_sys_operation_type.sql`（当时只补 5 个 type） | `种子数据.sql` 段 4（现在是全量 139 行） |
 
-# 2. 补操作类型字典里缺的 5 个 type（幂等，含 ON DUPLICATE KEY UPDATE，可重复执行）
-docker exec -i check-repeat-mysql sh -c \
-  'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "check-repeat-system"' \
-  < src/main/resources/db/seed_sys_operation_type.sql
-```
+这段历史保留下来是因为症状和原因仍然值得记：
 
-执行后自检：
+- **为什么要加 `execution_time`**：不加的话，日志中心「统计分析」页的四个接口会全部 500，
+  报 `Unknown column 'execution_time' in 'field list'`。列可空、旧代码忽略它，
+  所以「先 DDL 后发版」对新旧两个版本都安全。
+  自检：`SHOW COLUMNS FROM sys_operation_log LIKE 'execution_time';`
+  存量库另见 `存量修复.sql` 的 0.6 / 5.6。
 
-```sql
-SHOW COLUMNS FROM `sys_operation_log` LIKE 'execution_time';  -- 应返回一行
-SELECT COUNT(*) FROM `sys_operation_type`;                     -- 应 > 0
-```
-
-**为什么 seed 是必须的**：`sys_operation_type` 此前**不是空表**（实际有 134 行），
-但日志里出现的操作类型并不都在字典里。「模块使用率」饼图靠
-`LEFT JOIN sys_operation_type` 取模块名，字典里没有的 type 会落到 `'未知'`。
-截至 2026-10-03，2369 行日志中有 83 行（3.5%）未命中，恰好是
-`admin_auto_assign`、`check_task_create`、`check_task_delete`、`user_update_info`、
-`teacher_update_info` 这 5 个；补齐后覆盖率为 100%。seed 只补这 5 个，
-其余 2286 行已由字典中既有条目命中，不改动。（另注：`init.sql` 里
-`sys_operation_type` 只有建表、没有 INSERT，所以新建空库时这张表是空的。）
+- **为什么要补字典**：`sys_operation_type` 此前**不是空表**（实际有 134 行），
+  但日志里出现的操作类型并不都在字典里。「模块使用率」饼图靠
+  `LEFT JOIN sys_operation_type` 取模块名，字典里没有的 type 会落到 `'未知'`。
+  截至 2026-10-03，2369 行日志中有 83 行（3.5%）未命中，恰好是
+  `admin_auto_assign`、`check_task_create`、`check_task_delete`、`user_update_info`、
+  `teacher_update_info` 这 5 个；补齐后覆盖率为 100%。现在 `种子数据.sql` 段 4
+  直接带全量 139 行，新库和存量库都能一次到位（`ON DUPLICATE KEY UPDATE`，可重复执行）。
 
 **不要删模块统计 JOIN 上的 `COLLATE`**：两张表的排序规则不同
 （`sys_operation_log` 是 `utf8mb4_0900_ai_ci`，`sys_operation_type` 是

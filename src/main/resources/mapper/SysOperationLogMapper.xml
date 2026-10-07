@@ -125,8 +125,8 @@
            (utf8mb4_0900_ai_ci,IMPLICIT) for operation '='
          整个接口 500。统一到左表的排序规则即可。
 
-      未被字典收录的 type 会落到 '未知'；缺失的条目由
-      db/seed_sys_operation_type.sql 补全。
+      未被字典收录的 type 会落到 '未知'；字典的完整初始化在
+      db/种子数据.sql 段 4（sys_operation_type，139 条）。
     -->
     <select id="getModuleUsageStatistics" parameterType="map" resultType="map">
         SELECT

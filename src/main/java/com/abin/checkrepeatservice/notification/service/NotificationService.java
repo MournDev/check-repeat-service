@@ -13,7 +13,7 @@ import com.abin.checkrepeatservice.common.Result;
  * 且方法重名，调错就会对同一个事件发两条通知。该服务已合并到这里。
  *
  * 注意：模板文案不在代码里，在 message_template 表。本类只负责把变量凑齐，
- * 改了某个模板引用的变量名，必须同步改 db/seed_knowledge_and_message_template.sql。
+ * 改了某个模板引用的变量名，必须同步改 db/种子数据.sql 段 6（message_template）。
  */
 public interface NotificationService {
 
