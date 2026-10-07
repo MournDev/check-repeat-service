@@ -16,7 +16,6 @@ import com.abin.checkrepeatservice.student.mapper.CheckRuleMapper;
 import com.abin.checkrepeatservice.student.mapper.CheckTaskMapper;
 import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import jakarta.annotation.Resource;
@@ -93,9 +92,13 @@ public class AdminRuleConfigServiceImpl extends ServiceImpl<CheckRuleMapper, Che
             ruleWrapper.eq(CheckRule::getIsDefault, isDefault);
         }
 
-        // 执行分页查询（按创建时间倒序）
-        IPage<CheckRule> ruleIPage = baseMapper.selectPage(rulePage, ruleWrapper);
-        Page<CheckRule> pageInfo = new Page<>();
+        // 按创建时间倒序。create_time 只到秒，同一秒内创建的多条规则谁在前由数据库定，
+        // 翻页时会出现"某条规则在第 1 页和第 2 页各出现一次"这类错乱，故再用 id 兜底排序
+        ruleWrapper.orderByDesc(CheckRule::getCreateTime)
+                .orderByDesc(CheckRule::getId);
+
+        // selectPage 会把记录与总数回填进传入的 page 对象，直接返回它即可
+        Page<CheckRule> pageInfo = baseMapper.selectPage(rulePage, ruleWrapper);
 
         return Result.success("查重规则列表查询成功", pageInfo);
     }
@@ -317,9 +320,12 @@ public class AdminRuleConfigServiceImpl extends ServiceImpl<CheckRuleMapper, Che
             libWrapper.eq(CompareLib::getIsEnabled, isEnabled);
         }
 
-        // 执行分页查询（按创建时间倒序）
-        IPage<CompareLib> libIPage = compareLibMapper.selectPage(libPage, libWrapper);
-        Page<CompareLib> pageInfo = new Page<>();
+        // 排序理由同 getCheckRuleList：create_time 精度到秒，需 id 兜底保证翻页稳定
+        libWrapper.orderByDesc(CompareLib::getCreateTime)
+                .orderByDesc(CompareLib::getId);
+
+        // selectPage 会把记录与总数回填进传入的 page 对象，直接返回它即可
+        Page<CompareLib> pageInfo = compareLibMapper.selectPage(libPage, libWrapper);
 
         return Result.success("比对库列表查询成功", pageInfo);
     }
