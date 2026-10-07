@@ -56,13 +56,12 @@ public class StudentInfoController {
     @PostMapping("/upload-avatar")
     public Result<String> uploadAvatar(@RequestParam("file") MultipartFile file) {
         log.info("接收用户头像上传请求：");
-        try {
-            Result<String> avatar = infoService.uploadAvatar(file);
-            return Result.success( "头像上传成功",avatar.getData());
-        } catch (Exception e) {
-            log.error("头像上传失败：", e);
-            return Result.error(ResultCode.SYSTEM_ERROR,"头像上传失败：" );
-        }
+        // 服务层已经把成功和失败都封在 Result 里了，这里直接返回。
+        // 曾经这里写的是 Result.success("头像上传成功", avatar.getData())，
+        // 等于把服务层的失败整个吞掉：MinIO 报「bucket 不存在」时，
+        // 前端收到的仍是 HTTP 200 + code 200 + 「头像上传成功」，只是 data 为 null，
+        // 表现成「点了没反应，但也没报错」。
+        return infoService.uploadAvatar(file);
     }
     /**
      * 查询用户登录历史接口

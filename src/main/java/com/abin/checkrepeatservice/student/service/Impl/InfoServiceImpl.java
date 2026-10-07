@@ -20,6 +20,7 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
+import io.minio.errors.ErrorResponseException;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
@@ -244,6 +245,18 @@ public class InfoServiceImpl implements InfoService {
 
             log.info("用户头像上传成功： 头像路径={}", avatarUrl);
             return Result.success("头像上传成功", avatarUrl);
+        } catch (ErrorResponseException e) {
+            // MinIO 侧最常见的这个失败：桶没建过（新环境刚部署、或桶名配错）。
+            // 别把 "The specified bucket does not exist" 这句英文直接甩给用户，
+            // 日志里把桶名带上，管理员一眼知道该去建哪个桶。
+            String minioCode = (e.errorResponse() == null) ? "" : e.errorResponse().code();
+            if ("NoSuchBucket".equals(minioCode)) {
+                log.error("头像上传失败：存储桶 {} 不存在，需先在 MinIO 上创建该桶并开放匿名读，"
+                        + "否则头像存不进去；endpoint={}", avatarBucket, minioEndpoint);
+                return Result.error(ResultCode.SYSTEM_ERROR, "头像存储未初始化（存储桶不存在），请联系管理员");
+            }
+            log.error("头像上传失败: 错误信息={}", e.getMessage(), e);
+            return Result.error(ResultCode.SYSTEM_ERROR, "头像上传失败：" + e.getMessage());
         } catch (Exception e) {
             log.error("头像上传失败: 错误信息={}", e.getMessage(), e);
             return Result.error(ResultCode.SYSTEM_ERROR, "头像上传失败：" + e.getMessage());
