@@ -3,6 +3,7 @@ package com.abin.checkrepeatservice.admin.service.Impl;
 import com.abin.checkrepeatservice.admin.service.AutoAssignmentService;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
+import com.abin.checkrepeatservice.common.constant.DictConstants;
 import com.abin.checkrepeatservice.admin.dto.*;
 import com.abin.checkrepeatservice.pojo.entity.SysUser;
 import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
@@ -132,9 +133,11 @@ public class AutoAssignmentServiceImpl implements AutoAssignmentService {
             AutoAssignmentPreviewDTO preview = new AutoAssignmentPreviewDTO();
             
             // 获取待分配学生数
+            // 待分配=已提交但还没指定导师 → pending。字典里没有 "approved"
+            // （审核通过是 completed），原来那个条件恒不成立，预估数一直是 0。
             LambdaQueryWrapper<PaperInfo> studentWrapper = new LambdaQueryWrapper<>();
             studentWrapper.isNull(PaperInfo::getTeacherId)
-                          .eq(PaperInfo::getPaperStatus, "approved");
+                          .eq(PaperInfo::getPaperStatus, DictConstants.PaperStatus.PENDING);
             List<PaperInfo> unassignedPapers = paperInfoMapper.selectList(studentWrapper);
             preview.setUnassigned(unassignedPapers.size());
             
@@ -460,7 +463,7 @@ public class AutoAssignmentServiceImpl implements AutoAssignmentService {
     private List<PaperInfo> getUnassignedStudents() {
         LambdaQueryWrapper<PaperInfo> wrapper = new LambdaQueryWrapper<>();
         wrapper.isNull(PaperInfo::getTeacherId)
-              .eq(PaperInfo::getPaperStatus, "approved");
+              .eq(PaperInfo::getPaperStatus, DictConstants.PaperStatus.PENDING);
         return paperInfoMapper.selectList(wrapper);
     }
 
@@ -567,7 +570,7 @@ public class AutoAssignmentServiceImpl implements AutoAssignmentService {
         // 基于实际待分配学生数计算
         LambdaQueryWrapper<PaperInfo> wrapper = new LambdaQueryWrapper<>();
         wrapper.isNull(PaperInfo::getTeacherId)
-              .eq(PaperInfo::getPaperStatus, "approved");
+              .eq(PaperInfo::getPaperStatus, DictConstants.PaperStatus.PENDING);
         int studentCount = paperInfoMapper.selectCount(wrapper).intValue();
         
         // 每个学生分配需要100毫秒

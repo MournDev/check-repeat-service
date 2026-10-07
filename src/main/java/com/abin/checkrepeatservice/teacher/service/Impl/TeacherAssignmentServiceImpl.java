@@ -13,6 +13,7 @@ import com.abin.checkrepeatservice.student.service.CheckTaskService;
 import com.abin.checkrepeatservice.teacher.service.TeacherAssignmentService;
 import com.abin.checkrepeatservice.user.service.MessageService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -120,12 +121,19 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
                 return Result.error(ResultCode.BUSINESS_TASK_ASSIGNED, "论文分配状态不允许拒绝");
             }
             // 2. 更新论文分配状态
-            PaperInfo updatePaper = new PaperInfo();
-            updatePaper.setId(paperId);
-            updatePaper.setAllocationStatus(DictConstants.AllocationStatus.REJECTED);
-            updatePaper.setPaperStatus(DictConstants.PaperStatus.PENDING);  // 返回待分配状态，重新分配
-            updatePaper.setUpdateTime(LocalDateTime.now());
-            paperInfoMapper.updateById(updatePaper);
+            // 退回待分配必须把 teacher_id 一起清掉：管理员待分配列表、自动分配、学生端
+            // 「我有没有导师」全都只看 teacher_id 是否为空（见 autoAssignAdvisor 开头的
+            // 「论文已分配老师」判断）。只把 paper_status 改回 pending 的话，这篇论文会永远
+            // 停在「已分配给那位拒绝它的老师」的状态——进不了待分配列表，也无法被重新分配。
+            // 注意：updateById 默认忽略 null 字段，所以清空教师必须用 UpdateWrapper 显式 set。
+            LambdaUpdateWrapper<PaperInfo> updateWrapper = new LambdaUpdateWrapper<>();
+            updateWrapper.eq(PaperInfo::getId, paperId)
+                         .set(PaperInfo::getAllocationStatus, DictConstants.AllocationStatus.REJECTED)
+                         .set(PaperInfo::getPaperStatus, DictConstants.PaperStatus.PENDING)
+                         .set(PaperInfo::getTeacherId, null)
+                         .set(PaperInfo::getTeacherName, null)
+                         .set(PaperInfo::getUpdateTime, LocalDateTime.now());
+            paperInfoMapper.update(null, updateWrapper);
 
             // 3. 释放教师任务数
             releaseTeacherTaskCount(teacherId);

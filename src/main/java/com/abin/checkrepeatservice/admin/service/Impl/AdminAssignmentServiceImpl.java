@@ -3,6 +3,7 @@ package com.abin.checkrepeatservice.admin.service.Impl;
 import com.abin.checkrepeatservice.admin.service.AdminAssignmentService;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
+import com.abin.checkrepeatservice.common.constant.DictConstants;
 import com.abin.checkrepeatservice.admin.dto.AssignmentRuleConfigDTO;
 import com.abin.checkrepeatservice.mapper.SysUserMapper;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
@@ -43,9 +44,11 @@ public class AdminAssignmentServiceImpl implements AdminAssignmentService {
             Map<String, Object> stats = new HashMap<>();
             
             // 未分配学生数 - 没有指导老师的论文
+            // 待分配=已提交但还没指定导师，值就是 pending；字典里没有 "approved"
+            // （审核通过是 completed），写成 "approved" 这个条件恒不成立，统计永远是 0。
             LambdaQueryWrapper<PaperInfo> unassignedWrapper = new LambdaQueryWrapper<>();
             unassignedWrapper.isNull(PaperInfo::getTeacherId)
-                           .eq(PaperInfo::getPaperStatus, "approved"); // 只统计已通过审核的论文
+                           .eq(PaperInfo::getPaperStatus, DictConstants.PaperStatus.PENDING);
             int unassignedStudents = paperInfoMapper.selectCount(unassignedWrapper).intValue();
             stats.put("unassignedStudents", unassignedStudents);
             
@@ -88,7 +91,8 @@ public class AdminAssignmentServiceImpl implements AdminAssignmentService {
             
             LambdaQueryWrapper<PaperInfo> wrapper = new LambdaQueryWrapper<>();
             wrapper.isNull(PaperInfo::getTeacherId) // 未分配指导老师
-                   .eq(PaperInfo::getPaperStatus, "approved"); // 已通过审核
+                   // 待分配的学生 = 已提交、尚未指定导师 → pending（见上方 getAssignmentStats 说明）
+                   .eq(PaperInfo::getPaperStatus, DictConstants.PaperStatus.PENDING);
             
             // 关键词搜索
             if (keyword != null && !keyword.isEmpty()) {
@@ -197,24 +201,24 @@ public class AdminAssignmentServiceImpl implements AdminAssignmentService {
     public Result<String> singleAssign(String studentId, String teacherId, String remark) {
         try {
             // 验证学生和教师是否存在
+            // 注意：入参 studentId 实际是「论文ID」——待分配列表返回的 id 就是 paper.getId()，
+            // 前端按原值回传。字段名沿用旧约定不改，避免动到接口契约（见下方 applyAssignment）。
             PaperInfo paper = paperInfoMapper.selectById(studentId);
             if (paper == null) {
                 return Result.error(ResultCode.PARAM_ERROR, "论文不存在");
             }
-            
+
             SysUser teacher = sysUserMapper.selectById(teacherId);
             if (teacher == null) {
                 return Result.error(ResultCode.PARAM_ERROR, "教师不存在");
             }
-            
+
             if (!"teacher".equals(teacher.getUserType())) {
                 return Result.error(ResultCode.PARAM_ERROR, "指定用户不是教师");
             }
-            
+
             // 执行分配
-            paper.setTeacherId(Long.valueOf(teacherId));
-            paper.setUpdateTime(LocalDateTime.now());
-            paperInfoMapper.updateById(paper);
+            applyAssignment(paper, teacher);
             
             // 更新教师负载
             teacher.setCurrentAdvisorCount(teacher.getCurrentAdvisorCount() + 1);
@@ -265,19 +269,17 @@ public class AdminAssignmentServiceImpl implements AdminAssignmentService {
                         failCount++;
                         continue;
                     }
-                    
+
                     if (paper.getTeacherId() != null) {
                         details.add("论文ID " + studentId + " 已有指导老师");
                         failCount++;
                         continue;
                     }
-                    
+
                     // 执行分配
-                    paper.setTeacherId(Long.valueOf(teacherId));
-                    paper.setUpdateTime(LocalDateTime.now());
-                    paperInfoMapper.updateById(paper);
+                    applyAssignment(paper, teacher);
                     successCount++;
-                    
+
                 } catch (Exception e) {
                     log.error("批量分配单个学生失败: studentId={}", studentId, e);
                     details.add("论文ID " + studentId + " 分配失败: " + e.getMessage());
@@ -302,6 +304,27 @@ public class AdminAssignmentServiceImpl implements AdminAssignmentService {
             log.error("批量分配失败: {}", e.getMessage(), e);
             return Result.error(ResultCode.SYSTEM_ERROR, "批量分配失败: " + e.getMessage());
         }
+    }
+
+    /**
+     * 把「管理员手动分配」这一组字段一次写全并落库。
+     *
+     * 只写 teacher_id 是不够的：教师端「待确认论文」列表查的是
+     * teacher_id + allocation_status='pending'（TeacherAssignmentServiceImpl.getPendingConfirmPapers），
+     * 分配状态不跟着走的话，老师那边永远看不到这条待确认任务，而论文又已经不在待分配列表里
+     * （那里要求 teacher_id 为空）——两边都找不到它。字段组合对齐
+     * AdvisorAssignServiceImpl.autoAssignAdvisor（自动分配那条路本来就是写全的）。
+     */
+    private void applyAssignment(PaperInfo paper, SysUser teacher) {
+        LocalDateTime now = LocalDateTime.now();
+        paper.setTeacherId(teacher.getId());
+        paper.setTeacherName(teacher.getRealName());
+        paper.setAllocationType(DictConstants.AllocationType.MANUAL);
+        paper.setAllocationStatus(DictConstants.AllocationStatus.PENDING); // 待老师确认
+        paper.setAllocationTime(now);
+        paper.setPaperStatus(DictConstants.PaperStatus.ASSIGNED); // 已分配导师，等待确认
+        paper.setUpdateTime(now);
+        paperInfoMapper.updateById(paper);
     }
 
     @Override

@@ -172,20 +172,28 @@ public class AdvisorAssignServiceImpl implements AdvisorAssignService {
         // 校验老师合法性
         SysUser advisor = sysUserMapper.selectById(teacherId);
         if ((advisor == null) || !"2001".equals(advisor.getRoleId())) {
-            throw new BusinessException(ResultCode.BUSINESS_ILLEGAL, "指导老师不合法");
+            throw new BusinessException(ResultCode.BUSINESS_ILLEGAL, "指导老师不合法", null);
         }
         if (advisor.getCurrentAdvisorCount() >= maxTaskCount) {
-            throw new BusinessException(ResultCode.BUSINESS_NO_TASK_MAX, "老师任务数已达上限");
+            throw new BusinessException(ResultCode.BUSINESS_NO_TASK_MAX, "老师任务数已达上限", null);
         }
 
         // 更新论文信息
         PaperInfo paperInfo = paperInfoMapper.selectById(paperId);
+        if (paperInfo == null) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "论文不存在", paperId);
+        }
         paperInfo.setTeacherId(teacherId);
         paperInfo.setTeacherName(advisor.getRealName());//指导老师姓名
         paperInfo.setAllocationType(DictConstants.AllocationType.MANUAL);//手动指定
         paperInfo.setAllocationStatus(DictConstants.AllocationStatus.PENDING);//待确认
         paperInfo.setAllocationTime(LocalDateTime.now());
         paperInfo.setPaperStatus(DictConstants.PaperStatus.ASSIGNED);//已分配，等待学生确认
+        paperInfo.setUpdateTime(LocalDateTime.now());
+        // 落库。原来这个方法从头到尾没有 updateById：paperInfo 只在内存里改完就丢了，
+        // 接口照样返回「手动分配指导老师成功」，实际只有老师负载 +1 和一条分配记录，
+        // 论文上根本没有导师（待分配列表里还在、学生端还是"暂未分配"）。
+        paperInfoMapper.updateById(paperInfo);
         // 更新老师任务数
         advisor.setCurrentAdvisorCount(advisor.getCurrentAdvisorCount() + 1);
         sysUserMapper.updateById(advisor);

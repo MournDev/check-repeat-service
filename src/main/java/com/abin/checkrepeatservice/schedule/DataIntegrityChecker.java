@@ -1,6 +1,7 @@
 package com.abin.checkrepeatservice.schedule;
 
 import com.abin.checkrepeatservice.admin.mapper.CheckResultMapper;
+import com.abin.checkrepeatservice.common.constant.DictConstants;
 import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
 import com.abin.checkrepeatservice.pojo.entity.CheckResult;
 import com.abin.checkrepeatservice.pojo.entity.CheckTask;
@@ -276,7 +277,7 @@ public class DataIntegrityChecker {
                 updatePaper.setId(task.getPaperId());
                 updatePaper.setCheckCompleted(0);
                 updatePaper.setCheckResult("查重失败：系统超时");
-                updatePaper.setPaperStatus("PENDING"); // 重置为待处理状态
+                updatePaper.setPaperStatus(DictConstants.PaperStatus.PENDING); // 重置为待分配状态
                 updatePaper.setUpdateTime(LocalDateTime.now());
                 paperInfoMapper.updateById(updatePaper);
                 
