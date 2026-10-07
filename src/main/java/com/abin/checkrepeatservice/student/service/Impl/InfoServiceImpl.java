@@ -80,21 +80,11 @@ public class InfoServiceImpl implements InfoService {
     @Override
     public Result<LoginVO> updateUserInfo(UpdateUserInfoReq updateReq) {
         try {
-            // 1. 获取当前登录用户 ID（从 Security 上下文获取）
-            Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-            if (authentication == null || !authentication.isAuthenticated()) {
-                return Result.error(ResultCode.NOT_LOGIN, "用户未登录");
-            }
-
-            String currentUsername = authentication.getName();
-            SysUser currentUser = sysUserMapper.selectOne(
-                    Wrappers.<SysUser>lambdaQuery()
-                            .eq(SysUser::getUsername, currentUsername)
-                            .eq(SysUser::getIsDeleted, 0)
-            );
-
+            // 1. 获取当前登录用户（从 Security 上下文获取）
+            SysUser currentUser = currentLoginUser();
             if (currentUser == null) {
-                return Result.error(ResultCode.RESOURCE_NOT_FOUND, "当前用户不存在");
+                // 分不出是"没登录"还是"账号已不存在"，对调用方而言都是要重新登录
+                return Result.error(ResultCode.NOT_LOGIN, "用户未登录");
             }
 
             // 2. 更新用户信息（仅允许更新部分字段）
@@ -116,27 +106,79 @@ public class InfoServiceImpl implements InfoService {
                 return Result.error(ResultCode.PARAM_ERROR, "用户角色无效");
             }
 
-            // 4. 构造并返回更新后的 LoginVO 对象
-            LoginVO loginVO = new LoginVO();
-            loginVO.setUserId((currentUser.getId()));
-            loginVO.setRoleCode(sysRole.getRoleCode());
-            loginVO.setUsername(currentUser.getUsername());
-            loginVO.setRealName(currentUser.getRealName());
-            loginVO.setMajor(currentUser.getMajor());
-            loginVO.setCollegeName(currentUser.getCollegeName());
-            loginVO.setGrade(currentUser.getGrade());
-            loginVO.setClassName(currentUser.getClassName());
-            loginVO.setPhone(currentUser.getPhone());
-            loginVO.setEmail(currentUser.getEmail());
-            loginVO.setIntroduce(currentUser.getIntroduce());
-            loginVO.setLastLoginTime(currentUser.getLastLoginTime());
-
             log.info("用户信息更新成功：用户名={}", currentUser.getUsername());
-            return Result.success( "用户信息更新成功", loginVO);
+            return Result.success("用户信息更新成功", toLoginVO(currentUser, sysRole.getRoleCode()));
         } catch (Exception e) {
             log.error("用户信息更新失败：{}", e.getMessage(), e);
             return Result.error(ResultCode.SYSTEM_ERROR,"用户信息更新失败：" + e.getMessage());
         }
+    }
+
+    @Override
+    public Result<LoginVO> getCurrentUserInfo() {
+        try {
+            SysUser currentUser = currentLoginUser();
+            if (currentUser == null) {
+                return Result.error(ResultCode.NOT_LOGIN, "用户未登录");
+            }
+
+            SysRole sysRole = sysRoleMapper.selectById(currentUser.getRoleId());
+            if (sysRole == null || sysRole.getIsDeleted() == 1) {
+                log.warn("用户角色无效，roleId={}", currentUser.getRoleId());
+                return Result.error(ResultCode.PARAM_ERROR, "用户角色无效");
+            }
+
+            return Result.success(toLoginVO(currentUser, sysRole.getRoleCode()));
+        } catch (Exception e) {
+            log.error("查询当前用户信息失败：{}", e.getMessage(), e);
+            return Result.error(ResultCode.SYSTEM_ERROR, "查询用户信息失败：" + e.getMessage());
+        }
+    }
+
+    /**
+     * 取当前登录用户（Security 上下文 → 用户名 → sys_user）。
+     * 未登录或用户已被删除时返回 null。
+     */
+    private SysUser currentLoginUser() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || !authentication.isAuthenticated()) {
+            return null;
+        }
+        return sysUserMapper.selectOne(
+                Wrappers.<SysUser>lambdaQuery()
+                        .eq(SysUser::getUsername, authentication.getName())
+                        .eq(SysUser::getIsDeleted, 0)
+        );
+    }
+
+    /**
+     * 把用户实体拼成前端用的 LoginVO。
+     *
+     * <p>token / expireTime 不填：它们只属于登录响应，这里共用同一个结构是为了让前端
+     * 「登录 / 查询 / 更新」三条路径拿到同样一组字段、合并逻辑可以共用。</p>
+     *
+     * <p>emailVerified 和 avatar 必须带上：前端拿到响应后是
+     * {@code { ...userStore.userInfo, ...res.data }} 这样整体覆盖合并的，
+     * 少一个字段就会把 store 里已有值覆盖成 null（表现为保存一次资料，
+     * 邮箱验证状态变回「未验证」）。</p>
+     */
+    private LoginVO toLoginVO(SysUser user, String roleCode) {
+        LoginVO loginVO = new LoginVO();
+        loginVO.setUserId(user.getId());
+        loginVO.setRoleCode(roleCode);
+        loginVO.setUsername(user.getUsername());
+        loginVO.setRealName(user.getRealName());
+        loginVO.setMajor(user.getMajor());
+        loginVO.setCollegeName(user.getCollegeName());
+        loginVO.setGrade(user.getGrade());
+        loginVO.setClassName(user.getClassName());
+        loginVO.setPhone(user.getPhone());
+        loginVO.setEmail(user.getEmail());
+        loginVO.setEmailVerified(user.getEmailVerified());
+        loginVO.setIntroduce(user.getIntroduce());
+        loginVO.setAvatar(user.getAvatar());
+        loginVO.setLastLoginTime(user.getLastLoginTime());
+        return loginVO;
     }
 
     @Override

@@ -1,5 +1,6 @@
 package com.abin.checkrepeatservice.admin.service.Impl;
 
+import com.alibaba.fastjson.JSON;
 import com.abin.checkrepeatservice.admin.vo.CheckRuleOperateReq;
 import com.abin.checkrepeatservice.admin.vo.CompareLibOperateReq;
 import com.abin.checkrepeatservice.admin.dto.RuleLibRelationDTO;
@@ -176,6 +177,13 @@ public class AdminRuleConfigServiceImpl extends ServiceImpl<CheckRuleMapper, Che
         checkRule.setRuleName(operateReq.getRuleName());
         checkRule.setRuleCode(ruleCode);
         checkRule.setDescription(operateReq.getDescription());
+        // compare_lib 是 NOT NULL 的历史列，存库名 JSON（如 ["校内论文库","知网期刊库"]）。
+        // 真正的关系在 rule_lib_relation（下面第 4 步写），全代码库没有任何地方读这个列，
+        // 但列本身没默认值：新增时不给它赋值，MyBatis-Plus 会按 NOT_NULL 策略把整列从
+        // INSERT 里省掉，MySQL 严格模式直接报 1364 "Field 'compare_lib' doesn't have
+        // a default value" —— 管理端因此一条规则都建不出来。
+        checkRule.setCompareLib(JSON.toJSONString(
+                libList.stream().map(CompareLib::getLibName).collect(Collectors.toList())));
         // 填充审计字段
         UserBusinessInfoUtils.setAuditField(checkRule, ruleId == null);
 

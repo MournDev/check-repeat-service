@@ -23,6 +23,21 @@ public class StudentInfoController {
 
     @Resource
     private InfoService infoService;
+
+    /**
+     * 查询当前登录用户信息接口。
+     *
+     * <p>注意不要和 {@code UserController}（同样是 /api/user）的 /messages 搞混：
+     * 本类路径带尾斜杠，Spring 会拼成 /api/user/info。</p>
+     *
+     * @return 当前登录用户信息
+     */
+    @GetMapping("/info")
+    public Result<LoginVO> getCurrentUserInfo() {
+        log.info("接收当前用户信息查询请求");
+        return infoService.getCurrentUserInfo();
+    }
+
     /**
      * 更新用户信息接口
      * @param updateReq 用户信息更新请求

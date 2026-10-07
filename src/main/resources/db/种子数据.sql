@@ -10,7 +10,8 @@
 --   4    sys_operation_type    操作类型字典（日志中心「模块使用率」靠它分类）
 --   5    knowledge_category    知识库分类（knowledge_article.category_id 指向它）
 --   6    message_template      消息模板（缺哪个 code，对应的站内信就发不出去）
---   7    自检
+--   7    check_rule            查重规则（缺 is_default=1 那条，学生端规则卡片直接 404）
+--   8    自检
 --
 -- 存量库（V8 之前建的、结构落后于 init.sql 的）请在跑完本文件之后，再跑同目录的
 -- 存量修复.sql —— 那里第 1 段要从本文件改绑过的 teacher_info / student_info 回填
@@ -601,33 +602,105 @@ ON DUPLICATE KEY UPDATE
 
 
 -- ============================================================================
--- 段 7：自检
+-- 段 7：查重规则 check_rule
+--
+-- 为什么要有这一段：学生端「当前查重规则」卡片走的
+-- GET /api/student/check-rule/current，取的是 is_default=1 且未删除的那一条，
+-- 一条都取不到就返回 404 / 40401「未配置默认查重规则」。本文件此前没有 check_rule
+-- 的种子，线上这张表是空的，卡片就一直报错。
+--
+-- 取值沿用老库现有的这 4 条（id / 阈值 / 次数 / 间隔 / 描述逐字段照抄）：
+--   UNDERGRADUATE 本科（默认）  MASTER 硕士  PHD 博士  COURSEWORK 课程作业
+--
+-- 几个容易踩的点：
+--   1) id 是写死的固定值。命中主键就更新业务列，所以本段可重复执行；
+--      线上空表跑完就是这 4 条。
+--   2) is_default 只在 INSERT 时给，**更新列表里故意不含它**。否则线上若已有
+--      一条默认规则，再跑一遍本段就会出现两条 is_default=1。读取端
+--      （StudentCheckRuleServiceImpl）按 id 倒序取第一条，线上自建规则的雪花 id
+--      远大于这里的固定 id，因此真正生效的仍是线上那条 —— 这个优先级保持不变。
+--   3) pass_threshold 是 NOT NULL 的历史列，但**已废弃**：管理端编辑规则时不写它，
+--      真正生效的合格线由 SimilarityThresholdResolver 按「专业 > 学院 > 全局 >
+--      yml 默认 20.00」解析。这里填的值只为满足 NOT NULL，不参与判定，
+--      所以它和界面上显示的阈值对不上是正常的。
+--   4) compare_lib 同样是 NOT NULL 的历史列，存的是库名 JSON 文本，
+--      和 compare_lib 表没有任何关联（判定时走 CheckTaskServiceImpl
+--      .loadCompareLibraryData，是全量取「启用 + LOCAL」的库）。照抄老库取值即可，
+--      不要当成外键去改。
+--   5) create_by / update_by 沿用老库的 10001 / 10002。本库 sys_user 里没有这两个
+--      id（该列无外键约束，代码也不读这两列），仅作溯源记录，别去补用户。
+--   6) 本段不碰 is_deleted：某条规则被管理端软删过的话，重跑本段不会把它恢复。
+--
+-- ⚠️ 只想给线上补数据的话，**单独跑这一段就够了**，千万别整份文件跑
+--    —— 段 1~3 是 college / major 整表替换 + 全库引用改绑。
 -- ============================================================================
 
--- 7.1 学院数应为 20，专业数应为 114，孤儿专业（指不到学院）应为 0
+INSERT INTO `check_rule`
+  (`id`, `rule_name`, `rule_code`, `pass_threshold`, `max_re_submit_count`,
+   `compare_lib`, `check_interval`, `max_check_count`, `is_default`, `description`,
+   `create_by`, `update_by`)
+VALUES
+  (1623456789001, '本科毕业论文查重规则', 'UNDERGRADUATE', 20.00, 3,
+   '["校内论文库","知网期刊库","互联网资源"]', 86400, 5, 1,
+   '适用于本科毕业论文查重，重复率≤20%为合格', 10001, 10001),
+
+  (1623456789002, '硕士研究生论文查重规则', 'MASTER', 15.00, 3,
+   '["校内论文库","知网硕博库","知网期刊库","万方数据库","互联网资源"]', 172800, 3, 0,
+   '适用于硕士研究生论文查重，重复率≤15%为合格', 10001, 10002),
+
+  (1623456789003, '博士研究生论文查重规则', 'PHD', 10.00, 3,
+   '["校内论文库","知网硕博库","知网期刊库","万方数据库","维普数据库","互联网资源","国际学术库"]', 259200, 2, 0,
+   '适用于博士研究生论文查重，重复率≤10%为合格', 10002, 10002),
+
+  (1623456789005, '课程作业查重规则', 'COURSEWORK', 30.00, 3,
+   '["校内作业库","互联网资源"]', 3600, 1, 0,
+   '适用于课程作业查重，重复率≤30%为合格', 10001, 10001)
+ON DUPLICATE KEY UPDATE
+  `rule_name`           = VALUES(`rule_name`),
+  `rule_code`           = VALUES(`rule_code`),
+  `pass_threshold`      = VALUES(`pass_threshold`),
+  `max_re_submit_count` = VALUES(`max_re_submit_count`),
+  `compare_lib`         = VALUES(`compare_lib`),
+  `check_interval`      = VALUES(`check_interval`),
+  `max_check_count`     = VALUES(`max_check_count`),
+  `description`         = VALUES(`description`);
+  -- is_default / create_by / update_by / is_deleted 故意不更新，原因见上面 2) 5) 6)
+
+
+-- ============================================================================
+-- 段 8：自检
+-- ============================================================================
+
+-- 8.1 学院数应为 20，专业数应为 114，孤儿专业（指不到学院）应为 0
 SELECT (SELECT COUNT(*) FROM college WHERE is_deleted = 0) AS colleges,
        (SELECT COUNT(*) FROM major   WHERE is_deleted = 0) AS majors,
        (SELECT COUNT(*) FROM major m LEFT JOIN college c ON m.college_id = c.id
          WHERE c.id IS NULL) AS orphan_majors;
 
--- 7.2 各学院专业数分布（真实院校本就不均匀，这里只为看一眼有没有整段漏掉）
+-- 8.2 各学院专业数分布（真实院校本就不均匀，这里只为看一眼有没有整段漏掉）
 SELECT c.college_code, c.college_name, COUNT(m.id) AS major_count
   FROM college c LEFT JOIN major m ON m.college_id = c.id AND m.is_deleted = 0
  GROUP BY c.id, c.college_code, c.college_name ORDER BY c.id;
 
--- 7.3 旧 id 是否还残留引用（三项都应为 0）
+-- 8.3 旧 id 是否还残留引用（三项都应为 0）
 SELECT (SELECT COUNT(*) FROM sys_user     WHERE college_id BETWEEN 1668572928000 AND 1668572928059) AS old_sys_user,
        (SELECT COUNT(*) FROM paper_info   WHERE college_id BETWEEN 1668572928000 AND 1668572928059
                                           OR major_id   BETWEEN 1668572928000 AND 1668572928059) AS old_paper_info,
        (SELECT COUNT(*) FROM student_info WHERE college_id BETWEEN 1668572928000 AND 1668572928059
                                           OR major_id   BETWEEN 1668572928000 AND 1668572928059) AS old_student_info;
 
--- 7.4 字典与种子行数
+-- 8.4 字典与种子行数
 SELECT (SELECT COUNT(*) FROM sys_operation_type) AS operation_types,   -- 139
        (SELECT COUNT(*) FROM knowledge_category) AS knowledge_categories, -- 6
        (SELECT COUNT(*) FROM message_template)   AS message_templates;    -- 19
 
--- 7.5 代码在用的模板 code 是否覆盖齐（缺一行就有一类通知发不出去）
+-- 8.5 查重规则：seed_rules 至少 4，default_rules 必须恰好 1
+--     default_rules = 0 → 学生端「当前查重规则」卡片报 404/40401；
+--     > 1 → 学生端按 id 倒序取，拿到的是 id 最大的那条，容易和预期不符
+SELECT (SELECT COUNT(*) FROM check_rule WHERE is_deleted = 0)                   AS seed_rules,
+       (SELECT COUNT(*) FROM check_rule WHERE is_deleted = 0 AND is_default = 1) AS default_rules;
+
+-- 8.6 代码在用的模板 code 是否覆盖齐（缺一行就有一类通知发不出去）
 --     期望：missing 为空
 SELECT GROUP_CONCAT(c.code ORDER BY c.code) AS missing
   FROM (

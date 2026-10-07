@@ -20,6 +20,16 @@ public interface InfoService {
     Result<LoginVO> updateUserInfo(UpdateUserInfoReq updateReq);
 
     /**
+     * 查询当前登录用户的完整信息。
+     *
+     * <p>前端 localStorage 只保留非敏感展示字段（见 stores/user.js 的 filterSafeInfo），
+     * email/phone/introduce 等刷新后就丢了，个人中心靠这个接口补全。</p>
+     *
+     * @return 当前登录用户信息（结构与 updateUserInfo 的返回值一致）
+     */
+    Result<LoginVO> getCurrentUserInfo();
+
+    /**
      * 上传用户头像
      * @param file 头像文件
      * @return 上传结果
