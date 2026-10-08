@@ -238,9 +238,10 @@ DROP TABLE IF EXISTS `category_similarity_threshold`;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `category_similarity_threshold` (
   `id` bigint NOT NULL COMMENT '主键ID',
-  `category_type` varchar(50) DEFAULT NULL COMMENT '分类类型：college-学院，major-专业',
+  `category_type` varchar(50) DEFAULT NULL COMMENT '分类类型：college-学院，major-专业，subject-学科领域',
   `college_id` bigint DEFAULT NULL COMMENT '学院ID',
   `major_id` bigint DEFAULT NULL COMMENT '专业ID',
+  `subject_id` bigint DEFAULT NULL COMMENT '学科领域ID（category_type=subject 时必填，关联subject.id）',
   `threshold` int DEFAULT NULL COMMENT '相似度阈值',
   `create_by` bigint DEFAULT NULL COMMENT '创建人ID',
   `create_time` datetime DEFAULT NULL COMMENT '创建时间',
@@ -258,7 +259,8 @@ CREATE TABLE `category_similarity_threshold` (
   -- （SimilarityThresholdResolver.categoryThreshold），每篇论文查两次：
   -- 先专业、未命中再学院。表本身小，但查重每次调用都会走到，故建索引。
   KEY `idx_type_college` (`category_type`,`college_id`),
-  KEY `idx_type_major`   (`category_type`,`major_id`)
+  KEY `idx_type_major`   (`category_type`,`major_id`),
+  KEY `idx_type_subject` (`category_type`,`subject_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='学科/专业相似度阈值设置表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -649,6 +651,35 @@ CREATE TABLE `major` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `major_subject`
+--
+-- 专业↔学科领域 多对多映射。用途：论文提交页按学生专业过滤学科领域候选。
+-- 一个专业可对应多个学科（如 计算机科学与技术 → ENG-CS / ENG-SE / ENG-AI），
+-- 一个学科也可被多个专业共用；没有映射的专业，提交页退回展示整棵树。
+--
+-- 数据由 种子数据.sql 段 3B 维护。复合唯一键 + 物理删除（不用软删，否则重加同一对会撞键）。
+
+DROP TABLE IF EXISTS `major_subject`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `major_subject` (
+  `id` bigint NOT NULL COMMENT '主键ID（雪花ID）',
+  `create_by` bigint NOT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` bigint NOT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  `major_id` bigint NOT NULL COMMENT '专业ID（关联major.id）',
+  `subject_id` bigint NOT NULL COMMENT '学科领域ID（关联subject.id）',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_major_subject` (`major_id`,`subject_id`),
+  KEY `idx_major_subject_subject_id` (`subject_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='专业↔学科领域映射表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Table structure for table `message_template`
 --
 
@@ -796,7 +827,8 @@ DROP TABLE IF EXISTS `paper_info`;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `paper_info` (
   `id` bigint NOT NULL COMMENT '论文唯一ID（雪花ID）',
-  `subject_code` varchar(50) DEFAULT NULL COMMENT '学科领域',
+  `subject_code` varchar(50) DEFAULT NULL COMMENT '学科领域（subject.code 的冗余列，供展示与既有读取方，二者按 code 对齐）',
+  `subject_id` bigint DEFAULT NULL COMMENT '学科领域ID（关联subject.id）。写入时由 SubjectService.findIdByCode 反查 subject_code 得到',
   `paper_title` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL COMMENT '论文标题',
   `student_id` bigint DEFAULT NULL COMMENT '提交论文的学生ID（关联sys_user.id）',
   `author` varchar(255) DEFAULT NULL COMMENT '论文作者',
@@ -846,7 +878,8 @@ CREATE TABLE `paper_info` (
   KEY `idx_paper_info_teacher_status` (`teacher_id`,`paper_status`,`is_deleted`),
   KEY `idx_paper_info_status` (`paper_status`,`is_deleted`),
   KEY `idx_paper_info_delete_by` (`delete_by`),
-  KEY `idx_paper_info_lib_id` (`lib_id`)
+  KEY `idx_paper_info_lib_id` (`lib_id`),
+  KEY `idx_paper_info_subject_id` (`subject_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='论文信息表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -1194,6 +1227,44 @@ CREATE TABLE `student_info` (
   KEY `idx_student_info_college_id` (`college_id`),
   CONSTRAINT `fk_student_info_college` FOREIGN KEY (`college_id`) REFERENCES `college` (`id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=9 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='学生信息表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `subject`
+--
+-- 学科领域主数据。取代原先 sys_dict_data 里 dict_type='subject_field' 的那 100 行字符串树
+-- （层级靠 dict_value 里的连字符约定出来）。层级改用 parent_id 表达，level 是它的冗余投影。
+--
+-- id 是写死的 13 位（见 种子数据.sql 段 3B），不用雪花：13 位不过 2^53，规避 19 位 ID 过 JS
+-- 丢末位的整类问题。对外自然键是 code（如 ENG、ENG-CS），paper_info.subject_code 存的就是它 ——
+-- 所以那 100 行存量编码一个都不用改，前端的树选择器也不用改。
+--
+-- uk_subject_code 不含 is_deleted（照 uk_college_code / uk_major_code 的写法），所以学科不做软删除：
+-- 停用走 is_enabled=0；真要删必须先过引用检查（paper_info / category_similarity_threshold /
+-- teacher_subject / major_subject）再物理删除，否则「软删后重插同 code」会直接撞唯一键。
+
+DROP TABLE IF EXISTS `subject`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `subject` (
+  `id` bigint NOT NULL COMMENT '主键ID（写死的13位，见 种子数据.sql 段 3B）',
+  `create_by` bigint NOT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` bigint NOT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  `parent_id` bigint DEFAULT NULL COMMENT '父学科ID（一级门类为NULL，二级指向所属门类id）',
+  `level` tinyint NOT NULL DEFAULT '1' COMMENT '层级：1-一级门类，2-二级学科（由 parent_id 推导，不接受前端传值）',
+  `code` varchar(50) NOT NULL COMMENT '学科编码（唯一，如 ENG、ENG-CS）。对外稳定标识，paper_info.subject_code 存它；创建后不可改',
+  `name` varchar(128) NOT NULL COMMENT '学科名称（如 工学、人工智能），可改',
+  `sort_no` int NOT NULL DEFAULT '0' COMMENT '同层排序',
+  `is_enabled` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否启用（0-停用，1-启用）：停用后不再出现在选择器/阈值候选中，已引用的数据不受影响',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_subject_code` (`code`),
+  KEY `idx_subject_parent_id` (`parent_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='学科领域表（取代 sys_dict_data 的 subject_field 字符串树）';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1707,6 +1778,37 @@ CREATE TABLE `teacher_info` (
   KEY `idx_major_id` (`major_id`),
   KEY `idx_teacher_info_user_id` (`user_id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=10 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='教师信息表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `teacher_subject`
+--
+-- 教师研究方向 ↔ 学科领域关联表，是研究方向的真源。
+-- sys_user.research_direction 降级为「学科中文名 CSV」冗余列：那 3 个直接把该列透给前端展示的地方
+-- （StudentDashboardService / StudentProfileServiceImpl / StudentMessageServiceImpl）以及
+-- 两处中文关键词匹配（AdvisorAssignServiceImpl.isDirectionMatch、AutoAssignmentServiceImpl）
+-- 因此一行都不用改，显示还从 `ai` 变成「人工智能」。
+--
+-- 复合唯一键 + 物理删除（不用软删，否则重加同一对会撞键）。
+
+DROP TABLE IF EXISTS `teacher_subject`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `teacher_subject` (
+  `id` bigint NOT NULL COMMENT '主键ID（雪花ID）',
+  `create_by` bigint NOT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` bigint NOT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  `user_id` bigint NOT NULL COMMENT '教师用户ID（关联sys_user.id）',
+  `subject_id` bigint NOT NULL COMMENT '学科领域ID（关联subject.id）',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_teacher_subject` (`user_id`,`subject_id`),
+  KEY `idx_teacher_subject_subject_id` (`subject_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='教师研究方向↔学科领域关联表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --

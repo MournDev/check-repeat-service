@@ -8,11 +8,13 @@ import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.common.mapper.CategorySimilarityThresholdMapper;
 import com.abin.checkrepeatservice.common.mapper.SimilarityThresholdMapper;
 import com.abin.checkrepeatservice.common.mapper.CollegeMapper;
+import com.abin.checkrepeatservice.common.mapper.SubjectMapper;
 import com.abin.checkrepeatservice.common.service.SimilarityThresholdResolver;
 import com.abin.checkrepeatservice.pojo.entity.CategorySimilarityThreshold;
 import com.abin.checkrepeatservice.pojo.entity.College;
 import com.abin.checkrepeatservice.pojo.entity.Major;
 import com.abin.checkrepeatservice.pojo.entity.SimilarityThreshold;
+import com.abin.checkrepeatservice.pojo.entity.Subject;
 import com.abin.checkrepeatservice.student.mapper.MajorMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
@@ -50,6 +52,8 @@ public class SimilarityThresholdServiceImpl implements SimilarityThresholdServic
 
     private final SimilarityThresholdResolver similarityThresholdResolver;
 
+    private final SubjectMapper subjectMapper;
+
     @Override
     public SimilarityThresholdVO getThresholds() {
         SimilarityThresholdVO vo = new SimilarityThresholdVO();
@@ -73,6 +77,7 @@ public class SimilarityThresholdServiceImpl implements SimilarityThresholdServic
                 entity.setCategoryType(item.getCategoryType());
                 entity.setCollegeId(item.getCollegeId());
                 entity.setMajorId(item.getMajorId());
+                entity.setSubjectId(item.getSubjectId());
                 entity.setThreshold(item.getThreshold());
                 // DDL 默认值不足恃（存量库的 NULL 行见 db/存量修复.sql 段 2）：
                 // BaseEntity.isDeleted 没有 fill 注解，MyMetaObjectHandler 的 strictInsertFill 不会补，
@@ -110,8 +115,8 @@ public class SimilarityThresholdServiceImpl implements SimilarityThresholdServic
     }
 
     /**
-     * 读取学院/专业阈值，并把 college_id / major_id 反查成展示名。
-     * 名称在这里推导而不是落库，避免学院改名后配置表里留着旧名字。
+     * 读取学院/专业/学科阈值，并把外键反查成展示名。
+     * 名称在这里推导而不是落库，避免学院/学科改名后配置表里留着旧名字。
      */
     private List<SimilarityThresholdVO.CategoryItem> loadCategoryItems() {
         List<CategorySimilarityThreshold> rows = categorySimilarityThresholdMapper.selectList(null);
@@ -128,6 +133,14 @@ public class SimilarityThresholdServiceImpl implements SimilarityThresholdServic
             majorNames.put(major.getId(), major.getMajorName());
         }
 
+        // 学科名一次取全（而不是每行查一次）：门类要额外标「大类」，
+        // 因为同一个 category_type=subject 下既有门类又有二级，只显示名字分不清是哪一级
+        // —— 而两者的生效范围差别很大（配在门类上的会继承给它的全部二级学科）。
+        Map<Long, Subject> subjects = new HashMap<>();
+        for (Subject subject : subjectMapper.selectList(null)) {
+            subjects.put(subject.getId(), subject);
+        }
+
         List<SimilarityThresholdVO.CategoryItem> items = new ArrayList<>(rows.size());
         for (CategorySimilarityThreshold row : rows) {
             SimilarityThresholdVO.CategoryItem item = new SimilarityThresholdVO.CategoryItem();
@@ -135,22 +148,42 @@ public class SimilarityThresholdServiceImpl implements SimilarityThresholdServic
             item.setCategoryType(row.getCategoryType());
             item.setCollegeId(row.getCollegeId());
             item.setMajorId(row.getMajorId());
+            item.setSubjectId(row.getSubjectId());
             item.setThreshold(row.getThreshold());
-            item.setCategoryName(CategorySimilarityThreshold.TYPE_MAJOR.equals(row.getCategoryType())
-                    ? majorNames.get(row.getMajorId())
-                    : collegeNames.get(row.getCollegeId()));
+            item.setCategoryName(resolveCategoryName(row, collegeNames, majorNames, subjects));
             items.add(item);
         }
         return items;
     }
 
+    /** 按 categoryType 三路反查展示名 */
+    private String resolveCategoryName(CategorySimilarityThreshold row,
+                                       Map<Long, String> collegeNames,
+                                       Map<Long, String> majorNames,
+                                       Map<Long, Subject> subjects) {
+        String type = row.getCategoryType();
+        if (CategorySimilarityThreshold.TYPE_SUBJECT.equals(type)) {
+            Subject s = subjects.get(row.getSubjectId());
+            if (s == null) {
+                // 学科被删了而配置行还在：把裸 id 显出来，别留空白让人以为页面坏了
+                return "学科#" + row.getSubjectId() + "（已不存在）";
+            }
+            return s.getParentId() == null ? s.getName() + "（大类）" : s.getName();
+        }
+        if (CategorySimilarityThreshold.TYPE_MAJOR.equals(type)) {
+            return majorNames.get(row.getMajorId());
+        }
+        return collegeNames.get(row.getCollegeId());
+    }
+
     /**
      * 手工校验，不用 @Valid。
      *
-     * GlobalExceptionHandler 里没有 MethodArgumentNotValidException 处理器，
-     * @Valid 失败会落到 Exception 兜底变成 HTTP 500「系统繁忙」，
-     * 把"参数写错了"误导成"服务故障"。这里手工校验并抛 BusinessException，
-     * 由 GlobalExceptionHandler 返回正确的 400 + 自定义文案。
+     * 不是为了 HTTP 状态码（GlobalExceptionHandler 已有 MethodArgumentNotValidException
+     * 处理器，@Valid 失败同样返回 400），而是为了**文案能定位到具体哪一条**：
+     * 这是批量提交，字段级 @Valid 只能给出"阈值不能为空"这类不含下标的提示，
+     * 用户对着十几行配置无从下手。这里手工校验并抛 BusinessException，
+     * 文案统一带「第 N 条配置：」前缀。
      *
      * 注意必须用三参构造器：BusinessException 没有 (ResultCode, String) 重载，
      * 写成两参会命中 (ResultCode, Object)，把文案塞进 extraData 而 message 退回默认值。
@@ -184,9 +217,10 @@ public class SimilarityThresholdServiceImpl implements SimilarityThresholdServic
 
             String type = item.getCategoryType();
             if (!CategorySimilarityThreshold.TYPE_COLLEGE.equals(type)
-                    && !CategorySimilarityThreshold.TYPE_MAJOR.equals(type)) {
+                    && !CategorySimilarityThreshold.TYPE_MAJOR.equals(type)
+                    && !CategorySimilarityThreshold.TYPE_SUBJECT.equals(type)) {
                 throw new BusinessException(ResultCode.PARAM_ERROR,
-                        at + "分类类型必须是 college 或 major", null);
+                        at + "分类类型必须是 college、major 或 subject", null);
             }
 
             if (item.getThreshold() == null) {
@@ -200,12 +234,20 @@ public class SimilarityThresholdServiceImpl implements SimilarityThresholdServic
                 if (item.getCollegeId() == null) {
                     throw new BusinessException(ResultCode.PARAM_EMPTY, at + "学院阈值必须指定学院", null);
                 }
+            } else if (CategorySimilarityThreshold.TYPE_SUBJECT.equals(type)) {
+                // 学科维度必须带 subjectId：这张表没有唯一键，缺了它就没法定位到"哪一行"，
+                // 会插出一批 subject_id 全为 NULL 的配置，解析时永远匹配不到、纯垃圾行
+                if (item.getSubjectId() == null) {
+                    throw new BusinessException(ResultCode.PARAM_EMPTY, at + "学科阈值必须指定学科领域", null);
+                }
             } else if (item.getMajorId() == null) {
                 throw new BusinessException(ResultCode.PARAM_EMPTY, at + "专业阈值必须指定专业", null);
             }
 
-            // 自然键去重：同一学院/专业只允许一条，否则库里出现重复行、解析时谁生效要看排序
-            String naturalKey = type + ":" + item.getCollegeId() + ":" + item.getMajorId();
+            // 自然键去重：同一学院/专业/学科只允许一条，否则库里出现重复行、解析时谁生效要看排序。
+            // 这张表**没有唯一键**，去重完全靠这里，所以新增维度必须同步拼进 key ——
+            // 漏拼的后果是"同一门类下的两个二级学科只能存下一条"。
+            String naturalKey = type + ":" + item.getCollegeId() + ":" + item.getMajorId() + ":" + item.getSubjectId();
             if (!seenKeys.add(naturalKey)) {
                 throw new BusinessException(ResultCode.PARAM_ERROR, at + "存在重复的学院/专业阈值", null);
             }

@@ -7,11 +7,14 @@
 --
 -- 内容与顺序（顺序即依赖关系）：
 --   1~3  college / major 基础数据 + 全库引用改绑  ← 整表替换语义，说明见段 1
+--  3B    subject / major_subject  学科领域 + 专业↔学科映射（取代 sys_dict_data 的字符串树）
 --   4    sys_operation_type    操作类型字典（日志中心「模块使用率」靠它分类）
 --   5    knowledge_category    知识库分类（knowledge_article.category_id 指向它）
 --   6    message_template      消息模板（缺哪个 code，对应的站内信就发不出去）
 --   7    check_rule            查重规则（缺 is_default=1 那条，学生端规则卡片直接 404）
 --   8    自检
+--
+--   3B 放在 3 之后，是要先让 college/major 的固定 id 就位 —— 专业映射写的就是这些 id。
 --
 -- 存量库（V8 之前建的、结构落后于 init.sql 的）请在跑完本文件之后，再跑同目录的
 -- 存量修复.sql —— 那里第 1 段要从本文件改绑过的 teacher_info / student_info 回填
@@ -350,6 +353,365 @@ WHERE major_id IN (1668572928015,1668572928026,1668572928045,1668572928049,16685
 COMMIT;
 
 SET FOREIGN_KEY_CHECKS = @fk;
+
+
+-- ============================================================================
+-- 段 3B：学科领域 subject + 专业↔学科映射 major_subject
+--
+-- 这 100 行（10 门类 + 90 二级）是原先 sys_dict_data 里 dict_type='subject_field'
+-- 那批手工数据的固化 —— 它们此前只存在于库中，从未进过版本控制。这里按固定 id 重写，
+-- 层级从「dict_value 里的连字符约定」改为 parent_id 关系。
+--
+-- 编码（code）与原 dict_value 完全一致，因此 paper_info.subject_code 的存量值一个都不用改，
+-- 前端树选择器也不用改。
+--
+-- 整表替换语义，同段 1~3：DELETE 后按写死的固定 id 重插，可重复执行。
+-- id 区间 1668573200000+（门类）/ 1668573201000+（二级）与 college 1668573000000+、
+-- major 1668573001000+ 不重叠。
+--
+-- 专业映射是**多对多**：一个专业可对应多个学科（计算机科学与技术 → ENG-CS/ENG-SE/ENG-AI），
+-- 一个学科也可被多个专业共用。没有映射的专业（哲学、历史学、体育类 4 个）在学科目录里
+-- 确无对应项，故留空 —— 论文提交页对这类专业退回展示整棵树。
+-- 映射是「学科目录 ↔ 专业目录」两套目录间的语义近似，不是严格等价。
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 为什么这一段自带建表语句（本文件其它段都不带 DDL）
+--
+-- 本文件与 存量修复.sql 的约定执行顺序是「先 种子数据.sql、后 存量修复.sql」
+-- （原因见 存量修复.sql 头部：段 1 要从本文件改绑过的 teacher_info / student_info
+-- 回填 sys_user.major_id）。但 subject 这三张表是本次才新增的，落后的库上根本
+-- 还没有 —— 段 3B 直接 INSERT 就会报 1146 Table 'subject' doesn't exist，而
+-- 修复库结构的 1.10 段偏偏在它后面才跑。这里补上 IF NOT EXISTS 建表，让
+-- 「先种子后修复」这个约定在落后库上照样成立，也省得操作者去记额外顺序。
+-- 已有的库上是空操作；DDL 与 init.sql / 存量修复.sql 1.10.1 逐字一致。
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `subject` (
+  `id` bigint NOT NULL COMMENT '主键ID（写死的13位，见 种子数据.sql 段 3B）',
+  `create_by` bigint NOT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` bigint NOT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  `parent_id` bigint DEFAULT NULL COMMENT '父学科ID（一级门类为NULL，二级指向所属门类id）',
+  `level` tinyint NOT NULL DEFAULT '1' COMMENT '层级：1-一级门类，2-二级学科（由 parent_id 推导，不接受前端传值）',
+  `code` varchar(50) NOT NULL COMMENT '学科编码（唯一，如 ENG、ENG-CS）。对外稳定标识，paper_info.subject_code 存它；创建后不可改',
+  `name` varchar(128) NOT NULL COMMENT '学科名称（如 工学、人工智能），可改',
+  `sort_no` int NOT NULL DEFAULT '0' COMMENT '同层排序',
+  `is_enabled` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否启用（0-停用，1-启用）：停用后不再出现在选择器/阈值候选中，已引用的数据不受影响',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_subject_code` (`code`),
+  KEY `idx_subject_parent_id` (`parent_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='学科领域表（取代 sys_dict_data 的 subject_field 字符串树）';
+
+CREATE TABLE IF NOT EXISTS `major_subject` (
+  `id` bigint NOT NULL COMMENT '主键ID（雪花ID）',
+  `create_by` bigint NOT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` bigint NOT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  `major_id` bigint NOT NULL COMMENT '专业ID（关联major.id）',
+  `subject_id` bigint NOT NULL COMMENT '学科领域ID（关联subject.id）',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_major_subject` (`major_id`,`subject_id`),
+  KEY `idx_major_subject_subject_id` (`subject_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='专业↔学科领域映射表';
+
+CREATE TABLE IF NOT EXISTS `teacher_subject` (
+  `id` bigint NOT NULL COMMENT '主键ID（雪花ID）',
+  `create_by` bigint NOT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` bigint NOT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  `user_id` bigint NOT NULL COMMENT '教师用户ID（关联sys_user.id）',
+  `subject_id` bigint NOT NULL COMMENT '学科领域ID（关联subject.id）',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_teacher_subject` (`user_id`,`subject_id`),
+  KEY `idx_teacher_subject_subject_id` (`subject_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='教师研究方向↔学科领域关联表';
+
+START TRANSACTION;
+
+DELETE FROM `major_subject`;
+DELETE FROM `subject`;
+
+-- ---------- 1) 学科领域：10 个一级门类（parent_id = NULL） ----------
+INSERT INTO `subject` (id, create_by, create_time, update_by, update_time, is_deleted, delete_by, delete_time, parent_id, level, code, name, sort_no, is_enabled) VALUES
+(1668573200000, @op, NOW(), @op, NOW(), 0, NULL, NULL, NULL, 1, 'ENG',   '工学',     1, 1),
+(1668573200001, @op, NOW(), @op, NOW(), 0, NULL, NULL, NULL, 1, 'MED',   '医学',     2, 1),
+(1668573200002, @op, NOW(), @op, NOW(), 0, NULL, NULL, NULL, 1, 'SCI',   '理学',     3, 1),
+(1668573200003, @op, NOW(), @op, NOW(), 0, NULL, NULL, NULL, 1, 'ECON',  '经济学',   4, 1),
+(1668573200004, @op, NOW(), @op, NOW(), 0, NULL, NULL, NULL, 1, 'MGT',   '管理学',   5, 1),
+(1668573200005, @op, NOW(), @op, NOW(), 0, NULL, NULL, NULL, 1, 'LAW',   '法学',     6, 1),
+(1668573200006, @op, NOW(), @op, NOW(), 0, NULL, NULL, NULL, 1, 'LIT',   '文学',     7, 1),
+(1668573200007, @op, NOW(), @op, NOW(), 0, NULL, NULL, NULL, 1, 'EDU',   '教育学',   8, 1),
+(1668573200008, @op, NOW(), @op, NOW(), 0, NULL, NULL, NULL, 1, 'ART',   '艺术学',   9, 1),
+(1668573200009, @op, NOW(), @op, NOW(), 0, NULL, NULL, NULL, 1, 'INTER', '交叉学科', 10, 1);
+
+-- ---------- 2) 学科领域：90 个二级学科（parent_id 指向所属门类） ----------
+INSERT INTO `subject` (id, create_by, create_time, update_by, update_time, is_deleted, delete_by, delete_time, parent_id, level, code, name, sort_no, is_enabled) VALUES
+-- 工学 / ENG（24 个）
+(1668573201000, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-AI',      '人工智能',               1, 1),
+(1668573201001, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-CS',      '计算机科学与技术',       2, 1),
+(1668573201002, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-SE',      '软件工程',               3, 1),
+(1668573201003, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-CYBER',   '网络空间安全',           4, 1),
+(1668573201004, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-BIGDATA', '大数据技术',             5, 1),
+(1668573201005, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-CLOUD',   '云计算技术',             6, 1),
+(1668573201006, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-IoT',     '物联网工程',             7, 1),
+(1668573201007, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-BC',      '区块链工程',             8, 1),
+(1668573201008, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-ME',      '微电子科学与工程',       9, 1),
+(1668573201009, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-EE',      '电气工程及其自动化',    10, 1),
+(1668573201010, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-AUTO',    '自动化',                11, 1),
+(1668573201011, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-MECH',    '机械设计制造及其自动化', 12, 1),
+(1668573201012, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-CIVIL',   '土木工程',              13, 1),
+(1668573201013, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-HYDRO',   '水利水电工程',          14, 1),
+(1668573201014, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-SURVEY',  '测绘工程',              15, 1),
+(1668573201015, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-ENV',     '环境工程',              16, 1),
+(1668573201016, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-CHEM',    '化学工程与工艺',        17, 1),
+(1668573201017, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-FOOD',    '食品科学与工程',        18, 1),
+(1668573201018, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-BIO',     '生物工程',              19, 1),
+(1668573201019, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-AERO',    '航空航天工程',          20, 1),
+(1668573201020, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-MARINE',  '海洋工程',              21, 1),
+(1668573201021, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-RAIL',    '轨道交通信号与控制',    22, 1),
+(1668573201022, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-COM',     '通信工程',              23, 1),
+(1668573201023, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-INFO',    '信息工程',              24, 1),
+-- 医学 / MED（14 个）
+(1668573201024, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200001, 2, 'MED-CLIN',   '临床医学',                1, 1),
+(1668573201025, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200001, 2, 'MED-DENT',   '口腔医学',                2, 1),
+(1668573201026, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200001, 2, 'MED-PH',     '公共卫生与预防医学',      3, 1),
+(1668573201027, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200001, 2, 'MED-PHAR',   '药学',                    4, 1),
+(1668573201028, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200001, 2, 'MED-TCM',    '中药学',                  5, 1),
+(1668573201029, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200001, 2, 'MED-NURSE',  '护理学',                  6, 1),
+(1668573201030, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200001, 2, 'MED-IMG',    '医学影像学',              7, 1),
+(1668573201031, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200001, 2, 'MED-LAB',    '医学检验技术',            8, 1),
+(1668573201032, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200001, 2, 'MED-REHAB',  '康复医学',                9, 1),
+(1668573201033, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200001, 2, 'MED-PREV',   '预防医学',               10, 1),
+(1668573201034, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200001, 2, 'MED-ANES',   '麻醉学',                 11, 1),
+(1668573201035, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200001, 2, 'MED-PSY',    '精神病与精神卫生学',     12, 1),
+(1668573201036, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200001, 2, 'MED-INT',    '中西医结合',             13, 1),
+(1668573201037, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200001, 2, 'MED-PREC',   '精准医学',               14, 1),
+-- 理学 / SCI（14 个）
+(1668573201038, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200002, 2, 'SCI-MATH',     '数学',          1, 1),
+(1668573201039, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200002, 2, 'SCI-PHY',      '物理学',        2, 1),
+(1668573201040, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200002, 2, 'SCI-CHEM',     '化学',          3, 1),
+(1668573201041, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200002, 2, 'SCI-BIO',      '生物学',        4, 1),
+(1668573201042, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200002, 2, 'SCI-ECOL',     '生态学',        5, 1),
+(1668573201043, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200002, 2, 'SCI-ASTR',     '天文学',        6, 1),
+(1668573201044, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200002, 2, 'SCI-GEO',      '地理学',        7, 1),
+(1668573201045, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200002, 2, 'SCI-ATM',      '大气科学',      8, 1),
+(1668573201046, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200002, 2, 'SCI-MAR',      '海洋科学',      9, 1),
+(1668573201047, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200002, 2, 'SCI-GEOP',     '地球物理学',   10, 1),
+(1668573201048, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200002, 2, 'SCI-GEOL',     '地质学',       11, 1),
+(1668573201049, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200002, 2, 'SCI-STAT',     '统计学',       12, 1),
+(1668573201050, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200002, 2, 'SCI-BIOINFO',  '生物信息学',   13, 1),
+(1668573201051, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200002, 2, 'SCI-MATP',     '材料物理',     14, 1),
+-- 经济学 / ECON（9 个）
+(1668573201052, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200003, 2, 'ECON-FIN',   '金融学',          1, 1),
+(1668573201053, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200003, 2, 'ECON-TRADE', '国际贸易学',      2, 1),
+(1668573201054, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200003, 2, 'ECON-FISC',  '财政学',          3, 1),
+(1668573201055, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200003, 2, 'ECON-ACC',   '会计学',          4, 1),
+(1668573201056, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200003, 2, 'ECON-BA',    '工商管理',        5, 1),
+(1668573201057, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200003, 2, 'ECON-THEO',  '经济学（理论）',  6, 1),
+(1668573201058, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200003, 2, 'ECON-DIG',   '数字经济',        7, 1),
+(1668573201059, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200003, 2, 'ECON-FE',    '金融工程',        8, 1),
+(1668573201060, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200003, 2, 'ECON-INS',   '保险学',          9, 1),
+-- 管理学 / MGT（9 个）
+(1668573201061, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200004, 2, 'MGT-PA',   '公共管理',           1, 1),
+(1668573201062, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200004, 2, 'MGT-LOG',  '物流管理',           2, 1),
+(1668573201063, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200004, 2, 'MGT-IMS',  '信息管理与信息系统', 3, 1),
+(1668573201064, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200004, 2, 'MGT-TOUR', '旅游管理',           4, 1),
+(1668573201065, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200004, 2, 'MGT-EM',   '工程管理',           5, 1),
+(1668573201066, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200004, 2, 'MGT-HR',   '人力资源管理',       6, 1),
+(1668573201067, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200004, 2, 'MGT-MKT',  '市场营销',           7, 1),
+(1668573201068, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200004, 2, 'MGT-FIN',  '财务管理',           8, 1),
+(1668573201069, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200004, 2, 'MGT-EMER', '应急管理',           9, 1),
+-- 法学 / LAW（6 个）
+(1668573201070, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200005, 2, 'LAW-THEO',  '法学理论',           1, 1),
+(1668573201071, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200005, 2, 'LAW-CIV',   '民商法学',           2, 1),
+(1668573201072, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200005, 2, 'LAW-CRIM',  '刑法学',             3, 1),
+(1668573201073, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200005, 2, 'LAW-ADMIN', '行政法学',           4, 1),
+(1668573201074, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200005, 2, 'LAW-INT',   '国际法学',           5, 1),
+(1668573201075, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200005, 2, 'LAW-ENV',   '环境与资源保护法学', 6, 1),
+-- 文学 / LIT（5 个）
+(1668573201076, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200006, 2, 'LIT-CN', '中国语言文学', 1, 1),
+(1668573201077, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200006, 2, 'LIT-EN', '外国语言文学', 2, 1),
+(1668573201078, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200006, 2, 'LIT-JC', '新闻传播学',   3, 1),
+(1668573201079, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200006, 2, 'LIT-AD', '广告学',       4, 1),
+(1668573201080, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200006, 2, 'LIT-ED', '编辑出版学',   5, 1),
+-- 教育学 / EDU（5 个）
+(1668573201081, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200007, 2, 'EDU-THEO',   '教育学原理',     1, 1),
+(1668573201082, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200007, 2, 'EDU-CUR',    '课程与教学论',   2, 1),
+(1668573201083, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200007, 2, 'EDU-PRE',    '学前教育学',     3, 1),
+(1668573201084, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200007, 2, 'EDU-HIGHER', '高等教育学',     4, 1),
+(1668573201085, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200007, 2, 'EDU-VOC',    '职业技术教育学', 5, 1),
+-- 艺术学 / ART（3 个）
+(1668573201086, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200008, 2, 'ART-VIS', '视觉传达设计', 1, 1),
+(1668573201087, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200008, 2, 'ART-ENV', '环境设计',     2, 1),
+(1668573201088, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200008, 2, 'ART-DIG', '数字媒体艺术', 3, 1),
+-- 交叉学科 / INTER（1 个）
+(1668573201089, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573200009, 2, 'INTER-QIS', '量子信息科学', 1, 1);
+
+-- ---------- 3) 专业↔学科映射（major_subject）----------
+-- 只写有把握的映射；无对应项的专业（哲学、历史学、体育教育、社会体育指导与管理、
+-- 运动人体科学、休闲体育）不在这里出现，提交页对它们退回展示整棵树。
+INSERT INTO `major_subject` (id, create_by, create_time, update_by, update_time, is_deleted, delete_by, delete_time, major_id, subject_id) VALUES
+-- 计算机科学与技术学院
+(1668573300000, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001000, 1668573201001),  -- 计算机科学与技术 → ENG-CS
+(1668573300001, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001001, 1668573201006),  -- 物联网工程 → ENG-IoT
+(1668573300002, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001002, 1668573201000),  -- 智能科学与技术 → ENG-AI
+(1668573300003, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001003, 1668573201004),  -- 数据科学与大数据技术 → ENG-BIGDATA
+-- 软件学院
+(1668573300004, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001004, 1668573201002),  -- 软件工程 → ENG-SE
+(1668573300005, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001005, 1668573201022),  -- 网络工程 → ENG-COM
+(1668573300006, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001005, 1668573201003),  -- 网络工程 → ENG-CYBER
+(1668573300007, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001006, 1668573201088),  -- 数字媒体技术 → ART-DIG
+-- 网络空间安全学院
+(1668573300008, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001007, 1668573201003),  -- 信息安全 → ENG-CYBER
+(1668573300009, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001008, 1668573201003),  -- 网络空间安全 → ENG-CYBER
+(1668573300010, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001009, 1668573201003),  -- 保密技术 → ENG-CYBER
+(1668573300011, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001010, 1668573201003),  -- 密码科学与技术 → ENG-CYBER
+(1668573300012, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001010, 1668573201038),  -- 密码科学与技术 → SCI-MATH
+-- 电子信息与电气工程学院
+(1668573300013, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001011, 1668573201009),  -- 电气工程及其自动化 → ENG-EE
+(1668573300014, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001012, 1668573201023),  -- 电子信息工程 → ENG-INFO
+(1668573300015, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001012, 1668573201022),  -- 电子信息工程 → ENG-COM
+(1668573300016, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001013, 1668573201008),  -- 电子科学与技术 → ENG-ME
+(1668573300017, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001013, 1668573201023),  -- 电子科学与技术 → ENG-INFO
+(1668573300018, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001014, 1668573201022),  -- 通信工程 → ENG-COM
+(1668573300019, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001015, 1668573201008),  -- 微电子科学与工程 → ENG-ME
+(1668573300020, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001016, 1668573201008),  -- 集成电路设计与集成系统 → ENG-ME
+(1668573300021, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001017, 1668573201000),  -- 人工智能 → ENG-AI
+-- 机械与动力工程学院
+(1668573300022, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001018, 1668573201011),  -- 机械工程 → ENG-MECH
+(1668573300023, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001019, 1668573201011),  -- 机械设计制造及其自动化 → ENG-MECH
+(1668573300024, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001020, 1668573201011),  -- 机械电子工程 → ENG-MECH
+(1668573300025, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001021, 1668573201011),  -- 车辆工程 → ENG-MECH
+(1668573300026, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001022, 1668573201010),  -- 智能制造工程 → ENG-AUTO
+(1668573300027, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001022, 1668573201011),  -- 智能制造工程 → ENG-MECH
+(1668573300028, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001023, 1668573201011),  -- 新能源汽车工程 → ENG-MECH
+(1668573300029, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001023, 1668573201009),  -- 新能源汽车工程 → ENG-EE
+(1668573300030, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001024, 1668573201011),  -- 能源与动力工程 → ENG-MECH
+-- 材料科学与工程学院
+(1668573300031, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001025, 1668573201051),  -- 材料科学与工程 → SCI-MATP
+(1668573300032, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001026, 1668573201051),  -- 材料物理 → SCI-MATP
+(1668573300033, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001027, 1668573201051),  -- 金属材料工程 → SCI-MATP
+(1668573300034, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001028, 1668573201051),  -- 高分子材料与工程 → SCI-MATP
+(1668573300035, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001028, 1668573201016),  -- 高分子材料与工程 → ENG-CHEM
+(1668573300036, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001029, 1668573201051),  -- 功能材料 → SCI-MATP
+(1668573300037, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001030, 1668573201051),  -- 新能源材料与器件 → SCI-MATP
+(1668573300038, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001030, 1668573201009),  -- 新能源材料与器件 → ENG-EE
+-- 土木工程学院
+(1668573300039, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001031, 1668573201012),  -- 土木工程 → ENG-CIVIL
+(1668573300040, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001032, 1668573201012),  -- 建筑环境与能源应用工程 → ENG-CIVIL
+(1668573300041, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001033, 1668573201012),  -- 给排水科学与工程 → ENG-CIVIL
+(1668573300042, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001033, 1668573201013),  -- 给排水科学与工程 → ENG-HYDRO
+(1668573300043, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001034, 1668573201012),  -- 道路桥梁与渡河工程 → ENG-CIVIL
+(1668573300044, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001035, 1668573201012),  -- 智能建造 → ENG-CIVIL
+(1668573300045, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001036, 1668573201012),  -- 建筑学 → ENG-CIVIL
+(1668573300046, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001037, 1668573201065),  -- 工程管理 → MGT-EM
+-- 化学与化工学院
+(1668573300047, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001038, 1668573201040),  -- 化学 → SCI-CHEM
+(1668573300048, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001039, 1668573201040),  -- 应用化学 → SCI-CHEM
+(1668573300049, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001039, 1668573201016),  -- 应用化学 → ENG-CHEM
+(1668573300050, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001040, 1668573201016),  -- 化学工程与工艺 → ENG-CHEM
+(1668573300051, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001041, 1668573201027),  -- 制药工程 → MED-PHAR
+(1668573300052, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001041, 1668573201016),  -- 制药工程 → ENG-CHEM
+(1668573300053, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001042, 1668573201016),  -- 能源化学工程 → ENG-CHEM
+(1668573300054, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001043, 1668573201016),  -- 精细化工 → ENG-CHEM
+-- 生命科学学院
+(1668573300055, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001044, 1668573201041),  -- 生物科学 → SCI-BIO
+(1668573300056, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001045, 1668573201041),  -- 生物技术 → SCI-BIO
+(1668573300057, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001045, 1668573201018),  -- 生物技术 → ENG-BIO
+(1668573300058, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001046, 1668573201050),  -- 生物信息学 → SCI-BIOINFO
+(1668573300059, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001047, 1668573201042),  -- 生态学 → SCI-ECOL
+(1668573300060, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001048, 1668573201018),  -- 生物工程 → ENG-BIO
+(1668573300061, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001049, 1668573201027),  -- 生物制药 → MED-PHAR
+-- 数学与统计学院
+(1668573300062, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001050, 1668573201038),  -- 数学与应用数学 → SCI-MATH
+(1668573300063, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001051, 1668573201038),  -- 信息与计算科学 → SCI-MATH
+(1668573300064, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001052, 1668573201038),  -- 数据计算及应用 → SCI-MATH
+(1668573300065, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001052, 1668573201004),  -- 数据计算及应用 → ENG-BIGDATA
+(1668573300066, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001053, 1668573201049),  -- 统计学 → SCI-STAT
+(1668573300067, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001054, 1668573201049),  -- 应用统计学 → SCI-STAT
+-- 物理与光电工程学院
+(1668573300068, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001055, 1668573201039),  -- 物理学 → SCI-PHY
+(1668573300069, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001056, 1668573201039),  -- 应用物理学 → SCI-PHY
+(1668573300070, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001057, 1668573201039),  -- 核物理 → SCI-PHY
+(1668573300071, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001058, 1668573201023),  -- 光电信息科学与工程 → ENG-INFO
+(1668573300072, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001058, 1668573201039),  -- 光电信息科学与工程 → SCI-PHY
+-- 经济与管理学院
+(1668573300073, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001059, 1668573201057),  -- 经济学 → ECON-THEO
+(1668573300074, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001060, 1668573201052),  -- 金融学 → ECON-FIN
+(1668573300075, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001061, 1668573201059),  -- 金融工程 → ECON-FE
+(1668573300076, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001062, 1668573201053),  -- 国际经济与贸易 → ECON-TRADE
+(1668573300077, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001063, 1668573201063),  -- 信息管理与信息系统 → MGT-IMS
+(1668573300078, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001064, 1668573201004),  -- 大数据管理与应用 → ENG-BIGDATA
+(1668573300079, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001064, 1668573201063),  -- 大数据管理与应用 → MGT-IMS
+(1668573300080, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001065, 1668573201056),  -- 工商管理 → ECON-BA
+(1668573300081, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001066, 1668573201055),  -- 会计学 → ECON-ACC
+(1668573300082, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001067, 1668573201068),  -- 财务管理 → MGT-FIN
+(1668573300083, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001068, 1668573201066),  -- 人力资源管理 → MGT-HR
+-- 法学院
+(1668573300084, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001069, 1668573200005),  -- 法学 → LAW（门类）
+(1668573300085, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001070, 1668573201071),  -- 知识产权 → LAW-CIV
+(1668573300086, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001071, 1668573201074),  -- 国际经贸规则 → LAW-INT
+(1668573300087, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001071, 1668573201053),  -- 国际经贸规则 → ECON-TRADE
+(1668573300088, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001072, 1668573201073),  -- 纪检监察 → LAW-ADMIN
+(1668573300089, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001072, 1668573201072),  -- 纪检监察 → LAW-CRIM
+-- 外国语学院（6 个专业同归外国语言文学）
+(1668573300090, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001073, 1668573201077),  -- 英语 → LIT-EN
+(1668573300091, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001074, 1668573201077),  -- 德语 → LIT-EN
+(1668573300092, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001075, 1668573201077),  -- 法语 → LIT-EN
+(1668573300093, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001076, 1668573201077),  -- 日语 → LIT-EN
+(1668573300094, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001077, 1668573201077),  -- 翻译 → LIT-EN
+(1668573300095, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001078, 1668573201077),  -- 商务英语 → LIT-EN
+-- 文学院
+(1668573300096, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001080, 1668573201076),  -- 汉语言文学 → LIT-CN
+(1668573300097, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001081, 1668573201076),  -- 汉语国际教育 → LIT-CN
+(1668573300098, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001082, 1668573201076),  -- 秘书学 → LIT-CN
+-- 新闻与传播学院
+(1668573300099, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001084, 1668573201078),  -- 新闻学 → LIT-JC
+(1668573300100, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001085, 1668573201078),  -- 广播电视学 → LIT-JC
+(1668573300101, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001086, 1668573201079),  -- 广告学 → LIT-AD
+(1668573300102, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001087, 1668573201078),  -- 网络与新媒体 → LIT-JC
+(1668573300103, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001088, 1668573201078),  -- 国际新闻与传播 → LIT-JC
+(1668573300104, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001088, 1668573201077),  -- 国际新闻与传播 → LIT-EN
+-- 艺术与设计学院
+(1668573300105, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001089, 1668573200008),  -- 音乐学 → ART（门类）
+(1668573300106, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001090, 1668573201088),  -- 动画 → ART-DIG
+(1668573300107, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001091, 1668573200008),  -- 美术学 → ART（门类）
+(1668573300108, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001092, 1668573201086),  -- 视觉传达设计 → ART-VIS
+(1668573300109, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001093, 1668573201087),  -- 环境设计 → ART-ENV
+(1668573300110, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001094, 1668573201086),  -- 产品设计 → ART-VIS
+(1668573300111, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001095, 1668573201088),  -- 数字媒体艺术 → ART-DIG
+-- 医学院
+(1668573300112, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001096, 1668573200001),  -- 基础医学 → MED（门类）
+(1668573300113, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001097, 1668573201024),  -- 临床医学 → MED-CLIN
+(1668573300114, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001098, 1668573201025),  -- 口腔医学 → MED-DENT
+(1668573300115, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001099, 1668573201033),  -- 预防医学 → MED-PREV
+(1668573300116, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001100, 1668573201027),  -- 药学 → MED-PHAR
+(1668573300117, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001101, 1668573201028),  -- 中药学 → MED-TCM
+(1668573300118, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001102, 1668573201032),  -- 康复治疗学 → MED-REHAB
+(1668573300119, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001103, 1668573201029),  -- 护理学 → MED-NURSE
+-- 环境与资源学院
+(1668573300120, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001104, 1668573201044),  -- 人文地理与城乡规划 → SCI-GEO
+(1668573300121, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001105, 1668573201044),  -- 地理信息科学 → SCI-GEO
+(1668573300122, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001106, 1668573201048),  -- 资源勘查工程 → SCI-GEOL
+(1668573300123, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001107, 1668573201015),  -- 环境工程 → ENG-ENV
+(1668573300124, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001108, 1668573201015),  -- 环境科学 → ENG-ENV
+(1668573300125, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001108, 1668573201042),  -- 环境科学 → SCI-ECOL
+(1668573300126, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001109, 1668573201042),  -- 环境生态工程 → SCI-ECOL
+(1668573300127, @op, NOW(), @op, NOW(), 0, NULL, NULL, 1668573001109, 1668573201015);  -- 环境生态工程 → ENG-ENV
+
+COMMIT;
 
 
 -- ============================================================================
@@ -716,3 +1078,25 @@ SELECT GROUP_CONCAT(c.code ORDER BY c.code) AS missing
        ) c
   LEFT JOIN message_template t ON t.template_code = c.code AND t.is_active = 1
  WHERE t.id IS NULL;
+
+-- 8.7 学科领域（段 3B）：subjects=100 / level1=10 / level2=90 / orphan_subject=0
+--     orphan 指 level=2 但 parent_id 指不到 level=1 的行（含 parent_id 为 NULL 的二级）。
+--     level 与 parent_id 不自洽（如 level=1 却带 parent_id）由 selfcheck_clash 暴露。
+SELECT (SELECT COUNT(*) FROM subject WHERE is_deleted = 0)                     AS subjects,
+       (SELECT COUNT(*) FROM subject WHERE is_deleted = 0 AND level = 1)        AS level1,
+       (SELECT COUNT(*) FROM subject WHERE is_deleted = 0 AND level = 2)        AS level2,
+       (SELECT COUNT(*) FROM subject s LEFT JOIN subject p ON s.parent_id = p.id
+         WHERE s.level = 2 AND (p.id IS NULL OR p.level <> 1))                  AS orphan_subject,
+       (SELECT COUNT(*) FROM subject WHERE is_deleted = 0
+          AND ((level = 1 AND parent_id IS NOT NULL) OR (level = 2 AND parent_id IS NULL))) AS selfcheck_clash;
+
+-- 8.8 专业映射（段 3B）：两列都不该指到不存在的行
+--     mapped_majors=108（114 个专业里哲学/历史学/体育类 4 个共 6 个无对应学科）
+--     mapped_subjects 覆盖门类+二级；pairs 为映射行数
+SELECT (SELECT COUNT(*) FROM major_subject WHERE is_deleted = 0)                       AS pairs,
+       (SELECT COUNT(DISTINCT major_id) FROM major_subject WHERE is_deleted = 0)       AS mapped_majors,
+       (SELECT COUNT(DISTINCT subject_id) FROM major_subject WHERE is_deleted = 0)     AS mapped_subjects,
+       (SELECT COUNT(*) FROM major_subject ms
+          LEFT JOIN major   m ON ms.major_id   = m.id
+          LEFT JOIN subject s ON ms.subject_id = s.id
+         WHERE ms.is_deleted = 0 AND (m.id IS NULL OR s.id IS NULL))                   AS dangling_should_be_0;

@@ -27,6 +27,19 @@ public interface SimilarityThresholdResolver {
     BigDecimal resolve(Long collegeId, Long majorId);
 
     /**
+     * 按学科 + 学院/专业解析生效阈值。
+     * 优先级：**二级学科 &gt; 其所属门类 &gt; 专业 &gt; 学院 &gt; 全局 &gt; yml 兜底**。
+     *
+     * 「其所属门类」是继承：二级学科没单独配阈值时，回落到它 parent_id 指向的门类上配的那条。
+     * 于是只在门类级配一次就能覆盖该门类下全部二级学科的论文，不必逐个二级去配
+     * （存量论文里 17/19 篇选的正是门类，这一条是让门类级配置真正有意义的关键）。
+     * subjectId 指向的就是门类时，第一查即命中，继承这一步自然用不上。
+     *
+     * @param subjectId 学科领域ID，可为 null —— 为 null 时行为与两参版本逐字节一致
+     */
+    BigDecimal resolve(Long subjectId, Long collegeId, Long majorId);
+
+    /**
      * 从论文上下文解析生效阈值。
      * 优先用论文自带的学院/专业；论文上缺失时回查学生资料兜底。
      * 传 null 时等同于取全局阈值。

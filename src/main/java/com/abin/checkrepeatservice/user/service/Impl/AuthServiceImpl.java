@@ -241,6 +241,11 @@ public class AuthServiceImpl implements AuthService {
         loginVO.setRoleCode(sysRole.getRoleCode());
         loginVO.setUsername(sysUser.getUsername());
         loginVO.setRealName(sysUser.getRealName());
+        // 学院/专业四项一起给：个人中心的下拉框按 ID 回显、按名称显示，少任一项就要多等一次
+        // /api/user/info 才能填上（缓存渲染时两个框会先空一下）
+        loginVO.setCollegeId(sysUser.getCollegeId());
+        loginVO.setCollegeName(sysUser.getCollegeName());
+        loginVO.setMajorId(sysUser.getMajorId());
         loginVO.setMajor(sysUser.getMajor());
         loginVO.setGrade(sysUser.getGrade());
         loginVO.setClassName(sysUser.getClassName());

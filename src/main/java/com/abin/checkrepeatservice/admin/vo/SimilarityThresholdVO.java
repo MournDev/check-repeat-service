@@ -18,7 +18,7 @@ public class SimilarityThresholdVO {
     private Integer globalThreshold;
 
     /**
-     * 学院/专业阈值列表
+     * 学院/专业/学科阈值列表
      */
     private List<CategoryItem> categoryThresholds;
 
@@ -40,10 +40,19 @@ public class SimilarityThresholdVO {
         @JsonFormat(shape = JsonFormat.Shape.STRING)
         private Long majorId;
 
+        /**
+         * 学科领域ID（categoryType=subject 时有值）。
+         * 学科 id 只有 13 位、本身没过 2^53，但这里同样序列化成字符串 ——
+         * 前端要把它回填进与学科树共用的下拉里，统一字符串形态可以免掉
+         * 「数字 id ≠ 字符串 value」这类比较坑。
+         */
+        @JsonFormat(shape = JsonFormat.Shape.STRING)
+        private Long subjectId;
+
         private Integer threshold;
 
         /**
-         * 展示名，由 college / major 表反查得出，不落库。
+         * 展示名，由 college / major / subject 表按 categoryType 三路反查得出，不落库。
          */
         private String categoryName;
 

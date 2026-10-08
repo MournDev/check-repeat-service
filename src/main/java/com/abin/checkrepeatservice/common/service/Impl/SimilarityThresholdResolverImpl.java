@@ -3,6 +3,7 @@ package com.abin.checkrepeatservice.common.service.Impl;
 import com.abin.checkrepeatservice.common.mapper.CategorySimilarityThresholdMapper;
 import com.abin.checkrepeatservice.common.mapper.SimilarityThresholdMapper;
 import com.abin.checkrepeatservice.common.service.SimilarityThresholdResolver;
+import com.abin.checkrepeatservice.common.service.Impl.SubjectService;
 import com.abin.checkrepeatservice.mapper.SysUserMapper;
 import com.abin.checkrepeatservice.pojo.entity.CategorySimilarityThreshold;
 import com.abin.checkrepeatservice.pojo.entity.Major;
@@ -38,6 +39,12 @@ public class SimilarityThresholdResolverImpl implements SimilarityThresholdResol
     private final SysUserMapper sysUserMapper;
 
     /**
+     * 学科两级查法与 subject_code 兜底反查都走它 —— code→id 的规则只允许有一份实现，
+     * 散开写就会出现"同一篇论文在这里解析出了学科、在别处解析不出"的漂移。
+     */
+    private final SubjectService subjectService;
+
+    /**
      * 兜底阈值。与改造前各判定点注入的是同一个配置键，
      * 因此两张新表为空时判定结果与改造前完全一致。
      */
@@ -60,16 +67,42 @@ public class SimilarityThresholdResolverImpl implements SimilarityThresholdResol
                 majorId = student.getMajorId();
             }
         }
-        return resolve(collegeId, majorId);
+        return resolve(subjectIdOf(paperInfo), collegeId, majorId);
     }
 
     @Override
     public BigDecimal resolve(Long collegeId, Long majorId) {
+        // 两参版本保持原样（学生端「当前查重规则」卡片还在用它），
+        // 只把它转成三参版本、subjectId 传 null —— 于是行为逐字节不变。
+        return resolve(null, collegeId, majorId);
+    }
+
+    @Override
+    public BigDecimal resolve(Long subjectId, Long collegeId, Long majorId) {
         // 只知道专业时补出所属学院，好让专业没配阈值时能回退到学院级
         if (collegeId == null && majorId != null) {
             Major major = majorMapper.selectById(majorId);
             if (major != null) {
                 collegeId = major.getCollegeId();
+            }
+        }
+
+        // 学科维度排在最前：它比"专业"更贴近论文本身（同一专业下不同学科方向的
+        // 重复率标准可以不同）。两级查法即"精确没配就继承其门类"。
+        if (subjectId != null) {
+            BigDecimal threshold = categoryThreshold(
+                    CategorySimilarityThreshold.TYPE_SUBJECT, null, null, subjectId);
+            if (threshold != null) {
+                return threshold;
+            }
+            // 二级学科没配 → 继承它所属门类上配的那条
+            Long parentId = subjectService.parentIdOf(subjectId);
+            if (parentId != null) {
+                threshold = categoryThreshold(
+                        CategorySimilarityThreshold.TYPE_SUBJECT, null, null, parentId);
+                if (threshold != null) {
+                    return threshold;
+                }
             }
         }
 
@@ -90,6 +123,21 @@ public class SimilarityThresholdResolverImpl implements SimilarityThresholdResol
         }
 
         return globalThreshold();
+    }
+
+    /**
+     * 论文的学科ID：优先用 subject_id；存量论文可能只有 subject_code（1.10.5 的回填
+     * 只覆盖了 code 能对上学科的，脏 code 会留空），所以这里用 code 兜底反查一次。
+     * 不兜底的话，那些论文永远拿不到学科维度的阈值，且不会报任何错。
+     */
+    private Long subjectIdOf(PaperInfo paperInfo) {
+        if (paperInfo.getSubjectId() != null) {
+            return paperInfo.getSubjectId();
+        }
+        if (paperInfo.getSubjectCode() == null || paperInfo.getSubjectCode().isBlank()) {
+            return null;
+        }
+        return subjectService.findIdByCode(paperInfo.getSubjectCode());
     }
 
     @Override
@@ -121,6 +169,13 @@ public class SimilarityThresholdResolverImpl implements SimilarityThresholdResol
      * 查某一级（学院或专业）配置的阈值，没有配置时返回 null 以继续向上回退。
      */
     private BigDecimal categoryThreshold(String categoryType, Long collegeId, Long majorId) {
+        return categoryThreshold(categoryType, collegeId, majorId, null);
+    }
+
+    /**
+     * 查某一级（学院/专业/学科）配置的阈值，没配则返回 null 以继续向上回退。
+     */
+    private BigDecimal categoryThreshold(String categoryType, Long collegeId, Long majorId, Long subjectId) {
         LambdaQueryWrapper<CategorySimilarityThreshold> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(CategorySimilarityThreshold::getCategoryType, categoryType);
         if (collegeId != null) {
@@ -128,6 +183,9 @@ public class SimilarityThresholdResolverImpl implements SimilarityThresholdResol
         }
         if (majorId != null) {
             wrapper.eq(CategorySimilarityThreshold::getMajorId, majorId);
+        }
+        if (subjectId != null) {
+            wrapper.eq(CategorySimilarityThreshold::getSubjectId, subjectId);
         }
         wrapper.orderByDesc(CategorySimilarityThreshold::getId).last("LIMIT 1");
 

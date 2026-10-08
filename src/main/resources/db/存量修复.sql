@@ -21,6 +21,8 @@
 --     不报错，所以表现为静默的 0）。
 --   · 相似度阈值保存成功、刷新后列表恒空且无报错 —— is_deleted 落成 NULL。
 --   · 管理端「待分配学生」列表恒空 —— 分配字段链路的历史脏数据。
+--   · 需要「学科领域」独立成表（subject / major_subject / teacher_subject）、
+--     论文带 subject_id、阈值支持学科维度 —— 跑 1.10 段（纯加表加列，不动字典）。
 --
 -- 执行方式：**先跑「0. 自检」**看清哪些已经到位，然后按 1 → 4 顺序执行，
 --           最后跑「5. 执行后自检」。
@@ -40,7 +42,7 @@
 --    判断成败只看「5. 执行后自检」的数值，不看有没有 ERROR 行。
 --    1.6、1.7 用的 CREATE TABLE IF NOT EXISTS 与 2~4 段本身就可重复执行。
 --
--- 前置假设：目标库里 init.sql 那 59 张表都已存在。若某张表整个不存在，先看第 1 段
+-- 前置假设：目标库里 init.sql 那 62 张表都已存在。若某张表整个不存在，先看第 1 段
 --           是否已为它准备好建表语句（teacher_audit → 1.6，metric_event_daily → 1.7）；
 --           其余缺表该做的是用 init.sql 重建，而不是跑本文件。
 -- ============================================================================
@@ -99,6 +101,25 @@ SELECT (SELECT COUNT(*) FROM information_schema.TABLES
        (SELECT COUNT(DISTINCT INDEX_NAME) FROM information_schema.STATISTICS
          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'category_similarity_threshold'
            AND INDEX_NAME IN ('idx_type_college','idx_type_major'))                        AS threshold_indexes;
+
+-- 0.7 段 1.10 学科领域重构的前置现状
+--     has_subject_tables 期望 3（subject / major_subject / teacher_subject）
+--     subject_cols       期望 2（paper_info.subject_id + category_similarity_threshold.subject_id）
+--     dict_subject_rows  旧字典 sys_dict_data 里 dict_type='subject_field' 的行数（本机/线上都是 100）
+--     papers_pending_backfill >0 才需要 1.10.5 回填
+--     注意：本探针只用 information_schema 判断表/列在不在，不去直接 SELECT 那三张表，
+--     否则结构还没对齐的库里这一句就先报 1146 了。（sys_dict_data 本身没有 is_deleted 列。）
+SELECT (SELECT COUNT(*) FROM information_schema.TABLES
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME IN ('subject','major_subject','teacher_subject'))               AS has_subject_tables,
+       (SELECT COUNT(*) FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND ((TABLE_NAME = 'paper_info'  AND COLUMN_NAME = 'subject_id')
+             OR (TABLE_NAME = 'category_similarity_threshold' AND COLUMN_NAME = 'subject_id'))) AS subject_cols,
+       (SELECT COUNT(*) FROM sys_dict_data WHERE dict_type = 'subject_field')             AS dict_subject_rows,
+       (SELECT COUNT(*) FROM paper_info
+         WHERE is_deleted = 0 AND subject_id IS NULL
+           AND subject_code IS NOT NULL AND TRIM(subject_code) <> '')                     AS papers_pending_backfill;
 
 
 -- ============================================================================
@@ -296,6 +317,439 @@ ALTER TABLE category_similarity_threshold
 
 ALTER TABLE category_similarity_threshold
     ADD INDEX idx_type_major (category_type, major_id);
+
+
+-- ---------------------------------------------------------------------
+-- 1.10 学科领域重构：subject / major_subject / teacher_subject + 两处加列 + 存量回填
+--
+-- 背景：学科领域原先是一张没有版本控制的字典树 —— 100 行 sys_dict_data
+--   (dict_type='subject_field')，层级靠 dict_value 里的连字符约定出来，没有 parent_id；
+--   教师研究方向又是第三套取值域（前端硬编码的 7 个短码，和这 100 个编码对不上）。
+--   本段把它升级成独立主数据表，并让论文/阈值/教师研究方向共用同一套取值域。
+--
+-- 与 种子数据.sql 段 3B 的关系：那边是「先 DELETE 再 INSERT 写死 id」的整表替换，
+--   这边改成 INSERT ... ON DUPLICATE KEY UPDATE（打到 uk_subject_code）—— 因为
+--   paper_info.subject_id / major_subject / teacher_subject 都指向这些 id，
+--   逐行 upsert 不会制造一段「先删空、后重插」的悬空窗口。
+--
+-- ⚠️ 本段**一行都不删 sys_dict_data**。理由见 DEPLOY.md 第八节：deploy.sh 健康检查
+--   失败会回滚应用镜像但 DDL 不回滚，旧代码正好跑在新结构上；旧代码的学科树只读
+--   字典，删了之后回滚，论文提交页的选择器直接空白。字典的清理要单独出脚本、
+--   且只在确认所有环境都不再回滚之后执行。
+--
+-- 幂等性：1.10.1 是 CREATE TABLE IF NOT EXISTS；1.10.2 / 1.10.3 的 ALTER 重复执行
+--   报 1060 / 1061（预期）；1.10.4~1.10.7 全部可重复执行。
+-- ---------------------------------------------------------------------
+
+-- 1.10.1 三张新表（DDL 与 init.sql 逐字一致）
+CREATE TABLE IF NOT EXISTS `subject` (
+  `id` bigint NOT NULL COMMENT '主键ID（写死的13位，见 种子数据.sql 段 3B）',
+  `create_by` bigint NOT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` bigint NOT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  `parent_id` bigint DEFAULT NULL COMMENT '父学科ID（一级门类为NULL，二级指向所属门类id）',
+  `level` tinyint NOT NULL DEFAULT '1' COMMENT '层级：1-一级门类，2-二级学科（由 parent_id 推导，不接受前端传值）',
+  `code` varchar(50) NOT NULL COMMENT '学科编码（唯一，如 ENG、ENG-CS）。对外稳定标识，paper_info.subject_code 存它；创建后不可改',
+  `name` varchar(128) NOT NULL COMMENT '学科名称（如 工学、人工智能），可改',
+  `sort_no` int NOT NULL DEFAULT '0' COMMENT '同层排序',
+  `is_enabled` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否启用（0-停用，1-启用）：停用后不再出现在选择器/阈值候选中，已引用的数据不受影响',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_subject_code` (`code`),
+  KEY `idx_subject_parent_id` (`parent_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='学科领域表（取代 sys_dict_data 的 subject_field 字符串树）';
+
+CREATE TABLE IF NOT EXISTS `major_subject` (
+  `id` bigint NOT NULL COMMENT '主键ID（雪花ID）',
+  `create_by` bigint NOT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` bigint NOT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  `major_id` bigint NOT NULL COMMENT '专业ID（关联major.id）',
+  `subject_id` bigint NOT NULL COMMENT '学科领域ID（关联subject.id）',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_major_subject` (`major_id`,`subject_id`),
+  KEY `idx_major_subject_subject_id` (`subject_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='专业↔学科领域映射表';
+
+CREATE TABLE IF NOT EXISTS `teacher_subject` (
+  `id` bigint NOT NULL COMMENT '主键ID（雪花ID）',
+  `create_by` bigint NOT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` bigint NOT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  `user_id` bigint NOT NULL COMMENT '教师用户ID（关联sys_user.id）',
+  `subject_id` bigint NOT NULL COMMENT '学科领域ID（关联subject.id）',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_teacher_subject` (`user_id`,`subject_id`),
+  KEY `idx_teacher_subject_subject_id` (`subject_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='教师研究方向↔学科领域关联表';
+
+-- 1.10.2 paper_info 加 subject_id（可空列 + 索引，重复执行报 1060 / 1061）
+--        subject_code 保留不动：它是 subject.code 的冗余列，值域必须维持「编码」形态
+--        —— AcademicIntegrityServiceImpl:95 拿它当 subjectArea 去匹配资源分类。
+ALTER TABLE `paper_info`
+  ADD COLUMN `subject_id` bigint DEFAULT NULL COMMENT '学科领域ID（关联subject.id）。写入时由 SubjectService.findIdByCode 反查 subject_code 得到' AFTER `subject_code`;
+
+ALTER TABLE `paper_info`
+  ADD INDEX `idx_paper_info_subject_id` (`subject_id`);
+
+-- 1.10.3 category_similarity_threshold 增加 subject 维度（同上，1060 / 1061 预期内）
+--        这张表没有唯一键，去重靠 Java 侧 SimilarityThresholdServiceImpl.validate 的
+--        naturalKey，所以加 subject 行不会撞键；但 naturalKey 必须同步拼上 subjectId。
+ALTER TABLE `category_similarity_threshold`
+  MODIFY COLUMN `category_type` varchar(50) DEFAULT NULL COMMENT '分类类型：college-学院，major-专业，subject-学科领域';
+
+ALTER TABLE `category_similarity_threshold`
+  ADD COLUMN `subject_id` bigint DEFAULT NULL COMMENT '学科领域ID（category_type=subject 时必填，关联subject.id）' AFTER `major_id`;
+
+ALTER TABLE `category_similarity_threshold`
+  ADD INDEX `idx_type_subject` (`category_type`,`subject_id`);
+
+-- 1.10.4 播 100 行学科（10 门类 + 90 二级），与 种子数据.sql 段 3B 同一份清单。
+--        code 与原 dict_value 完全一致，因此 paper_info.subject_code 的存量值一个都不用改。
+--        冲突时只更新可变的展示/排序/启用列，不动 code（它是匹配键）、也不动 create_by/create_time。
+--        create_by/update_by 写 1：这两列只是 NOT NULL 的审计列，全局没有 FK 指向 sys_user
+--        （init.sql 里为学科这几张表只声明了 PRIMARY/UNIQUE/KEY，故意不加外键），
+--        所以不必去猜一个真实存在过的用户 id。种子路径（种子数据.sql 段 3B）用的是 @op。
+INSERT INTO `subject` (id, create_by, create_time, update_by, update_time, is_deleted, delete_by, delete_time, parent_id, level, code, name, sort_no, is_enabled) VALUES
+(1668573200000, 1, NOW(), 1, NOW(), 0, NULL, NULL, NULL, 1, 'ENG',   '工学',     1, 1),
+(1668573200001, 1, NOW(), 1, NOW(), 0, NULL, NULL, NULL, 1, 'MED',   '医学',     2, 1),
+(1668573200002, 1, NOW(), 1, NOW(), 0, NULL, NULL, NULL, 1, 'SCI',   '理学',     3, 1),
+(1668573200003, 1, NOW(), 1, NOW(), 0, NULL, NULL, NULL, 1, 'ECON',  '经济学',   4, 1),
+(1668573200004, 1, NOW(), 1, NOW(), 0, NULL, NULL, NULL, 1, 'MGT',   '管理学',   5, 1),
+(1668573200005, 1, NOW(), 1, NOW(), 0, NULL, NULL, NULL, 1, 'LAW',   '法学',     6, 1),
+(1668573200006, 1, NOW(), 1, NOW(), 0, NULL, NULL, NULL, 1, 'LIT',   '文学',     7, 1),
+(1668573200007, 1, NOW(), 1, NOW(), 0, NULL, NULL, NULL, 1, 'EDU',   '教育学',   8, 1),
+(1668573200008, 1, NOW(), 1, NOW(), 0, NULL, NULL, NULL, 1, 'ART',   '艺术学',   9, 1),
+(1668573200009, 1, NOW(), 1, NOW(), 0, NULL, NULL, NULL, 1, 'INTER', '交叉学科', 10, 1),
+(1668573201000, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-AI',      '人工智能',               1, 1),
+(1668573201001, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-CS',      '计算机科学与技术',       2, 1),
+(1668573201002, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-SE',      '软件工程',               3, 1),
+(1668573201003, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-CYBER',   '网络空间安全',           4, 1),
+(1668573201004, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-BIGDATA', '大数据技术',             5, 1),
+(1668573201005, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-CLOUD',   '云计算技术',             6, 1),
+(1668573201006, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-IoT',     '物联网工程',             7, 1),
+(1668573201007, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-BC',      '区块链工程',             8, 1),
+(1668573201008, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-ME',      '微电子科学与工程',       9, 1),
+(1668573201009, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-EE',      '电气工程及其自动化',    10, 1),
+(1668573201010, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-AUTO',    '自动化',                11, 1),
+(1668573201011, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-MECH',    '机械设计制造及其自动化', 12, 1),
+(1668573201012, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-CIVIL',   '土木工程',              13, 1),
+(1668573201013, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-HYDRO',   '水利水电工程',          14, 1),
+(1668573201014, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-SURVEY',  '测绘工程',              15, 1),
+(1668573201015, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-ENV',     '环境工程',              16, 1),
+(1668573201016, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-CHEM',    '化学工程与工艺',        17, 1),
+(1668573201017, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-FOOD',    '食品科学与工程',        18, 1),
+(1668573201018, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-BIO',     '生物工程',              19, 1),
+(1668573201019, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-AERO',    '航空航天工程',          20, 1),
+(1668573201020, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-MARINE',  '海洋工程',              21, 1),
+(1668573201021, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-RAIL',    '轨道交通信号与控制',    22, 1),
+(1668573201022, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-COM',     '通信工程',              23, 1),
+(1668573201023, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200000, 2, 'ENG-INFO',    '信息工程',              24, 1),
+(1668573201024, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200001, 2, 'MED-CLIN',   '临床医学',                1, 1),
+(1668573201025, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200001, 2, 'MED-DENT',   '口腔医学',                2, 1),
+(1668573201026, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200001, 2, 'MED-PH',     '公共卫生与预防医学',      3, 1),
+(1668573201027, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200001, 2, 'MED-PHAR',   '药学',                    4, 1),
+(1668573201028, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200001, 2, 'MED-TCM',    '中药学',                  5, 1),
+(1668573201029, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200001, 2, 'MED-NURSE',  '护理学',                  6, 1),
+(1668573201030, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200001, 2, 'MED-IMG',    '医学影像学',              7, 1),
+(1668573201031, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200001, 2, 'MED-LAB',    '医学检验技术',            8, 1),
+(1668573201032, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200001, 2, 'MED-REHAB',  '康复医学',                9, 1),
+(1668573201033, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200001, 2, 'MED-PREV',   '预防医学',               10, 1),
+(1668573201034, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200001, 2, 'MED-ANES',   '麻醉学',                 11, 1),
+(1668573201035, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200001, 2, 'MED-PSY',    '精神病与精神卫生学',     12, 1),
+(1668573201036, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200001, 2, 'MED-INT',    '中西医结合',             13, 1),
+(1668573201037, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200001, 2, 'MED-PREC',   '精准医学',               14, 1),
+(1668573201038, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200002, 2, 'SCI-MATH',     '数学',          1, 1),
+(1668573201039, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200002, 2, 'SCI-PHY',      '物理学',        2, 1),
+(1668573201040, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200002, 2, 'SCI-CHEM',     '化学',          3, 1),
+(1668573201041, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200002, 2, 'SCI-BIO',      '生物学',        4, 1),
+(1668573201042, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200002, 2, 'SCI-ECOL',     '生态学',        5, 1),
+(1668573201043, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200002, 2, 'SCI-ASTR',     '天文学',        6, 1),
+(1668573201044, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200002, 2, 'SCI-GEO',      '地理学',        7, 1),
+(1668573201045, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200002, 2, 'SCI-ATM',      '大气科学',      8, 1),
+(1668573201046, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200002, 2, 'SCI-MAR',      '海洋科学',      9, 1),
+(1668573201047, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200002, 2, 'SCI-GEOP',     '地球物理学',   10, 1),
+(1668573201048, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200002, 2, 'SCI-GEOL',     '地质学',       11, 1),
+(1668573201049, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200002, 2, 'SCI-STAT',     '统计学',       12, 1),
+(1668573201050, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200002, 2, 'SCI-BIOINFO',  '生物信息学',   13, 1),
+(1668573201051, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200002, 2, 'SCI-MATP',     '材料物理',     14, 1),
+(1668573201052, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200003, 2, 'ECON-FIN',   '金融学',          1, 1),
+(1668573201053, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200003, 2, 'ECON-TRADE', '国际贸易学',      2, 1),
+(1668573201054, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200003, 2, 'ECON-FISC',  '财政学',          3, 1),
+(1668573201055, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200003, 2, 'ECON-ACC',   '会计学',          4, 1),
+(1668573201056, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200003, 2, 'ECON-BA',    '工商管理',        5, 1),
+(1668573201057, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200003, 2, 'ECON-THEO',  '经济学（理论）',  6, 1),
+(1668573201058, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200003, 2, 'ECON-DIG',   '数字经济',        7, 1),
+(1668573201059, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200003, 2, 'ECON-FE',    '金融工程',        8, 1),
+(1668573201060, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200003, 2, 'ECON-INS',   '保险学',          9, 1),
+(1668573201061, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200004, 2, 'MGT-PA',   '公共管理',           1, 1),
+(1668573201062, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200004, 2, 'MGT-LOG',  '物流管理',           2, 1),
+(1668573201063, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200004, 2, 'MGT-IMS',  '信息管理与信息系统', 3, 1),
+(1668573201064, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200004, 2, 'MGT-TOUR', '旅游管理',           4, 1),
+(1668573201065, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200004, 2, 'MGT-EM',   '工程管理',           5, 1),
+(1668573201066, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200004, 2, 'MGT-HR',   '人力资源管理',       6, 1),
+(1668573201067, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200004, 2, 'MGT-MKT',  '市场营销',           7, 1),
+(1668573201068, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200004, 2, 'MGT-FIN',  '财务管理',           8, 1),
+(1668573201069, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200004, 2, 'MGT-EMER', '应急管理',           9, 1),
+(1668573201070, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200005, 2, 'LAW-THEO',  '法学理论',           1, 1),
+(1668573201071, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200005, 2, 'LAW-CIV',   '民商法学',           2, 1),
+(1668573201072, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200005, 2, 'LAW-CRIM',  '刑法学',             3, 1),
+(1668573201073, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200005, 2, 'LAW-ADMIN', '行政法学',           4, 1),
+(1668573201074, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200005, 2, 'LAW-INT',   '国际法学',           5, 1),
+(1668573201075, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200005, 2, 'LAW-ENV',   '环境与资源保护法学', 6, 1),
+(1668573201076, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200006, 2, 'LIT-CN', '中国语言文学', 1, 1),
+(1668573201077, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200006, 2, 'LIT-EN', '外国语言文学', 2, 1),
+(1668573201078, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200006, 2, 'LIT-JC', '新闻传播学',   3, 1),
+(1668573201079, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200006, 2, 'LIT-AD', '广告学',       4, 1),
+(1668573201080, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200006, 2, 'LIT-ED', '编辑出版学',   5, 1),
+(1668573201081, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200007, 2, 'EDU-THEO',   '教育学原理',     1, 1),
+(1668573201082, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200007, 2, 'EDU-CUR',    '课程与教学论',   2, 1),
+(1668573201083, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200007, 2, 'EDU-PRE',    '学前教育学',     3, 1),
+(1668573201084, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200007, 2, 'EDU-HIGHER', '高等教育学',     4, 1),
+(1668573201085, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200007, 2, 'EDU-VOC',    '职业技术教育学', 5, 1),
+(1668573201086, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200008, 2, 'ART-VIS', '视觉传达设计', 1, 1),
+(1668573201087, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200008, 2, 'ART-ENV', '环境设计',     2, 1),
+(1668573201088, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200008, 2, 'ART-DIG', '数字媒体艺术', 3, 1),
+(1668573201089, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573200009, 2, 'INTER-QIS', '量子信息科学', 1, 1)
+ON DUPLICATE KEY UPDATE
+  `parent_id`  = VALUES(`parent_id`),
+  `level`      = VALUES(`level`),
+  `name`       = VALUES(`name`),
+  `sort_no`    = VALUES(`sort_no`),
+  `is_enabled` = VALUES(`is_enabled`),
+  `is_deleted` = 0,
+  `update_time` = NOW();
+
+-- 1.10.4b 播专业↔学科映射（128 行），与 种子数据.sql 段 3B 同一份清单。
+--
+--   ⚠️ 这一段容易漏：论文提交页「选完专业只列相关学科」全靠它。漏了不会报任何错
+--      —— SubjectService.getTree(majorId) 查不到映射就会退回整棵树，表现为
+--      "收窄没生效"，是那种只能靠端到端点一遍才能发现的静默失效。
+--
+--   major_id 用的是 种子数据.sql 段 3 改绑之后的新专业 id（1668573001000+），
+--   所以本文件必须跑在 种子数据.sql 之后 —— 文件头那条顺序约定在这里也是硬要求。
+--
+--   冲突时只刷新 is_deleted/update_time：major_id/subject_id 是匹配键不能改；
+--   管理端（阶段 6）用雪花 id 建的行不可能撞上这里的 13 位 id，所以
+--   ON DUPLICATE KEY UPDATE 命中的一定是 uk_major_subject 这一侧，是预期的幂等行为。
+INSERT INTO `major_subject` (id, create_by, create_time, update_by, update_time, is_deleted, delete_by, delete_time, major_id, subject_id) VALUES
+(1668573300000, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001000, 1668573201001),
+(1668573300001, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001001, 1668573201006),
+(1668573300002, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001002, 1668573201000),
+(1668573300003, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001003, 1668573201004),
+(1668573300004, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001004, 1668573201002),
+(1668573300005, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001005, 1668573201022),
+(1668573300006, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001005, 1668573201003),
+(1668573300007, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001006, 1668573201088),
+(1668573300008, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001007, 1668573201003),
+(1668573300009, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001008, 1668573201003),
+(1668573300010, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001009, 1668573201003),
+(1668573300011, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001010, 1668573201003),
+(1668573300012, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001010, 1668573201038),
+(1668573300013, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001011, 1668573201009),
+(1668573300014, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001012, 1668573201023),
+(1668573300015, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001012, 1668573201022),
+(1668573300016, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001013, 1668573201008),
+(1668573300017, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001013, 1668573201023),
+(1668573300018, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001014, 1668573201022),
+(1668573300019, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001015, 1668573201008),
+(1668573300020, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001016, 1668573201008),
+(1668573300021, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001017, 1668573201000),
+(1668573300022, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001018, 1668573201011),
+(1668573300023, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001019, 1668573201011),
+(1668573300024, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001020, 1668573201011),
+(1668573300025, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001021, 1668573201011),
+(1668573300026, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001022, 1668573201010),
+(1668573300027, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001022, 1668573201011),
+(1668573300028, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001023, 1668573201011),
+(1668573300029, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001023, 1668573201009),
+(1668573300030, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001024, 1668573201011),
+(1668573300031, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001025, 1668573201051),
+(1668573300032, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001026, 1668573201051),
+(1668573300033, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001027, 1668573201051),
+(1668573300034, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001028, 1668573201051),
+(1668573300035, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001028, 1668573201016),
+(1668573300036, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001029, 1668573201051),
+(1668573300037, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001030, 1668573201051),
+(1668573300038, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001030, 1668573201009),
+(1668573300039, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001031, 1668573201012),
+(1668573300040, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001032, 1668573201012),
+(1668573300041, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001033, 1668573201012),
+(1668573300042, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001033, 1668573201013),
+(1668573300043, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001034, 1668573201012),
+(1668573300044, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001035, 1668573201012),
+(1668573300045, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001036, 1668573201012),
+(1668573300046, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001037, 1668573201065),
+(1668573300047, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001038, 1668573201040),
+(1668573300048, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001039, 1668573201040),
+(1668573300049, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001039, 1668573201016),
+(1668573300050, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001040, 1668573201016),
+(1668573300051, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001041, 1668573201027),
+(1668573300052, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001041, 1668573201016),
+(1668573300053, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001042, 1668573201016),
+(1668573300054, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001043, 1668573201016),
+(1668573300055, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001044, 1668573201041),
+(1668573300056, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001045, 1668573201041),
+(1668573300057, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001045, 1668573201018),
+(1668573300058, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001046, 1668573201050),
+(1668573300059, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001047, 1668573201042),
+(1668573300060, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001048, 1668573201018),
+(1668573300061, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001049, 1668573201027),
+(1668573300062, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001050, 1668573201038),
+(1668573300063, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001051, 1668573201038),
+(1668573300064, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001052, 1668573201038),
+(1668573300065, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001052, 1668573201004),
+(1668573300066, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001053, 1668573201049),
+(1668573300067, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001054, 1668573201049),
+(1668573300068, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001055, 1668573201039),
+(1668573300069, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001056, 1668573201039),
+(1668573300070, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001057, 1668573201039),
+(1668573300071, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001058, 1668573201023),
+(1668573300072, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001058, 1668573201039),
+(1668573300073, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001059, 1668573201057),
+(1668573300074, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001060, 1668573201052),
+(1668573300075, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001061, 1668573201059),
+(1668573300076, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001062, 1668573201053),
+(1668573300077, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001063, 1668573201063),
+(1668573300078, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001064, 1668573201004),
+(1668573300079, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001064, 1668573201063),
+(1668573300080, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001065, 1668573201056),
+(1668573300081, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001066, 1668573201055),
+(1668573300082, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001067, 1668573201068),
+(1668573300083, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001068, 1668573201066),
+(1668573300084, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001069, 1668573200005),
+(1668573300085, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001070, 1668573201071),
+(1668573300086, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001071, 1668573201074),
+(1668573300087, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001071, 1668573201053),
+(1668573300088, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001072, 1668573201073),
+(1668573300089, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001072, 1668573201072),
+(1668573300090, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001073, 1668573201077),
+(1668573300091, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001074, 1668573201077),
+(1668573300092, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001075, 1668573201077),
+(1668573300093, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001076, 1668573201077),
+(1668573300094, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001077, 1668573201077),
+(1668573300095, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001078, 1668573201077),
+(1668573300096, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001080, 1668573201076),
+(1668573300097, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001081, 1668573201076),
+(1668573300098, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001082, 1668573201076),
+(1668573300099, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001084, 1668573201078),
+(1668573300100, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001085, 1668573201078),
+(1668573300101, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001086, 1668573201079),
+(1668573300102, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001087, 1668573201078),
+(1668573300103, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001088, 1668573201078),
+(1668573300104, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001088, 1668573201077),
+(1668573300105, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001089, 1668573200008),
+(1668573300106, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001090, 1668573201088),
+(1668573300107, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001091, 1668573200008),
+(1668573300108, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001092, 1668573201086),
+(1668573300109, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001093, 1668573201087),
+(1668573300110, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001094, 1668573201086),
+(1668573300111, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001095, 1668573201088),
+(1668573300112, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001096, 1668573200001),
+(1668573300113, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001097, 1668573201024),
+(1668573300114, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001098, 1668573201025),
+(1668573300115, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001099, 1668573201033),
+(1668573300116, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001100, 1668573201027),
+(1668573300117, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001101, 1668573201028),
+(1668573300118, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001102, 1668573201032),
+(1668573300119, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001103, 1668573201029),
+(1668573300120, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001104, 1668573201044),
+(1668573300121, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001105, 1668573201044),
+(1668573300122, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001106, 1668573201048),
+(1668573300123, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001107, 1668573201015),
+(1668573300124, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001108, 1668573201015),
+(1668573300125, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001108, 1668573201042),
+(1668573300126, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001109, 1668573201042),
+(1668573300127, 1, NOW(), 1, NOW(), 0, NULL, NULL, 1668573001109, 1668573201015)
+ON DUPLICATE KEY UPDATE
+  `is_deleted`  = 0,
+  `update_time` = NOW();
+
+-- 1.10.5 回填 paper_info.subject_id（只补 NULL 行，可重复执行）
+--        subject_code 存的是 code，join 上就得到 id。本机 19 篇的 9 个不同 code
+--        （SCI/MED/ECON/ENG/MGT/INTER/ART + MGT-IMS/MED-DENT）都在 1.10.4 里，
+--        所以 5.7 的 paper_code_unmapped_should_be_0 期望 0。
+UPDATE `paper_info` p
+  JOIN `subject` s ON TRIM(p.subject_code) = s.code
+   SET p.subject_id = s.id,
+       p.update_time = NOW()
+ WHERE p.subject_id IS NULL
+   AND p.subject_code IS NOT NULL
+   AND TRIM(p.subject_code) <> '';
+
+-- 1.10.6 教师研究方向 → teacher_subject（只迁能同名映射的 2 个 token）
+--
+--     旧值是前端硬编码的 7 个短码：ai / machine_learning / data_mining /
+--     computer_network / software_engineering / database / information_security。
+--     逐条比对 ENG 下的 24 个二级学科名后，只有 ai→ENG-AI、software_engineering→ENG-SE
+--     能同名对上；其余 5 个（机器学习/数据挖掘/计算机网络/数据库/信息安全）在学科目录里
+--     没有同名项，**原样保留不动** —— 显示与迁移前完全一致，零回归，教师下次进设置页重选即可。
+--
+--     ⚠️ 必须限定 user_type='TEACHER'：sys_user.research_direction 学生也在用
+--        （StudentProfileServiceImpl 把学生「研究兴趣」写进同一列），
+--        不加这个条件会把学生的自由文本也当成 token 处理。
+--     ⚠️ FIND_IN_SET 做的是逗号分词的精确匹配（不是子串），所以短 token 'ai'
+--        不会误伤 machine_learning / data_mining 等。REPLACE(...,' ','') 是容忍
+--        "ai, machine_learning" 这种逗号后带空格的写法。
+--
+--     幂等：uk_teacher_subject 已存在则只刷新 update_time，不会插重复行。
+--     id 用 UUID_SHORT()：这些 id 从不返回给前端（设置页回显的是 subject.code），
+--     所以不必是雪花 ID，只要有唯一性即可。
+--
+--     先备份 research_direction 原值。这里用 CREATE TABLE IF NOT EXISTS 而不是种子脚本
+--     的 DROP + CREATE：本文件是一次性脚本，重跑时**必须保留第一次跑时的快照**，
+--     DROP 会把已经改过的值当成"原值"重新拍一遍，快照就失去意义了。
+CREATE TABLE IF NOT EXISTS bak_sys_user_research_direction_20261008 AS
+SELECT id, user_type, research_direction
+  FROM `sys_user`
+ WHERE user_type = 'TEACHER' AND research_direction IS NOT NULL;
+
+INSERT INTO `teacher_subject` (id, create_by, create_time, update_by, update_time, is_deleted, delete_by, delete_time, user_id, subject_id)
+SELECT UUID_SHORT(), u.id, NOW(), u.id, NOW(), 0, NULL, NULL, u.id,
+       (SELECT s.id FROM `subject` s WHERE s.code = 'ENG-AI')
+  FROM `sys_user` u
+ WHERE u.is_deleted = 0
+   AND u.user_type = 'TEACHER'
+   AND u.research_direction IS NOT NULL
+   AND FIND_IN_SET('ai', REPLACE(u.research_direction, ' ', ''))
+ON DUPLICATE KEY UPDATE `update_time` = NOW();
+
+INSERT INTO `teacher_subject` (id, create_by, create_time, update_by, update_time, is_deleted, delete_by, delete_time, user_id, subject_id)
+SELECT UUID_SHORT(), u.id, NOW(), u.id, NOW(), 0, NULL, NULL, u.id,
+       (SELECT s.id FROM `subject` s WHERE s.code = 'ENG-SE')
+  FROM `sys_user` u
+ WHERE u.is_deleted = 0
+   AND u.user_type = 'TEACHER'
+   AND u.research_direction IS NOT NULL
+   AND FIND_IN_SET('software_engineering', REPLACE(u.research_direction, ' ', ''))
+ON DUPLICATE KEY UPDATE `update_time` = NOW();
+
+-- 1.10.7 把上面这 2 个 token 在有 teacher_subject 行的用户身上改成学科中文名
+--        （research_direction 降级为「学科中文名 CSV 缓存」，三个展示点 + 两处关键词
+--        匹配不改一行代码，显示还从 ai 变成了「人工智能」）。
+--        逗号包裹再替换：只认整 token，且顺手把逗号后的空格规整掉。
+--        未映射的 5 个 token 原样留在串里。
+UPDATE `sys_user`
+   SET `research_direction` = TRIM(BOTH ',' FROM
+         REPLACE(REPLACE(CONCAT(',', REPLACE(`research_direction`, ' ', ''), ','),
+                         ',software_engineering,', ',软件工程,'),
+                 ',ai,', ',人工智能,'))
+ WHERE `is_deleted` = 0
+   AND `user_type` = 'TEACHER'
+   AND `research_direction` IS NOT NULL
+   AND (FIND_IN_SET('ai', REPLACE(`research_direction`, ' ', ''))
+     OR FIND_IN_SET('software_engineering', REPLACE(`research_direction`, ' ', '')));
 
 
 -- ============================================================================
@@ -533,6 +987,56 @@ SELECT (SELECT COUNT(*) FROM information_schema.TABLES
          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'category_similarity_threshold'
            AND INDEX_NAME IN ('idx_type_college','idx_type_major'))                        AS threshold_indexes;
 
+-- 5.7 段 1.10 学科领域重构执行后（和 0.7 对照）
+--     期望：has_subject_tables=3 / subject_cols=2 / subject_level1=10 / subject_level2=90
+--           orphan_subject_should_be_0=0（二级指不到一级门类）
+--           subject_level_clash_should_be_0=0（level 与 parent_id 不自洽）
+--           paper_backfill_missed_should_be_0=0（code 有对应学科、却仍没回填出 subject_id）
+--           paper_code_unmapped_should_be_0=0（有 code 却指不到任何 subject.code；
+--             历史脏 code 会让它非 0，**那种情况是正常的**，对着 0.7 的清单逐条看即可）
+--           teacher_subject_dangling_should_be_0=0
+--           major_subject_dangling_should_be_0=0（映射指不到学科）
+--           major_subject_major_dangling_should_be_0=0（映射指不到专业 —— 这一项非 0
+--             基本等于"本文件被抢在 种子数据.sql 之前跑了"，专业 id 还是旧的）
+--           major_subject_pairs=128（= 种子数据.sql 段 8.8 的 pairs；两边不等就是清单漂了）
+--     dict_subject_rows 与 subject_rows 的对照：字典行数是 100（本段"一行不删"的预期），
+--     subject_rows 也是 100。两者不等不一定是错（字典可被 admin 加过行），但要能解释。
+SELECT (SELECT COUNT(*) FROM information_schema.TABLES
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME IN ('subject','major_subject','teacher_subject'))               AS has_subject_tables,
+       (SELECT COUNT(*) FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND ((TABLE_NAME = 'paper_info'  AND COLUMN_NAME = 'subject_id')
+             OR (TABLE_NAME = 'category_similarity_threshold' AND COLUMN_NAME = 'subject_id'))) AS subject_cols,
+       (SELECT COUNT(*) FROM `subject` WHERE is_deleted = 0 AND level = 1)                AS subject_level1,
+       (SELECT COUNT(*) FROM `subject` WHERE is_deleted = 0 AND level = 2)                AS subject_level2,
+       (SELECT COUNT(*) FROM `subject` s LEFT JOIN `subject` p ON s.parent_id = p.id
+         WHERE s.level = 2 AND (p.id IS NULL OR p.level <> 1))                            AS orphan_subject_should_be_0,
+       (SELECT COUNT(*) FROM `subject` WHERE is_deleted = 0
+          AND ((level = 1 AND parent_id IS NOT NULL) OR (level = 2 AND parent_id IS NULL))) AS subject_level_clash_should_be_0,
+       -- 这一列查的是"回填该命中却没命中"：code 在 subject 表里存在、subject_id 却还是空。
+       -- 与下一段的 paper_code_unmapped_should_be_0 不是一回事 —— 那个数的是"code 根本
+       -- 映射不到学科"，历史脏 code 会让它非 0 且**属正常**；这一列非 0 只可能是 1.10.5
+       -- 的回填没跑成（或被中途打断），所以期望值严格为 0。
+       (SELECT COUNT(*) FROM `paper_info` p JOIN `subject` s ON TRIM(p.subject_code) = s.code
+         WHERE p.is_deleted = 0 AND p.subject_id IS NULL)                                 AS paper_backfill_missed_should_be_0;
+
+SELECT (SELECT COUNT(*) FROM `paper_info` p LEFT JOIN `subject` s ON p.subject_id = s.id
+         WHERE p.subject_id IS NOT NULL AND s.id IS NULL)                                 AS paper_subject_id_dangling_should_be_0,
+       (SELECT COUNT(*) FROM `paper_info` p LEFT JOIN `subject` s ON TRIM(p.subject_code) = s.code
+         WHERE p.subject_code IS NOT NULL AND TRIM(p.subject_code) <> '' AND s.id IS NULL) AS paper_code_unmapped_should_be_0,
+       (SELECT COUNT(*) FROM `teacher_subject` ts LEFT JOIN `subject` s ON ts.subject_id = s.id
+         WHERE ts.is_deleted = 0 AND s.id IS NULL)                                        AS teacher_subject_dangling_should_be_0,
+       (SELECT COUNT(*) FROM `major_subject` ms LEFT JOIN `subject` s ON ms.subject_id = s.id
+         WHERE ms.is_deleted = 0 AND s.id IS NULL)                                        AS major_subject_dangling_should_be_0,
+       -- major 侧同样要查：1.10.4b 的 major_id 写死的是 种子数据.sql 改绑后的新专业 id，
+       -- 若本文件被抢在 种子数据.sql 之前跑（或那 114 个专业没进去），这一列会整片悬空
+       (SELECT COUNT(*) FROM `major_subject` ms LEFT JOIN `major` m ON ms.major_id = m.id
+         WHERE ms.is_deleted = 0 AND m.id IS NULL)                                        AS major_subject_major_dangling_should_be_0,
+       (SELECT COUNT(*) FROM `major_subject` WHERE is_deleted = 0)                        AS major_subject_pairs,
+       (SELECT COUNT(*) FROM `sys_dict_data` WHERE dict_type = 'subject_field')           AS dict_subject_rows,
+       (SELECT COUNT(*) FROM `subject` WHERE is_deleted = 0)                              AS subject_rows;
+
 
 -- ============================================================================
 -- 附录：顺序跑反了（先本文件、后 种子数据.sql）的补救
@@ -547,3 +1051,31 @@ SELECT (SELECT COUNT(*) FROM information_schema.TABLES
 --   ELSE `major_id` END
 -- WHERE `major_id` IN (1668572928015,1668572928026,1668572928045,
 --                      1668572928049,1668572928051,1668572928054);
+
+
+-- ----------------------------------------------------------------------------
+-- 附录 B：反向 —— 撤销「1.10 学科领域重构」
+--
+-- ⚠️ 先读这段再决定要不要跑：**不要为了回滚去删 sys_dict_data 的行**，本段也从没删过它们，
+--    所以字典路径始终是完好的。回滚应用的步骤是「回滚镜像」，不是「撤 DDL」——
+--    DEPLOY.md 第八节写明 deploy.sh 健康检查失败只回滚镜像、DDL 留着，
+--    旧代码跑在新结构上是预期场景，而旧代码只读字典，照常工作。
+--    下面的语句仅用于「确认新版不再上线、要彻底清掉新增结构」的场景，
+--    且必须在所有引用方都回滚之后执行。
+--
+-- 顺序：先删引用列，再删关联表，最后删主表。
+-- ----------------------------------------------------------------------------
+-- ALTER TABLE `paper_info`                  DROP INDEX `idx_paper_info_subject_id`;
+-- ALTER TABLE `paper_info`                  DROP COLUMN `subject_id`;
+-- ALTER TABLE `category_similarity_threshold` DROP INDEX `idx_type_subject`;
+-- ALTER TABLE `category_similarity_threshold` DROP COLUMN `subject_id`;
+-- -- category_type 的注释与取值范围无需回改：旧代码只认 college / major，多一个取值不影响。
+-- DROP TABLE IF EXISTS `teacher_subject`;
+-- DROP TABLE IF EXISTS `major_subject`;
+-- DROP TABLE IF EXISTS `subject`;
+--
+-- 另外，1.10.7 改过的 research_direction（ai→人工智能、software_engineering→软件工程）
+-- 若要还原，需先备份（本段没有建备份表 —— 这两处改动是幂等且可人工改回的）。
+-- 建议回滚前先跑一次：
+--   SELECT id, user_type, research_direction FROM sys_user
+--    WHERE user_type = 'TEACHER' AND research_direction IS NOT NULL;

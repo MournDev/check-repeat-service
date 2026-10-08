@@ -300,7 +300,7 @@ docker exec -it check-repeat-mysql mysql -uroot -p     # 进数据库
 表结构由**手工执行** `src/main/resources/db/init.sql` 维护，脚本已与实体类对齐。项目不使用迁移框架。
 
 - **新搭环境**：建好空库后按顺序跑两个脚本——先 `db/init.sql` 建齐全部表（开头是 `DROP TABLE IF EXISTS`，空库直接跑），再 `db/种子数据.sql` 灌初始数据。两步之后系统即可用。
-- **种子数据**：`db/种子数据.sql` 是本仓库唯一的初始数据来源，可重复执行（每段按各自唯一键做 `ON DUPLICATE KEY UPDATE`），**新旧库都能反复跑**。内容按依赖顺序排：学院/专业基础数据（整表替换 + 全库引用改绑，20 学院 114 专业）→ 操作类型字典 `sys_operation_type`（139 条，日志中心「模块使用率」靠它分类，**只有这份文件有**，导不出来新环境就全是「未知」）→ 知识库分类 → 消息模板。
+- **种子数据**：`db/种子数据.sql` 是本仓库唯一的初始数据来源，可重复执行（每段按各自唯一键做 `ON DUPLICATE KEY UPDATE`），**新旧库都能反复跑**。内容按依赖顺序排：学院/专业基础数据（整表替换 + 全库引用改绑，20 学院 114 专业）→ 学科领域 `subject` + 专业↔学科映射 `major_subject`（段 3B：10 门类 + 90 二级 + 128 条映射，写死 13 位 id；详见下面「学科领域表」）→ 操作类型字典 `sys_operation_type`（139 条，日志中心「模块使用率」靠它分类，**只有这份文件有**，导不出来新环境就全是「未知」）→ 知识库分类 → 消息模板 → 查重规则 `check_rule`（缺 `is_default=1` 那条，学生端规则卡片直接 404）。
   消息模板这一段是重点：**不跑它，论文状态变更 / 审核结果 / 查重完成 / 指导分配这些通知都会因「消息模板不存在」而发送失败**（`MessageServiceImpl.sendMessageByTemplate` 查库拿不到模板就返回该错误，只在日志里留一句告警）。它含代码正在用的全部 9 个模板编码，其中 `PAPER_STATUS_CHANGE`、`PAPER_REVIEW_RESULT`、`SIMILARITY_CHECK_RESULT` 是 2026-10-07 补的——此前库里没有这三个 code，那三类通知一直发不出去。
 - **改结构**：编辑 `db/init.sql` 保持一致，**再另出一份只含本次变更的 ALTER 脚本**手工对线上库执行——整份脚本含 `DROP TABLE IF EXISTS`，有数据的库不能重跑。
 - **存量库补齐历史欠账**：`db/存量修复.sql` 是一次性的增量脚本（结构对齐 + 历史数据修复），专门给「结构和数据落后于 `init.sql`」的库用——典型特征是库里 `flyway_schema_history` 有 V1~V7 但**没有 V8**。症状：对 `SysUserMapper` 的**任何**查询都报 `Unknown column 'college_name'`（`SysUser` 把 `college_name` / `major_id` 声明成真的 `@TableField`，MyBatis-Plus 会把它们拼进每一条自动生成的 SELECT），于是登录、管理端用户管理、学生/教师列表、各类 dashboard 全挂。脚本自带前置（「0. 自检」）和后置（「5. 执行后自检」）两段，跑完列差异归零即算对齐。**空库不要跑它**，直接 `init.sql` 一次建好。
@@ -338,6 +338,52 @@ docker exec check-repeat-mysql sh -c \
 
 - 加表、加**可空**字段、加索引 → 随时可以
 - **删表、删字段、改字段类型、重命名字段、加 NOT NULL 约束 → 必须拆成两次发布**：先发一个不再读写该字段的版本，下个版本再真正删除
+
+### 学科领域表（`subject` / `major_subject` / `teacher_subject`）
+
+2026-10-08 新增。原来「学科领域」是 `sys_dict_data` 里 `dict_type='subject_field'` 的 100 行
+**字符串树**：没有 `parent_id`，层级靠 `dict_value` 里的连字符约定出来（`ENG` / `ENG-CS`），
+只能整树读出再在内存里挂子树。现在改成三张真表：
+
+| 表 | 作用 |
+|---|---|
+| `subject` | 学科领域主数据，两级（`parent_id` 为空=一级门类，否则是它下面的二级学科） |
+| `major_subject` | 专业 ↔ 学科领域，多对多。论文提交页按专业收窄学科候选就靠它；没映射的专业退回整棵树 |
+| `teacher_subject` | 教师研究方向 ↔ 学科领域（**真源**） |
+
+另加两列：`paper_info.subject_id`、`category_similarity_threshold.subject_id`（都可空，已带索引）。
+
+**取值域约定，改这块之前必须记住：**
+
+- **`subject.code` 是对外稳定标识**（`ENG` / `ENG-CS`），`paper_info.subject_code` 里存的就是它，
+  **创建后不可修改**（改了会一次性断掉所有既有引用，需要级联，本期不做）。`subject.id` 只用于库内关联。
+  `subject.name` 是显示名，随便改，不影响任何引用。
+- **`paper_info.subject_code` 这个冗余列必须保留**，不能因为有了 `subject_id` 就删掉：
+  `AcademicIntegrityServiceImpl` 把它当 `subjectArea` 去 `contains` 匹配资源分类。
+  它的值域因此必须一直是「编码」形态。
+- **一级门类和二级学科都能选**（存量 19 篇里 17 篇选的就是门类），一级的在界面上标「（大类）」。
+- **阈值解析顺序：二级学科 → 它所属的一级门类 → 专业 → 学院 → 全局**。「继承」就是这条：
+  配在门类上的阈值会作用于它下面所有没单独配的二级学科。实现见 `SimilarityThresholdResolverImpl`。
+- **学科不做软删除**：`uk_subject_code` 不含 `is_deleted`，软删后再建同一个 code 会直接撞唯一键。
+  不用了请走「停用」（`is_enabled=0`，不再出现在选择器与阈值候选里，已引用的数据不受影响）；
+  真要删得先过两道关——没有下级学科、且论文/阈值/教师研究方向/专业映射里一处都没引用——
+  然后**物理删除**。管理端页面 `/admin/subject-management` 已经把这套规则做成提示。
+- **`teacher_subject` 是教师研究方向的真源**，`sys_user.research_direction` 降级成一份
+  「学科中文名 CSV 缓存」（只为让既有的三处展示和两处关键词匹配不用改）。两者不同步时以 `teacher_subject` 为准。
+  存量里 7 个旧短码只有 `ai` / `software_engineering` 能同名映射到学科，其余 5 个**原样保留**，
+  教师设置页会以「已失效」提示引导重选——**不要为了"整洁"去删它们**，那等于顺手删掉教师填过的信息。
+
+**发布顺序：先后端、后前端**（这条是硬的）。阈值设置的 `PUT /api/admin/similarity-thresholds`
+是**整批覆盖**语义，而旧后端的白名单里没有 `subject` 这个 `categoryType`，
+一旦前端先上、带着学科行提交，旧后端会把**整批**（含原有的学院/专业行）400 拒绝，保存全失败。
+回滚时两个仓库要**配对回滚**，发布记录里写明配对版本号。
+
+**迁移与回滚**：种子见 `种子数据.sql` 段 3B，存量库见 `存量修复.sql` 段 1.10（含 1.10.5 论文回填、
+1.10.6/1.10.7 教师研究方向迁移），撤销见该文件**附录 B**。
+
+**`sys_dict_data` 里那 100 行 `subject_field` 一行都不要删**。新代码已经不读它，但回滚镜像之后
+旧代码的论文提交页只读字典——删了它，回滚后学科选择器直接空白。清理留在「确认所有环境都不再回滚」
+之后单独做，不要并进任何常规脚本。
 
 ### 大表 DDL 先手工做
 

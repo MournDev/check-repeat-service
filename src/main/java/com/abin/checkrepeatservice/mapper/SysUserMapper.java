@@ -4,11 +4,25 @@ import com.abin.checkrepeatservice.pojo.entity.SysUser;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Update;
 
 import java.util.List;
 
 @Mapper
 public  interface SysUserMapper extends BaseMapper<SysUser> {
+
+    /**
+     * 把 research_direction 显式置 NULL（教师清空研究方向时用）。
+     *
+     * 这里**必须是 NULL，不能写成空串**，两个理由：
+     *   1. updateById 是 NOT_NULL 策略，null 会被跳过 —— 不清就留着旧的中文名缓存；
+     *   2. AutoAssignmentServiceImpl.isResearchInterestMatch 用的是
+     *      paperTitle.contains(keyword.trim())，空串 split 出 [""]、而 contains("")
+     *      恒为 true —— 一旦写成 ''，**所有**教师都会被判定研究兴趣命中、白拿权重分。
+     */
+    @Update("UPDATE sys_user SET research_direction = NULL, update_time = NOW() WHERE id = #{userId}")
+    int clearResearchDirection(@Param("userId") Long userId);
+
     /**
      * 按专业或教师ID筛选教师列表
      * @param majorId 专业ID（可选，null则不按专业筛选）

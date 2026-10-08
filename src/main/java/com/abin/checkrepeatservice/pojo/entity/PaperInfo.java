@@ -194,9 +194,21 @@ public class PaperInfo extends BaseEntity implements Serializable {
 
     /**
      * 学科领域编码
+     *
+     * 与 subjectId 是一对冗余列（沿用 collegeId + collegeName 的既有模式）：
+     * 这一列是**对外稳定标识**，100 个 code 全在 subject 表里；
+     * AcademicIntegrityServiceImpl 把它当 subjectArea 拿去 contains 匹配资源分类，
+     * 所以值域必须保持"编码"形态（如 ENG-CS），改造时一个字都不能动。
      */
     @TableField("subject_code")
     private String subjectCode;
+
+    /**
+     * 学科领域ID（关联subject.id；一级门类、二级学科都在 subject 表里，两者都可选）
+     */
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
+    @TableField("subject_id")
+    private Long subjectId;
 
     /**
      * 学科领域名称

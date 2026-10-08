@@ -8,6 +8,7 @@ import com.abin.checkrepeatservice.teacher.vo.SimilarityDistributionVO;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Update;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -16,6 +17,18 @@ import java.util.List;
 public interface PaperInfoMapper extends BaseMapper<PaperInfo> {
 
     PaperInfo selectLatestPaper(Long studentId);
+
+    /**
+     * 把 subject_id 显式清空（置 NULL），仅用于「学科编码解析不出学科」时抹掉旧值。
+     *
+     * 为什么不能靠 updateById 顺带清：MyBatis-Plus 的更新策略是 NOT_NULL，null 字段会被
+     * 直接跳过 —— 于是「先选了 ENG-CS，重提时改成查不到的编码」会留下
+     * subject_code='查不到的编码' 而 subject_id 还指着「计算机科学与技术」的矛盾行，
+     * 阈值解析会拿这个错位的 id 去匹配学科维度的规则。所以这里用一条定点 UPDATE 显式置 NULL。
+     * （同类坑：本仓库全局靠 updateById，清空列一律要单独处理。）
+     */
+    @Update("UPDATE paper_info SET subject_id = NULL, update_time = NOW() WHERE id = #{paperId}")
+    int clearSubjectId(@Param("paperId") Long paperId);
 
     /**
      * 获取相似度分布数据

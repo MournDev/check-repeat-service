@@ -2,13 +2,17 @@ package com.abin.checkrepeatservice.student.service.Impl;
 
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
+import com.abin.checkrepeatservice.common.mapper.CollegeMapper;
 import com.abin.checkrepeatservice.mapper.SysRoleMapper;
 import com.abin.checkrepeatservice.mapper.SysUserMapper;
 import com.abin.checkrepeatservice.pojo.dto.UpdatePasswordReq;
+import com.abin.checkrepeatservice.pojo.entity.College;
+import com.abin.checkrepeatservice.pojo.entity.Major;
 import com.abin.checkrepeatservice.pojo.entity.SysLoginLog;
 import com.abin.checkrepeatservice.pojo.entity.SysRole;
 import com.abin.checkrepeatservice.pojo.entity.SysUser;
 import com.abin.checkrepeatservice.student.dto.UpdateEmailReq;
+import com.abin.checkrepeatservice.student.mapper.MajorMapper;
 import com.abin.checkrepeatservice.student.service.InfoService;
 import com.abin.checkrepeatservice.student.vo.LoginHistoryVO;
 import com.abin.checkrepeatservice.student.vo.LoginLogQueryReq;
@@ -52,6 +56,12 @@ public class InfoServiceImpl implements InfoService {
 
     @Resource
     private SysRoleMapper sysRoleMapper;
+
+    @Resource
+    private CollegeMapper collegeMapper;
+
+    @Resource
+    private MajorMapper majorMapper;
 
     @Resource
     private MinioClient minioClient;
@@ -103,8 +113,7 @@ public class InfoServiceImpl implements InfoService {
             currentUser.setRealName(updateReq.getRealName());
             currentUser.setEmail(updateReq.getEmail());
             currentUser.setPhone(updateReq.getPhone());
-            currentUser.setMajor(updateReq.getMajor());
-            currentUser.setCollegeName(updateReq.getCollegeName());
+            applyCollegeAndMajor(currentUser, updateReq);
             currentUser.setGrade(updateReq.getGrade());
             currentUser.setClassName(updateReq.getClassName());
             currentUser.setIntroduce(updateReq.getIntroduce());
@@ -124,6 +133,81 @@ public class InfoServiceImpl implements InfoService {
             log.error("用户信息更新失败：{}", e.getMessage(), e);
             return Result.error(ResultCode.SYSTEM_ERROR,"用户信息更新失败：" + e.getMessage());
         }
+    }
+
+    /**
+     * 落实用户的学院与专业。
+     *
+     * <p>前端个人中心把这两项改成了下拉框，会带上 {@code collegeId}/{@code majorId}：
+     * 认得出 ID 就 ID + 名称一起落库，名称以字典表为准；认不出就退化成只存名称，
+     * 兼容自由输入与库里只有名称的历史数据。ID 认不出时**不主动清空**实体的 ID 字段 ——
+     * MyBatis-Plus 的 {@code updateById} 默认跳过 null 字段，库里原值会留着，
+     * 而不是被这次保存抹成 null。</p>
+     *
+     * <p>不校验专业是否真属于该学院：存量数据里两者本就可能对不上，
+     * 卡这一条会让老数据连保存都保存不了。</p>
+     */
+    private void applyCollegeAndMajor(SysUser user, UpdateUserInfoReq req) {
+        College college = lookupCollege(req);
+        if (college != null) {
+            user.setCollegeId(college.getId());
+            user.setCollegeName(college.getCollegeName());
+        } else {
+            user.setCollegeName(req.getCollegeName());
+        }
+
+        Major major = lookupMajor(req);
+        if (major != null) {
+            user.setMajorId(major.getId());
+            user.setMajor(major.getMajorName());
+        } else {
+            user.setMajor(req.getMajor());
+        }
+    }
+
+    /**
+     * 由 collegeId 反查学院；查不到、或与请求里的学院名对不上时返回 null。
+     *
+     * <p>为什么要比对名称：ID 和名称同出于一次字典响应，本该指向同一行，
+     * 对不上就说明这个 ID 不是用户看到的那一行 —— 字典改过名，或 19 位雪花 ID
+     * 过 JS 时丢了末位、恰好撞上另一行。这种时候宁可少存一个 ID，
+     * 也不能写一份「ID 与名称互相矛盾」的关联关系。</p>
+     */
+    private College lookupCollege(UpdateUserInfoReq req) {
+        if (req.getCollegeId() == null) {
+            return null;
+        }
+        College college = collegeMapper.selectById(req.getCollegeId());
+        if (college == null) {
+            log.warn("学院ID在字典中不存在，退化为只存名称：collegeId={}, collegeName={}",
+                    req.getCollegeId(), req.getCollegeName());
+            return null;
+        }
+        if (req.getCollegeName() != null && !college.getCollegeName().equals(req.getCollegeName())) {
+            log.warn("学院ID与名称对不上，退化为只存名称：collegeId={}, 字典学院名={}, 提交学院名={}",
+                    req.getCollegeId(), college.getCollegeName(), req.getCollegeName());
+            return null;
+        }
+        return college;
+    }
+
+    /** 同 {@link #lookupCollege}，专业侧。 */
+    private Major lookupMajor(UpdateUserInfoReq req) {
+        if (req.getMajorId() == null) {
+            return null;
+        }
+        Major major = majorMapper.selectById(req.getMajorId());
+        if (major == null) {
+            log.warn("专业ID在字典中不存在，退化为只存名称：majorId={}, major={}",
+                    req.getMajorId(), req.getMajor());
+            return null;
+        }
+        if (req.getMajor() != null && !major.getMajorName().equals(req.getMajor())) {
+            log.warn("专业ID与名称对不上，退化为只存名称：majorId={}, 字典专业名={}, 提交专业名={}",
+                    req.getMajorId(), major.getMajorName(), req.getMajor());
+            return null;
+        }
+        return major;
     }
 
     @Override
@@ -180,7 +264,9 @@ public class InfoServiceImpl implements InfoService {
         loginVO.setRoleCode(roleCode);
         loginVO.setUsername(user.getUsername());
         loginVO.setRealName(user.getRealName());
+        loginVO.setMajorId(user.getMajorId());
         loginVO.setMajor(user.getMajor());
+        loginVO.setCollegeId(user.getCollegeId());
         loginVO.setCollegeName(user.getCollegeName());
         loginVO.setGrade(user.getGrade());
         loginVO.setClassName(user.getClassName());

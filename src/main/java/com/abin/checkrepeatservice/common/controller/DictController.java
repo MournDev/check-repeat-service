@@ -30,10 +30,14 @@ public class DictController {
 
     /**
      * 获取学科领域树形结构
+     *
+     * @param majorId 可选。论文提交页选完专业后带上来，只返回该专业映射到的学科分支；
+     *                不传 = 整棵树。不传时的行为与本次改造前完全一致（旧前端零影响）。
      */
     @GetMapping("/subject/tree")
-    public Result<List<DictTreeVO>> getSubjectFieldTree(){
-        List<DictTreeVO> subjectFieldTreeData = dictService.getSubjectFieldTreeData();
+    public Result<List<DictTreeVO>> getSubjectFieldTree(
+            @RequestParam(value = "majorId", required = false) Long majorId) {
+        List<DictTreeVO> subjectFieldTreeData = dictService.getSubjectFieldTreeData(majorId);
         return Result.success(subjectFieldTreeData);
     }
 

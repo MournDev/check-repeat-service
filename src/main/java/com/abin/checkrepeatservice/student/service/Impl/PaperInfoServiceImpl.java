@@ -7,6 +7,7 @@ import com.abin.checkrepeatservice.common.constant.DictConstants;
 import com.abin.checkrepeatservice.common.constant.PaperNoticeConstants;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.common.service.FileService;
+import com.abin.checkrepeatservice.common.service.Impl.SubjectService;
 import com.abin.checkrepeatservice.mapper.FileInfoMapper;
 import com.abin.checkrepeatservice.mapper.PaperAttachmentMapper;
 import com.abin.checkrepeatservice.mapper.SysUserMapper;
@@ -95,6 +96,47 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
 
     @Resource
     private MessageService messageService;
+
+    @Resource
+    private SubjectService subjectService;
+
+    /**
+     * 由学科编码反查并写入学科ID —— 论文写路径的**唯一入口**。
+     *
+     * 三条提交路径（新建 / 更新 / 撤回后重提）都从这里走，避免出现「某一条路写了
+     * subject_code、忘了写 subject_id」的半吊子状态：那种论文在阈值解析时会因为
+     * subjectId 为空而拿不到学科维度的规则，且不会报任何错。
+     *
+     * code 为空/null 时**不碰 subjectId**：与这几处 setter 的既有语义（null = 不修改，
+     * MyBatis-Plus 的 NOT_NULL 更新策略会跳过空字段）保持一致，也让「只改标题不改学科」
+     * 的调用不会把已存在的学科清掉。
+     *
+     * code 非空但**查不到**学科（历史脏 code，或老客户端传的旧值）时只告警、不抛异常：
+     * subject_code 的值域必须原样保留（AcademicIntegrityServiceImpl 拿它当 subjectArea
+     * 匹配资源分类），而且按 DEPLOY.md 第八节，新代码要能跟旧客户端并存 —— 直接拒绝会
+     * 把一次正常的提交变成 500。此时 subject_id 会被**显式清空**（见下），不留旧值。
+     */
+    private void applySubject(PaperInfo paperInfo, String subjectCode) {
+        if (subjectCode == null || subjectCode.isBlank()) {
+            return;
+        }
+        String code = subjectCode.trim();
+        paperInfo.setSubjectCode(code);
+        Long subjectId = subjectService.findIdByCode(code);
+        if (subjectId == null) {
+            log.warn("学科编码在 subject 表中不存在，subject_id 置空 - 论文ID: {}, subjectCode: {}",
+                    paperInfo.getId(), code);
+            // 更新场景下必须显式清库里的旧值：updateById 是 NOT_NULL 策略，subjectId=null
+            // 只会被跳过，留下一对互相矛盾的列（code 是新值、id 还是旧学科的）。
+            // 新建场景 paperInfo.getId() 为 null，本来就没有旧值可清。
+            paperInfo.setSubjectId(null);
+            if (paperInfo.getId() != null) {
+                paperInfoMapper.clearSubjectId(paperInfo.getId());
+            }
+            return;
+        }
+        paperInfo.setSubjectId(subjectId);
+    }
 
 
 
@@ -419,7 +461,7 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
             paperInfo.setAuthor("未知作者"); // 设置默认值
         }
         FileInfo fileInfo = fileInfoMapper.selectById(fileId);
-        paperInfo.setSubjectCode(subjectCode);
+        applySubject(paperInfo, subjectCode);
         paperInfo.setPaperTitle(paperTitle);
         paperInfo.setPaperAbstract(paperAbstract);
         paperInfo.setCollegeId(collegeId);
@@ -451,7 +493,7 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
                                       Long collegeId, Long majorId, String paperType,
                                       Long fileId, String fileMd5) {
 
-        existingPaper.setSubjectCode(subjectCode);
+        applySubject(existingPaper, subjectCode);
         existingPaper.setPaperTitle(paperTitle);
         existingPaper.setPaperAbstract(paperAbstract);
         existingPaper.setCollegeId(collegeId);
@@ -830,6 +872,9 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
             updatePaper.setPaperAbstract(request.getPaperAbstract());
             updatePaper.setFileId(request.getFileId());
             updatePaper.setFileMd5(request.getFileMd5());
+            // 撤回后重提也允许改学科。request.subjectCode 这个字段一直存在、前端 submitParams
+            // 也一直在传，只是服务层从来没读过 —— 所以老论文撤回重提时改了学科也不生效。
+            applySubject(updatePaper, request.getSubjectCode());
 
             // 3. 获取当前版本号
             Integer currentVersion = getCurrentVersion(paperId);

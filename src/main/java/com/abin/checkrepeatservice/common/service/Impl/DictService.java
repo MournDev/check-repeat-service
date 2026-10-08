@@ -19,6 +19,9 @@ public class DictService {
     @Autowired
     private SysDictDataMapper sysDictDataMapper;
 
+    @Autowired
+    private SubjectService subjectService;
+
     /**
      * 根据字典类型获取字典数据列表
      */
@@ -51,43 +54,16 @@ public class DictService {
 
     /**
      * 获取学科领域树形结构
+     *
+     * 数据源已从 sys_dict_data 的字符串树换成 subject 表（含 parent_id 的真实层级）。
+     *
+     * ⚠️ 旧的字典行**一行都没删**，仍然留在库里 —— DEPLOY.md 第八节写明 deploy.sh
+     * 健康检查失败只回滚应用镜像、DDL 不回滚，于是旧代码（正是上面那段读字典的实现）
+     * 会跑在新结构上；字典还在，回滚后学科选择器才不会空白。
+     * 所以这段被替换的实现是**故意不要了**，不是遗漏；反向恢复见 存量修复.sql 附录 B。
      */
     public List<DictTreeVO> getSubjectFieldTree() {
-        // 1. 先查询所有学科领域字典数据（状态正常）
-        List<SysDictData> allSubjectData = getDictDataByType("subject_field");
-
-        // 2. 分离一级学科和二级学科
-        // 一级学科：编码无“-”（如 ENG、MED）
-        List<SysDictData> firstLevelData = allSubjectData.stream()
-                .filter(data -> !data.getDictValue().contains("-"))
-                .collect(Collectors.toList());
-
-        // 二级学科：编码含“-”（如 ENG-AI、MED-CLIN）
-        List<SysDictData> secondLevelData = allSubjectData.stream()
-                .filter(data -> data.getDictValue().contains("-"))
-                .collect(Collectors.toList());
-
-        // 3. 组装树形结构：给每个一级学科分配对应的二级学科
-        return firstLevelData.stream().map(firstLevel -> {
-            DictTreeVO firstLevelVO = new DictTreeVO();
-            firstLevelVO.setLabel(firstLevel.getDictLabel()); // 一级名称（如“工学”）
-            firstLevelVO.setValue(firstLevel.getDictValue()); // 一级编码（如“ENG”）
-
-            // 筛选当前一级学科对应的二级学科（二级编码前缀=一级编码）
-            List<DictTreeVO> children = secondLevelData.stream()
-                    .filter(secondLevel -> secondLevel.getDictValue().startsWith(firstLevel.getDictValue() + "-"))
-                    .map(secondLevel -> {
-                        DictTreeVO secondLevelVO = new DictTreeVO();
-                        secondLevelVO.setLabel(secondLevel.getDictLabel()); // 二级名称（如“人工智能”）
-                        secondLevelVO.setValue(secondLevel.getDictValue()); // 二级编码（如“ENG-AI”）
-                        secondLevelVO.setChildren(null); // 学科最多二级，子节点为null
-                        return secondLevelVO;
-                    })
-                    .collect(Collectors.toList());
-
-            firstLevelVO.setChildren(children);
-            return firstLevelVO;
-        }).collect(Collectors.toList());
+        return subjectService.getTree(null);
     }
 
     /**
@@ -103,8 +79,11 @@ public class DictService {
     }
     /**
      * 获取学科领域树形结构数据
+     *
+     * @param majorId 可选。传了就只返回该专业映射到的学科分支（论文提交页选完专业后重拉用），
+     *                不传 = 整棵树（教师研究方向选择、管理端用）
      */
-    public List<DictTreeVO> getSubjectFieldTreeData() {
-        return getSubjectFieldTree();
+    public List<DictTreeVO> getSubjectFieldTreeData(Long majorId) {
+        return subjectService.getTree(majorId);
     }
 }
