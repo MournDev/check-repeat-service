@@ -4,6 +4,7 @@ import com.abin.checkrepeatservice.admin.service.AssignmentHistoryService;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.admin.vo.AssignmentRecordExcelVO;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
+import com.abin.checkrepeatservice.common.enums.UserTypeEnum;
 import com.abin.checkrepeatservice.admin.dto.*;
 import com.abin.checkrepeatservice.pojo.entity.TeacherAllocationRecord;
 import com.abin.checkrepeatservice.pojo.entity.SysUser;
@@ -273,9 +274,10 @@ public class AssignmentHistoryServiceImpl implements AssignmentHistoryService {
                 return Result.error(ResultCode.PARAM_ERROR, "原分配记录不存在");
             }
             
-            // 验证新教师
+            // 验证新教师。比的是 UserTypeEnum 的编码（大写 "TEACHER"）—— sys_user.user_type
+            // 存的就是大写；原先写小写 "teacher" 与库中取值恒不相等，改派这条路永远走不通。
             SysUser newTeacher = sysUserMapper.selectById(newTeacherId);
-            if (newTeacher == null || !"teacher".equals(newTeacher.getUserType())) {
+            if (newTeacher == null || !UserTypeEnum.TEACHER.getCode().equals(newTeacher.getUserType())) {
                 return Result.error(ResultCode.PARAM_ERROR, "指定的新教师不存在或不是教师");
             }
             

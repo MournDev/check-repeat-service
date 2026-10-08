@@ -3,6 +3,7 @@ package com.abin.checkrepeatservice.admin.service.Impl;
 import com.abin.checkrepeatservice.admin.service.AdminAssignmentService;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
+import com.abin.checkrepeatservice.common.enums.UserTypeEnum;
 import com.abin.checkrepeatservice.common.constant.DictConstants;
 import com.abin.checkrepeatservice.admin.dto.AssignmentRuleConfigDTO;
 import com.abin.checkrepeatservice.mapper.SysUserMapper;
@@ -213,7 +214,7 @@ public class AdminAssignmentServiceImpl implements AdminAssignmentService {
                 return Result.error(ResultCode.PARAM_ERROR, "教师不存在");
             }
 
-            if (!"teacher".equals(teacher.getUserType())) {
+            if (!isTeacher(teacher)) {
                 return Result.error(ResultCode.PARAM_ERROR, "指定用户不是教师");
             }
 
@@ -246,7 +247,7 @@ public class AdminAssignmentServiceImpl implements AdminAssignmentService {
                 return Result.error(ResultCode.PARAM_ERROR, "教师不存在");
             }
             
-            if (!"teacher".equals(teacher.getUserType())) {
+            if (!isTeacher(teacher)) {
                 return Result.error(ResultCode.PARAM_ERROR, "指定用户不是教师");
             }
             
@@ -325,6 +326,18 @@ public class AdminAssignmentServiceImpl implements AdminAssignmentService {
         paper.setPaperStatus(DictConstants.PaperStatus.ASSIGNED); // 已分配导师，等待确认
         paper.setUpdateTime(now);
         paperInfoMapper.updateById(paper);
+    }
+
+    /**
+     * 是否为教师账号。
+     *
+     * 比的是 UserTypeEnum 里的编码 —— sys_user.user_type 存的就是它（大写 "TEACHER"）。
+     * 这里原先写的是小写字面量 "teacher"，与库中取值恒不相等，于是手动分配无论选谁
+     * 都被判成「指定用户不是教师」，整条路走不通。用枚举取值而不是再写一遍字面量，
+     * 以后改编码也不会漏掉这里。
+     */
+    private boolean isTeacher(SysUser user) {
+        return user != null && UserTypeEnum.TEACHER.getCode().equals(user.getUserType());
     }
 
     @Override
