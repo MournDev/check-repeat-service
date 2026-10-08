@@ -142,6 +142,10 @@ public class AuthServiceImpl implements AuthService {
         newUser.setPassword(passwordEncoder.encode(registerReq.getPassword())); // 密码加密
         newUser.setRealName(registerReq.getRealName());
         newUser.setRoleId(registerReq.getRoleId());
+        // user_type 是 role_code 的冗余副本（管理端按它筛人、部分校验按它判角色）。
+        // 注册这条路以前不写它，落库就是 NULL，而 sys_user.user_type 是 DEFAULT NULL，
+        // 于是脏数据静默通过。写入时机与 roleId 一致，取值直接沿用刚查出的角色编码。
+        newUser.setUserType(sysRole.getRoleCode());
         newUser.setEmail(registerReq.getEmail());
         newUser.setPhone(registerReq.getPhone());
         newUser.setLastLoginTime(null); // 首次注册无登录时间

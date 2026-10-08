@@ -21,6 +21,9 @@
 --     不报错，所以表现为静默的 0）。
 --   · 相似度阈值保存成功、刷新后列表恒空且无报错 —— is_deleted 落成 NULL。
 --   · 管理端「待分配学生」列表恒空 —— 分配字段链路的历史脏数据。
+--   · 管理端「用户管理」列表 500，日志报
+--     Cannot invoke "String.hashCode()" because "<local4>" is null
+--     —— 有 sys_user.user_type 为 NULL 的行（自注册的遗留），跑 4.3 段回填。
 --   · 需要「学科领域」独立成表（subject / major_subject / teacher_subject）、
 --     论文带 subject_id、阈值支持学科维度 —— 跑 1.10 段（纯加表加列，不动字典）。
 --
@@ -120,6 +123,10 @@ SELECT (SELECT COUNT(*) FROM information_schema.TABLES
        (SELECT COUNT(*) FROM paper_info
          WHERE is_deleted = 0 AND subject_id IS NULL
            AND subject_code IS NOT NULL AND TRIM(subject_code) <> '')                     AS papers_pending_backfill;
+
+-- 0.8 段 4.3：user_type 为 NULL / 空串的行数（>0 才需要段 4.3）
+--     这一列不是结构问题，纯脏数据；不查 information_schema，直接数行即可。
+SELECT COUNT(*) AS user_type_null_rows FROM sys_user WHERE user_type IS NULL OR user_type = '';
 
 
 -- ============================================================================
@@ -883,6 +890,43 @@ UPDATE paper_info
    AND paper_status = 'assigned';
 
 
+-- ---------------------------------------------------------------------
+-- 4.3 修复 C：回填 sys_user.user_type 为 NULL 的行
+--
+--   症状：管理端「用户管理」列表整个打不开（接口 500），日志里是
+--     NullPointerException: Cannot invoke "String.hashCode()" because "<local4>" is null
+--     at AdminUserServiceImpl.convertToDTO(AdminUserServiceImpl.java:350)
+--   <local4> 是 switch 选择表达式的临时槽位。Java 的 switch 遇到 null 选择表达式
+--   **直接抛 NPE、不会走 default**，所以原代码里那句 `default -> "未知"` 兜不住。
+--   一行脏数据就能中断整个 stream 的 collect，于是整页列表一起挂 —— 不是只坏一行。
+--
+--   user_type 是 sys_role.role_code 的冗余副本。全项目 4 条 sys_user 写入路径里，
+--   只有自注册 AuthServiceImpl.register 没写这一列；而 DDL 是 `DEFAULT NULL`，
+--   于是脏数据静默落库。代码侧已同步修复（register 补写 + 列表角色名改从
+--   sys_role 取），本段只负责清存量。
+--
+--   本段只动 NULL / 空串的行，可重复执行。回填值取 role_code 而不是写死三值：
+--   库里本来就存在 SUPER_ADMIN 这类取值（管理端人员类型筛选用的是同一列），
+--   统一成 role_code 才自洽。
+-- ---------------------------------------------------------------------
+
+-- 4.3.0 先看清要动哪些行。注意左连接后 role_code 为空的行**回填不出来**，
+--       得人工确认该用户到底该是什么角色（通常意味着 role_id 指向了已删角色）。
+SELECT u.id, u.username, u.real_name, u.role_id, r.role_code, r.role_name, u.create_time
+  FROM sys_user u
+  LEFT JOIN sys_role r ON r.id = u.role_id
+ WHERE u.user_type IS NULL OR u.user_type = ''
+ ORDER BY u.create_time;
+
+-- 4.3.1 按角色编码回填（含已软删的用户行：它们仍会被别处的查询捞出来）
+UPDATE sys_user u
+  JOIN sys_role r ON r.id = u.role_id
+   SET u.user_type = r.role_code
+ WHERE (u.user_type IS NULL OR u.user_type = '')
+   AND r.role_code IS NOT NULL
+   AND r.role_code <> '';
+
+
 -- ============================================================================
 -- 段 5：执行后自检
 -- ============================================================================
@@ -1036,6 +1080,12 @@ SELECT (SELECT COUNT(*) FROM `paper_info` p LEFT JOIN `subject` s ON p.subject_i
        (SELECT COUNT(*) FROM `major_subject` WHERE is_deleted = 0)                        AS major_subject_pairs,
        (SELECT COUNT(*) FROM `sys_dict_data` WHERE dict_type = 'subject_field')           AS dict_subject_rows,
        (SELECT COUNT(*) FROM `subject` WHERE is_deleted = 0)                              AS subject_rows;
+
+-- 5.8 段 4.3 执行后：期望 user_type_null_rows = 0
+--     仍非 0 就去对照 4.3.0 的清单 —— 那些行的 role_id 在 sys_role 里指不到东西，
+--     回填不出来，得人工定角色后再补：
+--       UPDATE sys_user SET user_type = '<ROLE_CODE>' WHERE id = <id>;
+SELECT COUNT(*) AS user_type_null_rows FROM sys_user WHERE user_type IS NULL OR user_type = '';
 
 
 -- ============================================================================

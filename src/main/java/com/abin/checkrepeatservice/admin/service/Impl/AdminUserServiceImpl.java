@@ -9,7 +9,9 @@ import com.abin.checkrepeatservice.admin.vo.ResetPasswordReq;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.pojo.entity.SysUser;
+import com.abin.checkrepeatservice.pojo.entity.SysRole;
 import com.abin.checkrepeatservice.pojo.entity.SysLoginLog;
+import com.abin.checkrepeatservice.mapper.SysRoleMapper;
 import com.abin.checkrepeatservice.user.mapper.SysLoginLogMapper;
 import com.abin.checkrepeatservice.user.service.SysUserService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -41,6 +43,9 @@ public class AdminUserServiceImpl implements AdminUserService {
     @Resource
     private PasswordEncoder passwordEncoder;
 
+    @Resource
+    private SysRoleMapper sysRoleMapper;
+
     @Override
     public Result<Page<UserInfoDTO>> getUserList(Integer page, Integer size, String userType, 
                                                Integer status, String keyword) {
@@ -65,8 +70,9 @@ public class AdminUserServiceImpl implements AdminUserService {
             
             // 转换为DTO
             Page<UserInfoDTO> dtoPage = new Page<>(resultPage.getCurrent(), resultPage.getSize(), resultPage.getTotal());
+            Map<Long, String> roleNames = loadRoleNames();
             List<UserInfoDTO> dtoList = resultPage.getRecords().stream()
-                    .map(this::convertToDTO)
+                    .map(user -> convertToDTO(user, roleNames))
                     .collect(Collectors.toList());
             dtoPage.setRecords(dtoList);
             
@@ -234,7 +240,7 @@ public class AdminUserServiceImpl implements AdminUserService {
             return Result.error(ResultCode.SYSTEM_ERROR,"用户不存在");
         }
         
-        UserInfoDTO userInfoDTO = convertToDTO(user);
+        UserInfoDTO userInfoDTO = convertToDTO(user, loadRoleNames());
         return Result.success("用户详情获取成功", userInfoDTO);
     }
 
@@ -328,9 +334,45 @@ public class AdminUserServiceImpl implements AdminUserService {
     }
 
     /**
-     * 将SysUser转换为UserInfoDTO
+     * 角色ID → 角色名。
+     *
+     * 角色表只有个位数行，整表捞一次比逐行查省事，也免掉 N+1。
+     * 特意**不过滤 is_deleted**：角色被软删后历史用户仍指向它，此时更要显示出名字，
+     * 而不是让这批用户集体变成「未知」。
      */
-    private UserInfoDTO convertToDTO(SysUser user) {
+    private Map<Long, String> loadRoleNames() {
+        return sysRoleMapper.selectList(null).stream()
+                .filter(role -> role.getId() != null && role.getRoleName() != null)
+                .collect(Collectors.toMap(SysRole::getId, SysRole::getRoleName, (a, b) -> a));
+    }
+
+    /**
+     * sys_role 里查不到该角色时的兜底显示名。
+     *
+     * userType 为 null 必须容忍：这里以前是 `switch (user.getUserType())`，而 Java 的
+     * switch 遇到 null 选择表达式会直接抛 NPE（不走 default），于是库里只要有**一行**
+     * user_type 为 NULL，整个用户列表接口就 500。自注册那条写入路径从来没写过
+     * user_type，而 DDL 是 DEFAULT NULL，这种行是存在过的。
+     */
+    private String userTypeFallbackName(String userType) {
+        if (userType == null || userType.isBlank()) {
+            return "未知";
+        }
+        return switch (userType) {
+            case "ADMIN" -> "管理员";
+            case "STUDENT" -> "学生";
+            case "TEACHER" -> "教师";
+            case "SUPER_ADMIN" -> "超级管理员";
+            default -> "未知";
+        };
+    }
+
+    /**
+     * 将SysUser转换为UserInfoDTO
+     *
+     * @param roleNames 角色ID → 角色名，由 loadRoleNames() 批量取，勿在循环里单独查
+     */
+    private UserInfoDTO convertToDTO(SysUser user, Map<Long, String> roleNames) {
         UserInfoDTO dto = new UserInfoDTO();
         dto.setUserId(user.getId());
         dto.setUsername(user.getUsername());
@@ -345,16 +387,16 @@ public class AdminUserServiceImpl implements AdminUserService {
         dto.setClassName(user.getClassName());
         dto.setCreateTime(user.getCreateTime());
         dto.setLastLoginTime(user.getLastLoginTime());
-        
-        // 设置角色名称
-        String roleName = switch (user.getUserType()) {
-            case "ADMIN" -> "管理员";
-            case "STUDENT" -> "学生";
-            case "TEACHER" -> "教师";
-            default -> "未知";
-        };
-        dto.setRoleName(roleName);
-        
+
+        // 角色以 sys_role 为准。以前是从 user_type 反推的，而 user_type 只是 role_code
+        // 的冗余副本：既会因 NULL 抛 NPE，也认不出 SUPER_ADMIN / EDU_ADMIN 这些后来加的
+        // 角色（全被 default 打成「未知」）。改成查表后，新增角色不用再改这里的代码。
+        dto.setRoleId(user.getRoleId());
+        String roleName = roleNames.get(user.getRoleId());
+        dto.setRoleName((roleName == null || roleName.isBlank())
+                ? userTypeFallbackName(user.getUserType())
+                : roleName);
+
         return dto;
     }
 }
