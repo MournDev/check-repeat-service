@@ -13,6 +13,7 @@ import com.abin.checkrepeatservice.pojo.dto.ForgotPasswordReq;
 import com.abin.checkrepeatservice.pojo.dto.LoginReq;
 import com.abin.checkrepeatservice.pojo.dto.RefreshTokenReq;
 import com.abin.checkrepeatservice.pojo.dto.RegisterReq;
+import com.abin.checkrepeatservice.pojo.dto.SendPasswordResetCodeReq;
 import com.abin.checkrepeatservice.pojo.entity.SysRole;
 import com.abin.checkrepeatservice.pojo.entity.SysUser;
 import com.abin.checkrepeatservice.monitor.service.BusinessMetricsService;
@@ -25,6 +26,7 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -33,10 +35,14 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 认证服务实现类（核心业务逻辑：注册、登录、令牌刷新）
@@ -72,6 +78,36 @@ public class AuthServiceImpl implements AuthService {
 
     @Resource
     private BusinessMetricsService businessMetricsService;
+
+    @Resource
+    private EmailService emailService;
+
+    /*
+     * 这里刻意用自动配置的 StringRedisTemplate，而不是 InfoServiceImpl 那个
+     * RedisTemplate<String,String>。后者其实是 Spring Boot 自动配置的
+     * RedisTemplate<Object,Object>（JDK 序列化），两个坑：
+     *   1. 自建 RedisTemplate bean 会顶掉自动配置，已有的 email_code: /
+     *      email_verify_token:（24h TTL，可能正被用户使用）会全部读不出来；
+     *   2. JDK 序列化下 opsForValue().increment() 写入的是裸 ASCII 整数，
+     *      再用 get() 读会抛 SerializationException —— 错误计数要能加也能读。
+     * StringRedisTemplate 同样是零配置，且键值在 redis-cli 里可读。
+     */
+    @Resource
+    private StringRedisTemplate stringRedisTemplate;
+
+    // 找回密码验证码的 Redis 键前缀与有效期
+    private static final String KEY_CODE_PREFIX = "pwd_reset_code:";
+    private static final String KEY_COOLDOWN_PREFIX = "pwd_reset_code_cooldown:";
+    private static final String KEY_ATTEMPTS_PREFIX = "pwd_reset_code_attempts:";
+    private static final long CODE_TTL_SECONDS = 300;
+    private static final long COOLDOWN_SECONDS = 60;
+    private static final int MAX_VERIFY_ATTEMPTS = 5;
+
+    // 用户名不存在与邮箱不匹配共用一句，避免暴露账号是否存在
+    private static final String IDENTITY_MISMATCH_MSG = "用户名或邮箱不匹配";
+
+    // 验证码用 SecureRandom：Math.random() 既无前导零（100000-999999）又存在偏斜
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     /**
      * 用户注册（事务保证：确保用户插入成功，避免脏数据）
@@ -275,36 +311,134 @@ public class AuthServiceImpl implements AuthService {
         return Result.success("退出登录成功");
     }
 
+    /**
+     * 发送密码重置邮箱验证码（找回密码第一步）
+     */
+    @Override
+    public Result<String> sendPasswordResetCode(SendPasswordResetCodeReq req) {
+        String username = req.getUsername();
+
+        try {
+            // 1. 先占重发冷却位。放在身份校验之前，是为了让「发送过于频繁」这条提示
+            //    对存在与不存在的账号一视同仁，不至于变成账号探测的信号。
+            Boolean acquired = stringRedisTemplate.opsForValue().setIfAbsent(
+                    KEY_COOLDOWN_PREFIX + username, "1", COOLDOWN_SECONDS, TimeUnit.SECONDS);
+            if (!Boolean.TRUE.equals(acquired)) {
+                return Result.error(ResultCode.BUSINESS_NO_COUNT, "发送过于频繁，请稍后再试");
+            }
+
+            // 2. 校验身份（用户名不存在与邮箱不匹配回同一句）
+            SysUser sysUser = sysUserMapper.selectOne(
+                    Wrappers.<SysUser>lambdaQuery()
+                            .eq(SysUser::getUsername, username)
+                            .eq(SysUser::getIsDeleted, 0)
+            );
+            if (sysUser == null || !req.getEmail().equals(sysUser.getEmail())) {
+                log.warn("密码重置验证码身份校验未通过：用户名={}", username);
+                return Result.error(ResultCode.PARAM_ERROR, IDENTITY_MISMATCH_MSG);
+            }
+
+            // 3. 生成 6 位验证码并写入 Redis（5 分钟有效）
+            String code = String.format("%06d", SECURE_RANDOM.nextInt(1_000_000));
+            stringRedisTemplate.opsForValue().set(
+                    KEY_CODE_PREFIX + username, code, CODE_TTL_SECONDS, TimeUnit.SECONDS);
+
+            // 4. 发信。发不出去就把验证码和冷却位一起撤掉，让用户能立刻重试
+            boolean sent = emailService.sendPasswordResetCodeEmail(
+                    sysUser.getEmail(), sysUser.getUsername(), code,
+                    (int) (CODE_TTL_SECONDS / 60), sysUser.getId());
+            if (!sent) {
+                stringRedisTemplate.delete(KEY_CODE_PREFIX + username);
+                stringRedisTemplate.delete(KEY_COOLDOWN_PREFIX + username);
+                return Result.error(ResultCode.SYSTEM_ERROR, "验证码发送失败，请稍后重试");
+            }
+
+            // 日志里不要出现验证码本身
+            log.info("密码重置验证码已发送：用户名={}", username);
+            return Result.success("验证码发送成功");
+        } catch (Exception e) {
+            // 这一步让找回密码依赖上了 Redis：Redis 不可用时必须降级成一句提示，
+            // 而不是让连接异常冒到全局处理器，变成一句没头没尾的「系统繁忙」。
+            log.error("发送密码重置验证码失败：用户名={}", username, e);
+            try {
+                stringRedisTemplate.delete(KEY_COOLDOWN_PREFIX + username);
+            } catch (Exception ignored) {
+                // 清理失败无所谓，冷却位自己会过期
+            }
+            return Result.error(ResultCode.SYSTEM_ERROR, "验证码发送失败，请稍后重试");
+        }
+    }
+
     // AuthServiceImpl.java
     @Override
     public Result<String> forgotPassword(ForgotPasswordReq forgotPasswordReq) {
+        String username = forgotPasswordReq.getUsername();
+
         // 1. 根据用户名查询用户信息
         SysUser sysUser = sysUserMapper.selectOne(
                 Wrappers.<SysUser>lambdaQuery()
-                        .eq(SysUser::getUsername, forgotPasswordReq.getUsername())
+                        .eq(SysUser::getUsername, username)
                         .eq(SysUser::getIsDeleted, 0)
         );
 
-        // 2. 校验用户是否存在
-        if (sysUser == null) {
-            return Result.error(ResultCode.PARAM_ERROR, "用户不存在");
+        // 2. 校验身份（用户名不存在与邮箱不匹配回同一句，与发码接口保持一致）
+        if (sysUser == null || !forgotPasswordReq.getEmail().equals(sysUser.getEmail())) {
+            log.warn("密码重置身份校验未通过：用户名={}", username);
+            return Result.error(ResultCode.PARAM_ERROR, IDENTITY_MISMATCH_MSG);
         }
 
-        // 3. 校验邮箱是否匹配
-        if (!forgotPasswordReq.getEmail().equals(sysUser.getEmail())) {
-            return Result.error(ResultCode.PARAM_ERROR, "邮箱验证失败");
-        }
-
-        // 4. 更新密码（加密存储）
+        String codeKey = KEY_CODE_PREFIX + username;
         try {
+            // 3. 校验邮箱验证码：改密码之前必须过这一关。
+            //    （此前 ForgotPasswordReq 没有 verificationCode 字段，前端传的验证码被
+            //     Jackson 静默丢弃，等于填什么都能改密码，只剩「邮箱对得上」一层校验。）
+            String storedCode = stringRedisTemplate.opsForValue().get(codeKey);
+            if (storedCode == null || !MessageDigest.isEqual(
+                    storedCode.getBytes(StandardCharsets.UTF_8),
+                    forgotPasswordReq.getVerificationCode().getBytes(StandardCharsets.UTF_8))) {
+                return verifyCodeFailed(username, codeKey, storedCode != null);
+            }
+
+            // 4. 更新密码（加密存储）
             sysUser.setPassword(passwordEncoder.encode(forgotPasswordReq.getNewPassword()));
             sysUserMapper.updateById(sysUser);
-            log.info("用户密码重置成功：用户名={}", forgotPasswordReq.getUsername());
+
+            // 5. 用完即弃：删掉验证码和错误计数（冷却位留给它自然过期）
+            stringRedisTemplate.delete(codeKey);
+            stringRedisTemplate.delete(KEY_ATTEMPTS_PREFIX + username);
+
+            log.info("用户密码重置成功：用户名={}", username);
             return Result.success("密码重置成功");
         } catch (Exception e) {
-            log.error("用户密码重置失败：用户名={}", forgotPasswordReq.getUsername(), e);
+            log.error("用户密码重置失败：用户名={}", username, e);
             return Result.error(ResultCode.SYSTEM_ERROR, "密码重置失败");
         }
+    }
+
+    /**
+     * 验证码校验失败的分支：累计错误次数，超过上限就把验证码作废，逼用户重新获取
+     *
+     * @param codeExists 验证码是否还在 Redis 里（不在时不要建计数键）
+     */
+    private Result<String> verifyCodeFailed(String username, String codeKey, boolean codeExists) {
+        // 码都不存在就别写计数键了：否则匿名调用方拿任意用户名来刷，
+        // 就能造出一堆永远不用的计数键。
+        if (!codeExists) {
+            return Result.error(ResultCode.PARAM_VALUE_INVALID, "验证码错误或已过期");
+        }
+
+        String attemptsKey = KEY_ATTEMPTS_PREFIX + username;
+        Long attempts = stringRedisTemplate.opsForValue().increment(attemptsKey);
+        if (attempts != null && attempts == 1L) {
+            // increment 不会继承验证码的 TTL，首次计数时自己补一个，与验证码同寿
+            stringRedisTemplate.expire(attemptsKey, CODE_TTL_SECONDS, TimeUnit.SECONDS);
+        }
+        if (attempts != null && attempts >= MAX_VERIFY_ATTEMPTS) {
+            stringRedisTemplate.delete(codeKey);
+            log.warn("密码重置验证码错误次数超限，已作废验证码：用户名={}", username);
+            return Result.error(ResultCode.PARAM_VALUE_INVALID, "验证码错误次数过多，请重新获取验证码");
+        }
+        return Result.error(ResultCode.PARAM_VALUE_INVALID, "验证码错误或已过期");
     }
     /**
      * 记录登录日志

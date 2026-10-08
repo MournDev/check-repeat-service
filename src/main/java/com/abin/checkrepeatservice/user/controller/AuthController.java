@@ -5,6 +5,7 @@ import com.abin.checkrepeatservice.pojo.dto.ForgotPasswordReq;
 import com.abin.checkrepeatservice.pojo.dto.LoginReq;
 import com.abin.checkrepeatservice.pojo.dto.RefreshTokenReq;
 import com.abin.checkrepeatservice.pojo.dto.RegisterReq;
+import com.abin.checkrepeatservice.pojo.dto.SendPasswordResetCodeReq;
 import com.abin.checkrepeatservice.user.dto.UpdateUserInfoReq;
 import com.abin.checkrepeatservice.user.service.AuthService;
 import com.abin.checkrepeatservice.user.vo.LoginVO;
@@ -68,6 +69,15 @@ public class AuthController {
         log.info("接收用户退出登录请求");
         return authService.logout();
     }
+    /**
+     * 发送密码重置验证码接口（找回密码第一步：用户名 + 邮箱 → 邮箱收码）
+     */
+    @PostMapping("/send-password-reset-code")
+    public Result<String> sendPasswordResetCode(@Valid @RequestBody SendPasswordResetCodeReq req) {
+        log.info("接收发送密码重置验证码请求：用户名={}", req.getUsername());
+        return authService.sendPasswordResetCode(req);
+    }
+
     /**
      * 忘记密码接口（通过用户名和邮箱验证身份后重置密码）
      */

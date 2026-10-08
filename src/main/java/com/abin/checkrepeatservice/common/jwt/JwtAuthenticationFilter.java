@@ -44,11 +44,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             // 1. 获取请求URI
             String requestUri = request.getRequestURI();
 
-            // 2. 放行登录、注册和刷新令牌接口
+            // 2. 放行登录、注册、找回密码等未登录即可访问的接口
             if (requestUri.startsWith("/api/auth/login")
                     || requestUri.startsWith("/api/auth/register")
                     || requestUri.startsWith("/api/auth/refresh-token")
                     || requestUri.startsWith("/api/auth/forgot-password")
+                    || requestUri.startsWith("/api/auth/send-password-reset-code")
             ) {
                 // 直接放行，不进行JWT认证
                 filterChain.doFilter(request, response);

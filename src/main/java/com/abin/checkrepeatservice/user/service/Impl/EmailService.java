@@ -103,6 +103,29 @@ public class EmailService {
     }
 
     /**
+     * 发送密码重置验证码邮件（找回密码用，验证码是数字而非链接）
+     *
+     * 不走 sendTaskCompletionEmail：那条路的 PASSWORD_RESET 模板是「点链接重置」的文案
+     * （buildPasswordResetContent 里的 resetUrl），与数字验证码对不上。
+     * notice_type 仍复用已有的 "PASSWORD_RESET"，保证 sys_notice_log 的审计语义一致。
+     */
+    public boolean sendPasswordResetCodeEmail(String toEmail, String userName, String code,
+                                              int expireMinutes, Long relatedId) {
+        // 注意 sys_notice_log.content 是 varchar(500)，这段核心正文很短，别在这里堆样式
+        String content = String.format("""
+            <div class="warning-box">
+                <h3>🔒 密码重置验证码</h3>
+                <p>亲爱的 <strong>%s</strong>：</p>
+                <p>您的验证码是：<strong style="font-size: 24px; color: #1890ff; letter-spacing: 4px;">%s</strong></p>
+                <p>该验证码 %d 分钟内有效，请勿泄露给他人。</p>
+                <p>如果您没有申请重置密码，请忽略此邮件。</p>
+            </div>
+            """, userName, code, expireMinutes);
+
+        return sendNoticeEmail(toEmail, "密码重置验证码", content, "PASSWORD_RESET", relatedId, "USER");
+    }
+
+    /**
      * 构建邮件内容（支持HTML模板）
      */
     private String buildEmailContent(String coreContent) {

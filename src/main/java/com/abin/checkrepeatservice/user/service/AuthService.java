@@ -5,6 +5,7 @@ import com.abin.checkrepeatservice.pojo.dto.ForgotPasswordReq;
 import com.abin.checkrepeatservice.pojo.dto.LoginReq;
 import com.abin.checkrepeatservice.pojo.dto.RefreshTokenReq;
 import com.abin.checkrepeatservice.pojo.dto.RegisterReq;
+import com.abin.checkrepeatservice.pojo.dto.SendPasswordResetCodeReq;
 import com.abin.checkrepeatservice.user.dto.UpdateUserInfoReq;
 import com.abin.checkrepeatservice.user.vo.LoginVO;
 import com.abin.checkrepeatservice.user.vo.RefreshTokenVO;
@@ -40,6 +41,11 @@ public interface AuthService {
      * @return 退出结果（成功提示）
      */
     Result<String> logout();
+
+    /**
+     * 发送密码重置邮箱验证码（找回密码第一步）
+     */
+    Result<String> sendPasswordResetCode(SendPasswordResetCodeReq req);
 
     /**
      * 忘记密码（通过用户名和邮箱验证身份后重置密码）

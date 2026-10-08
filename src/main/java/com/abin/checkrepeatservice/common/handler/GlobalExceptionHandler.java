@@ -5,10 +5,14 @@ import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.FieldError;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
+
+import java.util.Objects;
 
 /**
  * 全局异常处理器：基于ResultCode枚举统一响应格式
@@ -55,7 +59,27 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(result, resultCode.getHttpStatus());
     }
 
-    // -------------------------- 3. 未映射路径（404 而非 500） --------------------------
+    // -------------------------- 3. 请求体参数校验失败（@Valid） --------------------------
+    /*
+     * 没有本方法时，@Valid 失败抛出的 MethodArgumentNotValidException 会落到下面的
+     * Exception 兜底，返回 500 +「系统繁忙，请稍后重试」——把客户端传错参数报成了服务端故障。
+     * 例：找回密码漏传验证码。此处取第一条字段错误信息，按 400 返回。
+     */
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<Result<?>> handleMethodArgumentNotValid(MethodArgumentNotValidException e) {
+        String customMsg = e.getBindingResult().getFieldErrors().stream()
+                .map(FieldError::getDefaultMessage)
+                .filter(Objects::nonNull)
+                .findFirst()
+                .orElse(ResultCode.PARAM_ERROR.getDefaultMsg());
+        log.warn("参数校验失败：{}", customMsg);
+
+        ResultCode resultCode = ResultCode.PARAM_ERROR;
+        Result<?> result = Result.error(resultCode.getCode(), customMsg, null);
+        return new ResponseEntity<>(result, resultCode.getHttpStatus());
+    }
+
+    // -------------------------- 4. 未映射路径（404 而非 500） --------------------------
     /*
      * Spring Boot 3 / Spring 6 对匹配不到任何 handler 的请求会抛 NoResourceFoundException
      * （消息形如 "No static resource api/admin/monitoring/metrics"）。
@@ -76,7 +100,7 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(result, resultCode.getHttpStatus());
     }
 
-    // -------------------------- 4. 系统异常（兜底处理） --------------------------
+    // -------------------------- 5. 系统异常（兜底处理） --------------------------
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Result<?>> handleSystemException(Exception e) {
         log.error("系统异常：{}", e.getMessage(), e);
