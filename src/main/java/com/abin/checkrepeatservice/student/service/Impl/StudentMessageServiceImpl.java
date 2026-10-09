@@ -1,6 +1,7 @@
 package com.abin.checkrepeatservice.student.service.Impl;
 
 import com.abin.checkrepeatservice.common.service.FileService;
+import com.abin.checkrepeatservice.common.utils.ConversationIdUtils;
 import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
 import com.abin.checkrepeatservice.pojo.entity.*;
 import com.abin.checkrepeatservice.student.dto.ChatExportDTO;
@@ -67,25 +68,13 @@ public class StudentMessageServiceImpl implements StudentMessageService {
     private String uploadBasePath;
     
     /**
-     * 生成师生之间的唯一会话 ID
-     * 规则：使用两个用户 ID 的组合哈希，确保同一个导师和学生只有一个会话
-     * 
-     * @param userId1 用户 ID 1（学生或导师）
-     * @param userId2 用户 ID 2（导师或学生）
-     * @return 唯一的会话 ID
+     * 生成师生之间的唯一会话 ID。
+     *
+     * <p>算法本身已搬到 {@link ConversationIdUtils}：教师端要用同一套规则找到同一个会话，
+     * 各留一份副本迟早会算岔，导致师生看到两个会话。这里只做委托，行为与原先完全一致。</p>
      */
     private Long generateConversationId(Long userId1, Long userId2) {
-        // 确保顺序一致：较小的 ID 在前，避免 (1,2) 和 (2,1) 生成不同的 ID
-        Long minId = Math.min(userId1, userId2);
-        Long maxId = Math.max(userId1, userId2);
-        
-        // 使用 MurmurHash 或简单拼接后取哈希
-        // 格式："conv_{minId}_{maxId}" 的哈希值
-        String key = "conv_" + minId + "_" + maxId;
-        
-        // 使用 MurmurHash3 或简单的字符串哈希（取绝对值确保为正）
-        // 注意：实际生产环境建议使用更稳定的哈希算法
-        return (long) Math.abs(key.hashCode() & 0x7FFFFFFF); // 确保为正数
+        return ConversationIdUtils.of(userId1, userId2);
     }
     
     /**
@@ -388,17 +377,17 @@ public class StudentMessageServiceImpl implements StudentMessageService {
             log.info("清空消息 -学生ID: {}, 会话ID: {}", studentId, sessionId);
             
             // 实现消息清空逻辑
-            //将会话中所有消息标记为已删除
+            // 将会话中所有消息标记为已删除。
+            // 注意：sessionId 是会话号（conversation_id），不是"对方的用户 ID"。
+            // 原先这里写的是 senderId/receiverId 与 sessionId 的两组配对 ——
+            // 拿会话号去比用户 ID 永远匹配不到，等于这个清空功能一直没生效过；
+            // 而且那个 .and(...).or(...).eq(isDeleted, 0) 的写法里，
+            // isDeleted 只约束了 OR 的后半支（AND 优先于 OR）。这里一并改掉。
             LambdaQueryWrapper<InstantMessage> deleteWrapper = new LambdaQueryWrapper<>();
             deleteWrapper
-                .and(wrapper -> wrapper
-                    .eq(InstantMessage::getSenderId, studentId)
-                    .eq(InstantMessage::getReceiverId, sessionId))
-                .or(wrapper -> wrapper
-                    .eq(InstantMessage::getSenderId, sessionId)
-                    .eq(InstantMessage::getReceiverId, studentId))
+                .eq(InstantMessage::getConversationId, sessionId)
                 .eq(InstantMessage::getIsDeleted, 0);
-            
+
             // 更新删除状态
             InstantMessage updateMessage = new InstantMessage();
             updateMessage.setIsDeleted(1);
@@ -420,15 +409,12 @@ public class StudentMessageServiceImpl implements StudentMessageService {
                     studentId, exportDTO.getSessionId(), exportDTO.getFormat());
             
             // 实现聊天记录导出逻辑
-            // 查询会话中的所有消息
+            // 查询会话中的所有消息。
+            // exportDTO.getSessionId() 是会话号（conversation_id），不是对方用户 ID ——
+            // 原先拿它去比 senderId/receiverId，恒匹配 0 行，导出的永远是空文件。
             LambdaQueryWrapper<InstantMessage> messageWrapper = new LambdaQueryWrapper<>();
             messageWrapper
-                .and(wrapper -> wrapper
-                    .eq(InstantMessage::getSenderId, studentId)
-                    .eq(InstantMessage::getReceiverId, exportDTO.getSessionId()))
-                .or(wrapper -> wrapper
-                    .eq(InstantMessage::getSenderId, exportDTO.getSessionId())
-                    .eq(InstantMessage::getReceiverId, studentId))
+                .eq(InstantMessage::getConversationId, exportDTO.getSessionId())
                 .eq(InstantMessage::getIsDeleted, 0)
                 .orderByAsc(InstantMessage::getSentTime);
                         
@@ -462,15 +448,12 @@ public class StudentMessageServiceImpl implements StudentMessageService {
             log.info("获取共享文件列表 -学生ID: {}, 会话ID: {}", studentId, sessionId);
             
             // 实现共享文件列表获取逻辑
-            //查询会话中的共享文件（通过附件消息）
+            // 查询会话中的共享文件（通过附件消息）。
+            // sessionId 是会话号（conversation_id），不是对方用户 ID ——
+            // 原先的错误配对让这个列表恒为空，学生端「文件管理」页一直拿不到任何文件。
             LambdaQueryWrapper<InstantMessage> fileWrapper = new LambdaQueryWrapper<>();
             fileWrapper
-                .and(wrapper -> wrapper
-                    .eq(InstantMessage::getSenderId, studentId)
-                    .eq(InstantMessage::getReceiverId, sessionId))
-                .or(wrapper -> wrapper
-                    .eq(InstantMessage::getSenderId, sessionId)
-                    .eq(InstantMessage::getReceiverId, studentId))
+                .eq(InstantMessage::getConversationId, sessionId)
                 .eq(InstantMessage::getIsDeleted, 0)
                 .isNotNull(InstantMessage::getAttachments)
                 .ne(InstantMessage::getAttachments, "")

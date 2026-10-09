@@ -1,5 +1,6 @@
 package com.abin.checkrepeatservice.student.vo;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import io.swagger.annotations.ApiModel;
 import io.swagger.annotations.ApiModelProperty;
 import lombok.Data;
@@ -15,10 +16,18 @@ import java.util.List;
 @ApiModel("消息")
 public class MessageVO {
 
+    // id / senderId 都是雪花 ID（19 位），必须以**字符串**下发。
+    // 以数字下发时 JS 会截掉末位，而前端判断"这条是不是我发的"用的正是
+    //   String(message.senderId) === String(userStore.userInfo?.userId)
+    // （userId 来自 LoginVO，本来就带 @JsonFormat(STRING)）——
+    // 一边字符串一边被截断的数字，比较恒不成立，自己的消息会全部渲染成对方发的。
+    // 见 LoginVO.userId 上的同款注释。
     @ApiModelProperty("消息ID")
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     private Long id;
 
     @ApiModelProperty("发送者ID")
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     private Long senderId;
 
     @ApiModelProperty("发送者姓名")
