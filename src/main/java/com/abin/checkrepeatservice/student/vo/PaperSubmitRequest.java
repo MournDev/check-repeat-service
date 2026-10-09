@@ -1,5 +1,6 @@
 package com.abin.checkrepeatservice.student.vo;
 
+import com.abin.checkrepeatservice.common.annotation.ValidPaperType;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
@@ -21,6 +22,7 @@ public class PaperSubmitRequest {
     private Long majorId;
 
     @NotBlank(message = "论文类型不能为空")
+    @ValidPaperType(message = "论文类型不合法")
     private String paperType;
 
     @NotBlank(message = "论文摘要不能为空")

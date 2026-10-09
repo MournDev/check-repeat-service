@@ -15,7 +15,12 @@ public class DictConstants {
     public static final String DICT_CHECK_STATUS = "check_status";
 
     /**
-     * 论文类型字典类型
+     * 论文类型字典类型。
+     *
+     * 注意这是个"名义字典"：DictService 遇到它会直接由 PaperTypeEnum 合成返回，
+     * 不查 sys_dict_data（那批行本仓库没有种子数据，详见 DictService.getDictDataByType）。
+     * 保留这个 key 是因为前端 /api/dict/data/type/paper_type 仍在用，
+     * 且 DictService 的两处特判需要它。
      */
     public static final String DICT_PAPER_TYPE = "paper_type";
 
@@ -70,14 +75,9 @@ public class DictConstants {
         public static final String WITHDRAWN = "withdrawn";// 已取消
     }
 
-    /**
-     * 论文类型字典值
-     */
-    public static class PaperType {
-        public static final String GRADUATION = "graduation";// 毕业论文
-        public static final String COURSE = "course";// 课程论文
-        public static final String OTHER = "other";// 其他
-    }
+    // 论文类型的取值域不在这里：见 common/enums/PaperTypeEnum。
+    // 原先这里有个 PaperType 嵌套类（graduation/course/other），全项目零引用，
+    // 留着就是一份会和枚举漂移的第二值域 —— 已删除。
 
     /**
      * 查重状态字典值
