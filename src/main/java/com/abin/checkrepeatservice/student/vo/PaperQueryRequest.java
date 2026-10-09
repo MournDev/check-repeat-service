@@ -21,6 +21,15 @@ public class PaperQueryRequest {
     private String paperStatus;
 
     /**
+     * 论文类型筛选（PaperTypeEnum 的 code），可空。
+     *
+     * 学生端「查重历史」页的类型下拉一直在传这个参数，但此前本类没有这个字段，
+     * 值被 Jackson 静默丢弃 —— 筛选看起来能点、实际毫无作用。
+     * 取值域由 PaperTypeEnum 决定，前端下拉的选项也来自它。
+     */
+    private String paperType;
+
+    /**
      * 论文名称（模糊搜索）
      */
     private String paperTitle;

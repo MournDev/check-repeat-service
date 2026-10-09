@@ -176,6 +176,14 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
             queryWrapper.eq(PaperInfo::getPaperStatus, request.getPaperStatus());
         }
 
+        // 论文类型条件。
+        // 学生端「查重历史」的论文类型下拉此前一直是个空转控件：前端传了 paperType，
+        // 但这个 DTO 上没有该字段，请求体里那个值在反序列化时就被丢掉了，
+        // 于是无论选什么都返回全量 —— 而且它给的还是 THESIS/JOURNAL 这套从未存在过的值。
+        if (StringUtils.hasText(request.getPaperType())) {
+            queryWrapper.eq(PaperInfo::getPaperType, request.getPaperType());
+        }
+
         // 论文名称搜索（模糊查询）
         if (StringUtils.hasText(request.getPaperTitle())) {
             queryWrapper.like(PaperInfo::getPaperTitle, request.getPaperTitle());
