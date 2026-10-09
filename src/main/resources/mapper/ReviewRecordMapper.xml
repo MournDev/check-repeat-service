@@ -37,18 +37,27 @@
     </select>
 
     <!-- 按月统计审核趋势 -->
+    <!-- avgSimilarity 语义：当月审核记录所涉论文的平均查重率（每篇论文先取其已完成任务的平均 rate）。
+         不能写成引用 rr.paper_id 的相关子查询——GROUP BY 月后 paper_id 既未分组也未聚合，
+         会被 sql_mode=only_full_group_by 拒绝（1055 错误） -->
     <select id="selectMonthlyTrend" resultType="com.abin.checkrepeatservice.teacher.vo.TrendDataVO">
         SELECT
-        DATE_FORMAT(create_time, '%Y-%m') as month,
+        DATE_FORMAT(rr.create_time, '%Y-%m') as month,
         COUNT(*) as reviewCount,
-        AVG(TIMESTAMPDIFF(HOUR, create_time, review_time)) as avgReviewTime,
-        (SELECT AVG(ct.check_rate) FROM check_task ct WHERE ct.paper_id = rr.paper_id AND ct.check_status = 2) as avgSimilarity
+        AVG(TIMESTAMPDIFF(HOUR, rr.create_time, rr.review_time)) as avgReviewTime,
+        AVG(ct_avg.avg_rate) as avgSimilarity
         FROM review_record rr
-        WHERE teacher_id = #{teacherId}
-        AND create_time >= #{startDate}
-        AND create_time &lt;= #{endDate}
-        AND is_deleted = 0
-        GROUP BY DATE_FORMAT(create_time, '%Y-%m')
+        LEFT JOIN (
+            SELECT paper_id, AVG(check_rate) as avg_rate
+            FROM check_task
+            WHERE check_status = 2
+            GROUP BY paper_id
+        ) ct_avg ON ct_avg.paper_id = rr.paper_id
+        WHERE rr.teacher_id = #{teacherId}
+        AND rr.create_time >= #{startDate}
+        AND rr.create_time &lt;= #{endDate}
+        AND rr.is_deleted = 0
+        GROUP BY DATE_FORMAT(rr.create_time, '%Y-%m')
         ORDER BY month
     </select>
 
