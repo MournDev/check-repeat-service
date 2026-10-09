@@ -133,14 +133,17 @@ SELECT (SELECT COUNT(*) FROM information_schema.TABLES
 --     这一列不是结构问题，纯脏数据；不查 information_schema，直接数行即可。
 SELECT COUNT(*) AS user_type_null_rows FROM sys_user WHERE user_type IS NULL OR user_type = '';
 
--- 0.9 段 1.11 论文类型维度的前置现状（期望 1 / 1）
+-- 0.9 段 1.11 论文类型维度的前置现状（没跑过段 1.11 的库上期望 0 / 0，跑过则为 1 / 1）
 --     threshold_pt_col    category_similarity_threshold.paper_type 在不在
 --     threshold_pt_index  idx_type_paper_type 在不在
 --     用 information_schema 判断列/索引在不在，避免结构没对齐的库上直接 SELECT 报 1054
+--     ⚠️ 索引必须数 COUNT(DISTINCT INDEX_NAME)，不能数 COUNT(*)：STATISTICS 是
+--        「每个索引的每一列一行」，idx_type_paper_type 建在两列上，COUNT(*) 恒为 2，
+--        会让人误以为"有两个索引"。
 SELECT (SELECT COUNT(*) FROM information_schema.COLUMNS
          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'category_similarity_threshold'
            AND COLUMN_NAME = 'paper_type')                                                AS threshold_pt_col,
-       (SELECT COUNT(*) FROM information_schema.STATISTICS
+       (SELECT COUNT(DISTINCT INDEX_NAME) FROM information_schema.STATISTICS
          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'category_similarity_threshold'
            AND INDEX_NAME = 'idx_type_paper_type')                                        AS threshold_pt_index;
 
@@ -1156,15 +1159,16 @@ SELECT COUNT(*) AS user_type_null_rows FROM sys_user WHERE user_type IS NULL OR 
 
 -- 5.9 段 1.11 论文类型维度执行后（和 0.9 对照）：期望 1 / 1 / 0
 --     pt_col       列到位
---     pt_index     索引到位
+--     pt_index     索引到位（数 COUNT(DISTINCT INDEX_NAME) 而不是 COUNT(*)：
+--                  STATISTICS 每个索引的每一列一行，该索引两列，数行会得到 2）
 --     empty_pt     空串行数为 0（'' 既匹配不到通用档、也不会被带类型的查询命中，必须是 0）
 SELECT (SELECT COUNT(*) FROM information_schema.COLUMNS
          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'category_similarity_threshold'
-           AND COLUMN_NAME = 'paper_type')                                          AS pt_col,
-       (SELECT COUNT(*) FROM information_schema.STATISTICS
+           AND COLUMN_NAME = 'paper_type')                                        AS pt_col,
+       (SELECT COUNT(DISTINCT INDEX_NAME) FROM information_schema.STATISTICS
          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'category_similarity_threshold'
-           AND INDEX_NAME = 'idx_type_paper_type')                                  AS pt_index,
-       (SELECT COUNT(*) FROM category_similarity_threshold WHERE paper_type = '')   AS empty_pt;
+           AND INDEX_NAME = 'idx_type_paper_type')                                AS pt_index,
+       (SELECT COUNT(*) FROM category_similarity_threshold WHERE paper_type = '') AS empty_pt;
 
 -- 5.9b 存量配置的生效范围没有被动过：期望 all_types_rows = 总行数、并存的类型档行数为 0 或新增数
 --      本段执行前全部行都是 NULL（= 适用全部类型），执行后除人工新增外应一律仍为 NULL。
