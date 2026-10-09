@@ -26,6 +26,11 @@
 --     —— 有 sys_user.user_type 为 NULL 的行（自注册的遗留），跑 4.3 段回填。
 --   · 需要「学科领域」独立成表（subject / major_subject / teacher_subject）、
 --     论文带 subject_id、阈值支持学科维度 —— 跑 1.10 段（纯加表加列，不动字典）。
+--   · 论文类型升级成 PaperTypeEnum、阈值要能按论文类型分档 —— 跑 1.11 段
+--     （仅给 category_similarity_threshold 加一列一索引，新列 NULL = 适用全部类型，
+--     故存量配置的生效范围不变）。**漏跑它会让新版后端的所有查重任务 500**：
+--     CategorySimilarityThreshold 一旦带上 paperType 字段，MyBatis-Plus 生成的
+--     每一条 SELECT 都会引用 paper_type。必须是「先跑 1.11，再部署后端」。
 --
 -- 执行方式：**先跑「0. 自检」**看清哪些已经到位，然后按 1 → 4 顺序执行，
 --           最后跑「5. 执行后自检」。
@@ -127,6 +132,17 @@ SELECT (SELECT COUNT(*) FROM information_schema.TABLES
 -- 0.8 段 4.3：user_type 为 NULL / 空串的行数（>0 才需要段 4.3）
 --     这一列不是结构问题，纯脏数据；不查 information_schema，直接数行即可。
 SELECT COUNT(*) AS user_type_null_rows FROM sys_user WHERE user_type IS NULL OR user_type = '';
+
+-- 0.9 段 1.11 论文类型维度的前置现状（期望 1 / 1）
+--     threshold_pt_col    category_similarity_threshold.paper_type 在不在
+--     threshold_pt_index  idx_type_paper_type 在不在
+--     用 information_schema 判断列/索引在不在，避免结构没对齐的库上直接 SELECT 报 1054
+SELECT (SELECT COUNT(*) FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'category_similarity_threshold'
+           AND COLUMN_NAME = 'paper_type')                                                AS threshold_pt_col,
+       (SELECT COUNT(*) FROM information_schema.STATISTICS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'category_similarity_threshold'
+           AND INDEX_NAME = 'idx_type_paper_type')                                        AS threshold_pt_index;
 
 
 -- ============================================================================
@@ -759,6 +775,57 @@ UPDATE `sys_user`
      OR FIND_IN_SET('software_engineering', REPLACE(`research_direction`, ' ', '')));
 
 
+-- ---------------------------------------------------------------------
+-- 1.11 category_similarity_threshold 增加论文类型维度
+--
+-- 背景：论文类型（graduation/course/other）从 DTO 上的裸字符串升级成
+--   common/enums/PaperTypeEnum，并接入阈值解析：每条配置行可以只对某一种论文类型
+--   生效，解析顺序变为
+--     学科+类型 > 学科 > 父门类+类型 > 父门类
+--       > 专业+类型 > 专业 > 学院+类型 > 学院 > 仅类型 > 全局
+--
+-- 关键：本列 DEFAULT NULL，而 NULL 的语义是「适用全部类型」——
+--   这正是本列存在之前**全部存量行**的形态。所以这一段执行完，
+--   一条既有配置的生效范围都不会变，解析结果逐字节不变。
+--   （回滚护栏：旧版后端不认这一列，列留着无害。）
+--
+-- ⚠️ 与 1.10.3 同理，这张表没有唯一键，去重靠 Java 侧
+--   SimilarityThresholdServiceImpl.validate 的 naturalKey —— 该 key 已同步拼上
+--   paperType（并把 null 与 '' 折叠成同一个值），否则"仅类型"档的两种写法会各存一行。
+--
+-- 幂等性：重复执行报 1060 / 1061，属预期，跳过即可。UPDATE 本身可重复执行。
+-- ---------------------------------------------------------------------
+
+-- 两条 ALTER 必须分开写。合并成一条的话，已执行过的库里 ADD COLUMN 报 1060
+-- 会把同一条语句里的 ADD KEY 一起压掉，索引就永远建不上。
+ALTER TABLE `category_similarity_threshold`
+  ADD COLUMN `paper_type` varchar(50) DEFAULT NULL COMMENT '论文类型维度（NULL=适用全部类型；取值见 PaperTypeEnum）' AFTER `subject_id`;
+
+ALTER TABLE `category_similarity_threshold`
+  ADD INDEX `idx_type_paper_type` (`category_type`,`paper_type`);
+
+-- 顺手把 category_type 的注释补上新档位
+ALTER TABLE `category_similarity_threshold`
+  MODIFY COLUMN `category_type` varchar(50) DEFAULT NULL COMMENT '分类类型：college-学院，major-专业，subject-学科领域，paper_type-论文类型（仅按类型的一档）';
+
+-- 空串归一成 NULL。解析器查「不带类型」的行时用的是 IS NULL，
+-- 一行写成 '' 就会既匹配不到通用档、又不会在任何带类型的查询里命中，成为永远失效的垃圾行。
+UPDATE `category_similarity_threshold`
+   SET `paper_type` = NULL
+ WHERE `paper_type` = '';
+
+-- 存量论文里可能出现不在 PaperTypeEnum 取值域内的 paper_type（已知历史上有过
+-- THESIS/JOURNAL/CONFERENCE 这套幽灵值）。**这里不做任何 UPDATE**：
+-- 从 'THESIS' 映射到哪个规范值纯属臆测，改错就是无声篡改业务数据。
+-- 读取侧（实体保持 String、解析器未命中原样回退）对非法值天然容错，
+-- 下面这条只是把现状摆出来供人工判断：
+SELECT paper_type, COUNT(*) AS n
+  FROM paper_info
+ WHERE is_deleted = 0
+ GROUP BY paper_type
+ ORDER BY n DESC;
+
+
 -- ============================================================================
 -- 段 2：similarity_threshold 系列表的 is_deleted 历史 NULL 归零
 --
@@ -1086,6 +1153,26 @@ SELECT (SELECT COUNT(*) FROM `paper_info` p LEFT JOIN `subject` s ON p.subject_i
 --     回填不出来，得人工定角色后再补：
 --       UPDATE sys_user SET user_type = '<ROLE_CODE>' WHERE id = <id>;
 SELECT COUNT(*) AS user_type_null_rows FROM sys_user WHERE user_type IS NULL OR user_type = '';
+
+-- 5.9 段 1.11 论文类型维度执行后（和 0.9 对照）：期望 1 / 1 / 0
+--     pt_col       列到位
+--     pt_index     索引到位
+--     empty_pt     空串行数为 0（'' 既匹配不到通用档、也不会被带类型的查询命中，必须是 0）
+SELECT (SELECT COUNT(*) FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'category_similarity_threshold'
+           AND COLUMN_NAME = 'paper_type')                                          AS pt_col,
+       (SELECT COUNT(*) FROM information_schema.STATISTICS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'category_similarity_threshold'
+           AND INDEX_NAME = 'idx_type_paper_type')                                  AS pt_index,
+       (SELECT COUNT(*) FROM category_similarity_threshold WHERE paper_type = '')   AS empty_pt;
+
+-- 5.9b 存量配置的生效范围没有被动过：期望 all_types_rows = 总行数、并存的类型档行数为 0 或新增数
+--      本段执行前全部行都是 NULL（= 适用全部类型），执行后除人工新增外应一律仍为 NULL。
+SELECT COUNT(*)                                            AS total_rows,
+       SUM(CASE WHEN paper_type IS NULL THEN 1 ELSE 0 END) AS all_types_rows,
+       COUNT(DISTINCT paper_type)                          AS distinct_types
+  FROM category_similarity_threshold
+ WHERE is_deleted = 0;
 
 
 -- ============================================================================

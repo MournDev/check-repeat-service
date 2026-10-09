@@ -242,10 +242,14 @@ DROP TABLE IF EXISTS `category_similarity_threshold`;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `category_similarity_threshold` (
   `id` bigint NOT NULL COMMENT '主键ID',
-  `category_type` varchar(50) DEFAULT NULL COMMENT '分类类型：college-学院，major-专业，subject-学科领域',
+  `category_type` varchar(50) DEFAULT NULL COMMENT '分类类型：college-学院，major-专业，subject-学科领域，paper_type-论文类型（仅按类型的一档）',
   `college_id` bigint DEFAULT NULL COMMENT '学院ID',
   `major_id` bigint DEFAULT NULL COMMENT '专业ID',
   `subject_id` bigint DEFAULT NULL COMMENT '学科领域ID（category_type=subject 时必填，关联subject.id）',
+  -- 论文类型维度：NULL = 适用全部类型，这正是本列存在之前的全部存量行的形态，
+  -- 所以加这一列不会改变任何既有配置的生效范围（见 SimilarityThresholdResolverImpl.typedOrGeneric）。
+  -- 取值只允许 PaperTypeEnum 的 code；category_type=paper_type 时本列必填且三个 id 全为 NULL。
+  `paper_type` varchar(50) DEFAULT NULL COMMENT '论文类型维度（NULL=适用全部类型；取值见 PaperTypeEnum）',
   `threshold` int DEFAULT NULL COMMENT '相似度阈值',
   `create_by` bigint DEFAULT NULL COMMENT '创建人ID',
   `create_time` datetime DEFAULT NULL COMMENT '创建时间',
@@ -264,7 +268,10 @@ CREATE TABLE `category_similarity_threshold` (
   -- 先专业、未命中再学院。表本身小，但查重每次调用都会走到，故建索引。
   KEY `idx_type_college` (`category_type`,`college_id`),
   KEY `idx_type_major`   (`category_type`,`major_id`),
-  KEY `idx_type_subject` (`category_type`,`subject_id`)
+  KEY `idx_type_subject` (`category_type`,`subject_id`),
+  -- 仅按类型那一档（category_type=paper_type AND paper_type=?）靠它；
+  -- 作用域行带类型的查询已经被上面三个索引收窄到个位数行，不必再加复合索引。
+  KEY `idx_type_paper_type` (`category_type`,`paper_type`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='学科/专业相似度阈值设置表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 

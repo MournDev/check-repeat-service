@@ -124,3 +124,12 @@ init.sql              -- 建表，59 张
 3. 段 3B 是整表替换，管理端自建的学科会被删（段 3B 注释里已标注）。
 4. `compare_lib` 表和 `category_similarity_threshold` 表**没有任何种子数据**，
    管理端建查重规则时这两处可能卡住。
+5. **论文类型不需要种子数据，这是刻意的。** 它的真相源是后端
+   `common/enums/PaperTypeEnum`，`/api/dict/data/type/paper_type`（以及
+   `/api/dict/label`、`/api/dict/paper/all`）由 `DictService` 在查库**之前**
+   特判该 dictType 并用枚举现合成返回。所以 `sys_dict_data` 里**没有**
+   `paper_type` 行是正常状态，不要往 `种子数据.sql` 里补 —— 补了也读不到，
+   只会变成第二套可能漂移的值域。判断标准很简单：空库起服务后
+   `/api/dict/paper/all` 的 `paperType` 应返回 3 条（毕业论文/课程论文/其他）。
+   同理，论文类型的合法取值校验走 `@ValidPaperType`（Bean Validation），
+   也不依赖任何库表数据。
