@@ -4,6 +4,7 @@ import com.abin.checkrepeatservice.admin.dto.SimilarityThresholdUpdateReq;
 import com.abin.checkrepeatservice.admin.service.SimilarityThresholdService;
 import com.abin.checkrepeatservice.admin.vo.SimilarityThresholdVO;
 import com.abin.checkrepeatservice.common.Exception.BusinessException;
+import com.abin.checkrepeatservice.common.enums.PaperTypeEnum;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.common.mapper.CategorySimilarityThresholdMapper;
 import com.abin.checkrepeatservice.common.mapper.SimilarityThresholdMapper;
@@ -78,6 +79,10 @@ public class SimilarityThresholdServiceImpl implements SimilarityThresholdServic
                 entity.setCollegeId(item.getCollegeId());
                 entity.setMajorId(item.getMajorId());
                 entity.setSubjectId(item.getSubjectId());
+                // 空串必须落成 NULL：解析器查"适用全部类型"的行用的是 IS NULL，
+                // 一行写成 '' 就既匹配不到通用档、也不会被任何带类型的查询命中，
+                // 成为一条永远不生效、但在管理端看起来正常的配置。
+                entity.setPaperType(blankToNull(item.getPaperType()));
                 entity.setThreshold(item.getThreshold());
                 // DDL 默认值不足恃（存量库的 NULL 行见 db/存量修复.sql 段 2）：
                 // BaseEntity.isDeleted 没有 fill 注解，MyMetaObjectHandler 的 strictInsertFill 不会补，
@@ -87,7 +92,7 @@ public class SimilarityThresholdServiceImpl implements SimilarityThresholdServic
             }
         }
 
-        log.info("相似度阈值设置已更新：全局={}，学院/专业配置 {} 条",
+        log.info("相似度阈值设置已更新：全局={}，学院/专业/学科/论文类型配置 {} 条",
                 req.getGlobalThreshold(), items == null ? 0 : items.size());
     }
 
@@ -149,6 +154,7 @@ public class SimilarityThresholdServiceImpl implements SimilarityThresholdServic
             item.setCollegeId(row.getCollegeId());
             item.setMajorId(row.getMajorId());
             item.setSubjectId(row.getSubjectId());
+            item.setPaperType(row.getPaperType());
             item.setThreshold(row.getThreshold());
             item.setCategoryName(resolveCategoryName(row, collegeNames, majorNames, subjects));
             items.add(item);
@@ -156,12 +162,23 @@ public class SimilarityThresholdServiceImpl implements SimilarityThresholdServic
         return items;
     }
 
-    /** 按 categoryType 三路反查展示名 */
+    /**
+     * 按 categoryType 四路反查展示名。
+     *
+     * 作用域行（学院/专业/学科）即使限定了论文类型，这里也仍只返回该作用域的名字 ——
+     * 类型单独占表格一列，名字里再拼一遍只会让两处对不上。
+     */
     private String resolveCategoryName(CategorySimilarityThreshold row,
                                        Map<Long, String> collegeNames,
                                        Map<Long, String> majorNames,
                                        Map<Long, Subject> subjects) {
         String type = row.getCategoryType();
+        if (CategorySimilarityThreshold.TYPE_PAPER_TYPE.equals(type)) {
+            // 仅按类型那一档：这一行的"名称"就是类型本身。
+            // 枚举里查不到说明该 code 已被下线（或库里有脏值），照学科的做法把裸值显出来
+            String desc = PaperTypeEnum.descOf(row.getPaperType());
+            return desc != null ? desc : "论文类型#" + row.getPaperType() + "（已失效）";
+        }
         if (CategorySimilarityThreshold.TYPE_SUBJECT.equals(type)) {
             Subject s = subjects.get(row.getSubjectId());
             if (s == null) {
@@ -174,6 +191,11 @@ public class SimilarityThresholdServiceImpl implements SimilarityThresholdServic
             return majorNames.get(row.getMajorId());
         }
         return collegeNames.get(row.getCollegeId());
+    }
+
+    /** 空串 / 纯空白归一成 null，其余去掉首尾空白后返回。 */
+    private static String blankToNull(String value) {
+        return (value == null || value.isBlank()) ? null : value.trim();
     }
 
     /**
@@ -218,9 +240,10 @@ public class SimilarityThresholdServiceImpl implements SimilarityThresholdServic
             String type = item.getCategoryType();
             if (!CategorySimilarityThreshold.TYPE_COLLEGE.equals(type)
                     && !CategorySimilarityThreshold.TYPE_MAJOR.equals(type)
-                    && !CategorySimilarityThreshold.TYPE_SUBJECT.equals(type)) {
+                    && !CategorySimilarityThreshold.TYPE_SUBJECT.equals(type)
+                    && !CategorySimilarityThreshold.TYPE_PAPER_TYPE.equals(type)) {
                 throw new BusinessException(ResultCode.PARAM_ERROR,
-                        at + "分类类型必须是 college、major 或 subject", null);
+                        at + "分类类型必须是 college、major、subject 或 paper_type", null);
             }
 
             if (item.getThreshold() == null) {
@@ -228,6 +251,14 @@ public class SimilarityThresholdServiceImpl implements SimilarityThresholdServic
             }
             if (item.getThreshold() < 0 || item.getThreshold() > 100) {
                 throw new BusinessException(ResultCode.PARAM_ERROR, at + "阈值必须在0-100之间", null);
+            }
+
+            // 论文类型维度：空 = 适用全部类型（存量行的形态，合法且是绝大多数）；
+            // 非空则必须是枚举里的 code —— 这列的取值域由 PaperTypeEnum 唯一决定，
+            // 放行裸字符串就等于允许写一条永远匹配不到任何论文、却看起来生效的配置。
+            String paperType = blankToNull(item.getPaperType());
+            if (paperType != null && !PaperTypeEnum.isValidCode(paperType)) {
+                throw new BusinessException(ResultCode.PARAM_ERROR, at + "论文类型不合法", null);
             }
 
             if (CategorySimilarityThreshold.TYPE_COLLEGE.equals(type)) {
@@ -240,16 +271,32 @@ public class SimilarityThresholdServiceImpl implements SimilarityThresholdServic
                 if (item.getSubjectId() == null) {
                     throw new BusinessException(ResultCode.PARAM_EMPTY, at + "学科阈值必须指定学科领域", null);
                 }
-            } else if (item.getMajorId() == null) {
-                throw new BusinessException(ResultCode.PARAM_EMPTY, at + "专业阈值必须指定专业", null);
+            } else if (CategorySimilarityThreshold.TYPE_MAJOR.equals(type)) {
+                if (item.getMajorId() == null) {
+                    throw new BusinessException(ResultCode.PARAM_EMPTY, at + "专业阈值必须指定专业", null);
+                }
+            } else {
+                // 「仅按类型」那一档：必须指定类型，且不能带任何 id。
+                // 带了 id 的行解析器根本不会去查（它按 category_type=paper_type + 三个 id 全空匹配），
+                // 于是存下来就是一条静默不生效的配置。
+                if (paperType == null) {
+                    throw new BusinessException(ResultCode.PARAM_EMPTY, at + "论文类型阈值必须指定论文类型", null);
+                }
+                if (item.getCollegeId() != null || item.getMajorId() != null || item.getSubjectId() != null) {
+                    throw new BusinessException(ResultCode.PARAM_ERROR,
+                            at + "论文类型阈值不能再指定学院/专业/学科", null);
+                }
             }
 
-            // 自然键去重：同一学院/专业/学科只允许一条，否则库里出现重复行、解析时谁生效要看排序。
-            // 这张表**没有唯一键**，去重完全靠这里，所以新增维度必须同步拼进 key ——
-            // 漏拼的后果是"同一门类下的两个二级学科只能存下一条"。
-            String naturalKey = type + ":" + item.getCollegeId() + ":" + item.getMajorId() + ":" + item.getSubjectId();
+            // 自然键去重：同一 (类型, 论文类型, 学院, 专业, 学科) 只允许一条，否则库里出现重复行、
+            // 解析时谁生效要看排序。这张表**没有唯一键**，去重完全靠这里，所以新增维度必须
+            // 同步拼进 key —— 漏拼的后果是"同一学院下按论文类型分的两条只能存下一条"。
+            // 空类型统一拼成 "*"：null 与 '' 是同一个含义，不能因此拆成两个 key。
+            String naturalKey = type + ":" + (paperType == null ? "*" : paperType)
+                    + ":" + item.getCollegeId() + ":" + item.getMajorId() + ":" + item.getSubjectId();
             if (!seenKeys.add(naturalKey)) {
-                throw new BusinessException(ResultCode.PARAM_ERROR, at + "存在重复的学院/专业阈值", null);
+                throw new BusinessException(ResultCode.PARAM_ERROR,
+                        at + "存在重复的阈值配置（学院/专业/学科/论文类型完全相同）", null);
             }
         }
         // 说明：这里不校验 collegeId / majorId 是否真实存在。

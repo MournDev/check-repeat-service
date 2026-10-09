@@ -19,7 +19,12 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 
 /**
- * 相似度阈值解析实现：专业 &gt; 学院 &gt; 全局 &gt; yml 兜底。
+ * 相似度阈值解析实现：学科（含门类继承）&gt; 专业 &gt; 学院 &gt; 仅类型 &gt; 全局 &gt; yml 兜底。
+ *
+ * 每一级内部再分"带本论文类型"与"不带类型（适用全部类型）"两步，
+ * 所以完整顺序是：学科+类型 &gt; 学科 &gt; 门类+类型 &gt; 门类 &gt; 专业+类型 &gt; 专业
+ * &gt; 学院+类型 &gt; 学院 &gt; 仅类型 &gt; 全局 &gt; yml 兜底。
+ * 详见 resolve(Long, Long, Long, String) 与 typedOrGeneric。
  *
  * 不做缓存。SystemConfigServiceImpl.refreshConfigCache() 本身是空壳，
  * 项目也没有引入 Caffeine/Redis 缓存设施；而每次查重本来就要跑 Tika 解析与查重引擎
@@ -67,18 +72,25 @@ public class SimilarityThresholdResolverImpl implements SimilarityThresholdResol
                 majorId = student.getMajorId();
             }
         }
-        return resolve(subjectIdOf(paperInfo), collegeId, majorId);
+        // 论文类型直接取自论文自己，paper_info.paper_type 是唯一被写入的那一列
+        // （paper_submit.paper_type 应用侧从不写，读它会恒为 NULL）
+        return resolve(subjectIdOf(paperInfo), collegeId, majorId, paperInfo.getPaperType());
     }
 
     @Override
     public BigDecimal resolve(Long collegeId, Long majorId) {
-        // 两参版本保持原样（学生端「当前查重规则」卡片还在用它），
-        // 只把它转成三参版本、subjectId 传 null —— 于是行为逐字节不变。
-        return resolve(null, collegeId, majorId);
+        // 两参版本保留：不带论文类型时行为与本类引入类型维度之前逐字节一致。
+        return resolve(null, collegeId, majorId, null);
     }
 
     @Override
     public BigDecimal resolve(Long subjectId, Long collegeId, Long majorId) {
+        // 不带论文类型的入口，同样保持逐字节不变。
+        return resolve(subjectId, collegeId, majorId, null);
+    }
+
+    @Override
+    public BigDecimal resolve(Long subjectId, Long collegeId, Long majorId, String paperType) {
         // 只知道专业时补出所属学院，好让专业没配阈值时能回退到学院级
         if (collegeId == null && majorId != null) {
             Major major = majorMapper.selectById(majorId);
@@ -87,19 +99,23 @@ public class SimilarityThresholdResolverImpl implements SimilarityThresholdResol
             }
         }
 
+        // 空串与 null 同义（都表示"这篇论文没有可用的类型信息"）。
+        // 归一在这里做，免得每个分支各自判断，也免得把空串当成一个"存在的类型"去查库。
+        String type = (paperType == null || paperType.isBlank()) ? null : paperType;
+
         // 学科维度排在最前：它比"专业"更贴近论文本身（同一专业下不同学科方向的
         // 重复率标准可以不同）。两级查法即"精确没配就继承其门类"。
         if (subjectId != null) {
-            BigDecimal threshold = categoryThreshold(
-                    CategorySimilarityThreshold.TYPE_SUBJECT, null, null, subjectId);
+            BigDecimal threshold = typedOrGeneric(
+                    CategorySimilarityThreshold.TYPE_SUBJECT, null, null, subjectId, type);
             if (threshold != null) {
                 return threshold;
             }
             // 二级学科没配 → 继承它所属门类上配的那条
             Long parentId = subjectService.parentIdOf(subjectId);
             if (parentId != null) {
-                threshold = categoryThreshold(
-                        CategorySimilarityThreshold.TYPE_SUBJECT, null, null, parentId);
+                threshold = typedOrGeneric(
+                        CategorySimilarityThreshold.TYPE_SUBJECT, null, null, parentId, type);
                 if (threshold != null) {
                     return threshold;
                 }
@@ -107,22 +123,49 @@ public class SimilarityThresholdResolverImpl implements SimilarityThresholdResol
         }
 
         if (majorId != null) {
-            BigDecimal threshold = categoryThreshold(
-                    CategorySimilarityThreshold.TYPE_MAJOR, null, majorId);
+            BigDecimal threshold = typedOrGeneric(
+                    CategorySimilarityThreshold.TYPE_MAJOR, null, majorId, null, type);
             if (threshold != null) {
                 return threshold;
             }
         }
 
         if (collegeId != null) {
+            BigDecimal threshold = typedOrGeneric(
+                    CategorySimilarityThreshold.TYPE_COLLEGE, collegeId, null, null, type);
+            if (threshold != null) {
+                return threshold;
+            }
+        }
+
+        // 「仅按类型」那一档：不区分学院/专业/学科的全局分类型配置，
+        // 排在学院之后、全局阈值之前 —— 比全局更贴近论文，又比任何范围限定更粗。
+        // 论文没有类型信息时整档跳过（"仅类型"的行本来也无从匹配）。
+        if (type != null) {
             BigDecimal threshold = categoryThreshold(
-                    CategorySimilarityThreshold.TYPE_COLLEGE, collegeId, null);
+                    CategorySimilarityThreshold.TYPE_PAPER_TYPE, null, null, null, type);
             if (threshold != null) {
                 return threshold;
             }
         }
 
         return globalThreshold();
+    }
+
+    /**
+     * 在某一级里查阈值：先查"限定为本论文类型"的行，未命中再查"适用全部类型"（paper_type IS NULL）的行。
+     *
+     * 顺序不能反 —— 反过来就是"通用行赢了专属行"，管理员为某类型单独调的标准会被静默忽略。
+     */
+    private BigDecimal typedOrGeneric(String categoryType, Long collegeId, Long majorId,
+                                      Long subjectId, String paperType) {
+        if (paperType != null) {
+            BigDecimal typed = categoryThreshold(categoryType, collegeId, majorId, subjectId, paperType);
+            if (typed != null) {
+                return typed;
+            }
+        }
+        return categoryThreshold(categoryType, collegeId, majorId, subjectId, null);
     }
 
     /**
@@ -166,16 +209,16 @@ public class SimilarityThresholdResolverImpl implements SimilarityThresholdResol
     }
 
     /**
-     * 查某一级（学院或专业）配置的阈值，没有配置时返回 null 以继续向上回退。
+     * 查某一级（学院/专业/学科/仅类型）配置的阈值，没配则返回 null 以继续向上回退。
+     *
+     * @param paperType 为 null 表示查"适用全部类型"的那一行，此时必须拼 paper_type IS NULL。
+     *                  **不能用"跳过这个条件"来代替** —— 跳过的话，
+     *                  "通用查询"会把任意一条限定了类型的行也匹配进来，
+     *                  于是某个学院为一篇课程论文调高的阈值，会被另一条毕业论文的配置顶掉，
+     *                  且不报任何错。
      */
-    private BigDecimal categoryThreshold(String categoryType, Long collegeId, Long majorId) {
-        return categoryThreshold(categoryType, collegeId, majorId, null);
-    }
-
-    /**
-     * 查某一级（学院/专业/学科）配置的阈值，没配则返回 null 以继续向上回退。
-     */
-    private BigDecimal categoryThreshold(String categoryType, Long collegeId, Long majorId, Long subjectId) {
+    private BigDecimal categoryThreshold(String categoryType, Long collegeId, Long majorId,
+                                         Long subjectId, String paperType) {
         LambdaQueryWrapper<CategorySimilarityThreshold> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(CategorySimilarityThreshold::getCategoryType, categoryType);
         if (collegeId != null) {
@@ -186,6 +229,11 @@ public class SimilarityThresholdResolverImpl implements SimilarityThresholdResol
         }
         if (subjectId != null) {
             wrapper.eq(CategorySimilarityThreshold::getSubjectId, subjectId);
+        }
+        if (paperType != null) {
+            wrapper.eq(CategorySimilarityThreshold::getPaperType, paperType);
+        } else {
+            wrapper.isNull(CategorySimilarityThreshold::getPaperType);
         }
         wrapper.orderByDesc(CategorySimilarityThreshold::getId).last("LIMIT 1");
 

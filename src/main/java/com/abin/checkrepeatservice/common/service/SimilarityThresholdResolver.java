@@ -40,8 +40,30 @@ public interface SimilarityThresholdResolver {
     BigDecimal resolve(Long subjectId, Long collegeId, Long majorId);
 
     /**
+     * 按学科 + 学院/专业 + 论文类型解析生效阈值。
+     * 优先级（从上到下，命中即返回）：
+     * <pre>
+     *   二级学科+类型 &gt; 二级学科 &gt; 所属门类+类型 &gt; 所属门类
+     *     &gt; 专业+类型  &gt; 专业
+     *     &gt; 学院+类型  &gt; 学院
+     *     &gt; 仅类型（category_type='paper_type' 的那一档）
+     *     &gt; 全局 &gt; yml 兜底
+     * </pre>
+     *
+     * 每一级都先查"带本论文类型"的行、未命中再查 paper_type IS NULL 的通用行
+     * —— 所以同一条配置行上加不加类型是"要不要收窄"，而不是"换一个维度"。
+     * 全部存量行的 paper_type 都是 NULL，因此 paperType 传 null 时的返回值与三参版本逐字节一致。
+     *
+     * @param paperType 论文类型（PaperTypeEnum 的 code），可为 null —— 为 null 时跳过所有带类型的档，
+     *                  且不查"仅类型"那一档，行为与本类引入类型维度之前完全一致
+     */
+    BigDecimal resolve(Long subjectId, Long collegeId, Long majorId, String paperType);
+
+    /**
      * 从论文上下文解析生效阈值。
      * 优先用论文自带的学院/专业；论文上缺失时回查学生资料兜底。
+     * 论文类型取自 paperInfo.paperType（读 paper_info，不是 paper_submit ——
+     * 后者那一列应用侧从不写入，恒为 NULL）。
      * 传 null 时等同于取全局阈值。
      */
     BigDecimal resolveForPaper(PaperInfo paperInfo);

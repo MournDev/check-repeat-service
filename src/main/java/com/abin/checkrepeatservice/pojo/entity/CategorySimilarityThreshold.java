@@ -33,7 +33,16 @@ public class CategorySimilarityThreshold extends BaseEntity {
     public static final String TYPE_SUBJECT = "subject";
 
     /**
-     * 分类类型：college-学院，major-专业，subject-学科领域
+     * 分类类型：论文类型（此时 paper_type 必填，三个 id 全为 NULL）。
+     *
+     * 这一档是"全校范围内某种论文类型的阈值"，排在学院之后、全局阈值之前 ——
+     * 用来表达"毕业论文全校按 20%、课程论文全校按 30%"这类不区分学院的规则。
+     * 想按学院再细分，则在学院/专业/学科行上填 paper_type（见 paperType 字段）。
+     */
+    public static final String TYPE_PAPER_TYPE = "paper_type";
+
+    /**
+     * 分类类型：college-学院，major-专业，subject-学科领域，paper_type-论文类型
      */
     @TableField("category_type")
     private String categoryType;
@@ -53,12 +62,30 @@ public class CategorySimilarityThreshold extends BaseEntity {
     /**
      * 学科领域ID（关联 subject.id；category_type=subject 时必填）
      *
-     * ⚠️ 这张表**没有唯一键**（只有 idx_type_college / idx_type_major），
-     * 去重完全靠 Java 侧 SimilarityThresholdServiceImpl.validate 拼的 naturalKey，
-     * 所以加 subject 维度时必须把 subjectId 也拼进去，否则两条只差学科的配置会互相覆盖。
+     * ⚠️ 这张表**没有唯一键**，去重完全靠 Java 侧 SimilarityThresholdServiceImpl.validate
+     * 拼的 naturalKey，所以每加一个维度都必须把它拼进 key，否则两条只差该维度的配置
+     * 会互相覆盖。subjectId 与 paperType 都已拼入。
      */
     @TableField("subject_id")
     private Long subjectId;
+
+    /**
+     * 论文类型维度（取值为 PaperTypeEnum 的 code）。
+     *
+     * NULL = 适用于**全部**论文类型 —— 这正是本列存在之前所有存量行的形态，
+     * 所以加了本列之后，既有配置的生效范围一条都没变。
+     *
+     * 两种用法：
+     *   · 作用域行（TYPE_COLLEGE / TYPE_MAJOR / TYPE_SUBJECT）上填它 = 只对该类型生效，
+     *     解析时先找带类型的行、找不到再退到 NULL 的通用行；
+     *   · TYPE_PAPER_TYPE 行上必填（那一档除了类型没有别的限定）。
+     *
+     * ⚠️ 写入侧必须归一：空串要落成 NULL。解析器查"不带类型"的行用的是 IS NULL，
+     *    一行写成 '' 既匹配不到通用档、也不会被任何带类型的查询命中，是永远失效的垃圾行。
+     *    （存量修复.sql 段 1.11 里有对应的 UPDATE 兜底。）
+     */
+    @TableField("paper_type")
+    private String paperType;
 
     /**
      * 相似度阈值（百分比整数，0-100）

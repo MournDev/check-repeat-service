@@ -18,7 +18,7 @@ public class SimilarityThresholdVO {
     private Integer globalThreshold;
 
     /**
-     * 学院/专业/学科阈值列表
+     * 学院/专业/学科/论文类型阈值列表
      */
     private List<CategoryItem> categoryThresholds;
 
@@ -48,6 +48,14 @@ public class SimilarityThresholdVO {
          */
         @JsonFormat(shape = JsonFormat.Shape.STRING)
         private Long subjectId;
+
+        /**
+         * 论文类型维度（PaperTypeEnum 的 code）。
+         *
+         * null 表示该行适用**全部**论文类型 —— 这不是"没填"，是全部存量行的形态，
+         * 前端表格要据此显示"全部类型"而不是空白。
+         */
+        private String paperType;
 
         private Integer threshold;
 
