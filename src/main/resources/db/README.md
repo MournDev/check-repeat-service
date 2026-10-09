@@ -22,6 +22,7 @@
 | `补消息模板.sql` | ✅ 可重复 | `message_template` 缺 code，或模板里还写着 `${key}` | — |
 | `补查重规则.sql` | ✅ 可重复 | `check_rule` 为空 → 学生端「当前查重规则」卡片 404 | — |
 | `补知识库.sql` | ✅ 可重复 | `knowledge_article` 为空 → 帮助中心只有章、没有文章 | — |
+| `补审核意见模板.sql` | ✅ 可重复 | `review_template` 为空 → 教师端「审核意见模板」页五个分类全空 | — |
 
 ### `种子数据.sql` 按段拆分（这是最容易出事的一份）
 
@@ -88,6 +89,7 @@ init.sql              -- 建表，59 张
 | `补消息模板.sql` | 末尾 | `total=19  active=19  with_legacy_dollar=0  distinct_codes=19` |
 | `补查重规则.sql` | 末尾 | `rules=4  default_rules=1` |
 | `补知识库.sql` | 末尾 | `categories=6  articles=15  orphan_articles=0  published=15` |
+| `补审核意见模板.sql` | 末尾 | `seed_public=10`（`templates>=10`，教师自建会让它更大，属正常） |
 
 ---
 
