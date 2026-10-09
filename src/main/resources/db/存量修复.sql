@@ -830,6 +830,37 @@ SELECT paper_type, COUNT(*) AS n
 
 
 -- ============================================================================
+-- 段 1.12：学生分组两张表（教师端「学生分组管理」页面）
+--   CREATE TABLE IF NOT EXISTS，可重复执行。
+--   student_group_member 是物理删除（无 is_deleted）：(group_id, student_id)
+--   复合唯一键若叠加软删，移出后重新加入会撞唯一键。
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS `student_group` (
+  `id` bigint NOT NULL COMMENT '分组ID（雪花ID，由业务代码生成，非自增）',
+  `teacher_id` bigint NOT NULL COMMENT '所属教师ID（关联sys_user.id）',
+  `name` varchar(50) NOT NULL COMMENT '分组名称',
+  `description` varchar(200) DEFAULT NULL COMMENT '分组描述',
+  `create_by` bigint NOT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` bigint NOT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  PRIMARY KEY (`id`),
+  KEY `idx_student_group_teacher` (`teacher_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='学生分组表';
+
+CREATE TABLE IF NOT EXISTS `student_group_member` (
+  `id` bigint NOT NULL COMMENT '主键ID（雪花ID）',
+  `group_id` bigint NOT NULL COMMENT '分组ID（关联student_group.id）',
+  `student_id` bigint NOT NULL COMMENT '学生ID（关联sys_user.id）',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '加入时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_group_student` (`group_id`,`student_id`),
+  KEY `idx_group_member_student` (`student_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='学生分组成员表（物理删除）';
+
+-- ============================================================================
 -- 段 2：similarity_threshold 系列表的 is_deleted 历史 NULL 归零
 --
 -- 背景：category_similarity_threshold.is_deleted 在 init.sql 里一度是 DEFAULT NULL，

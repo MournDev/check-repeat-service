@@ -1852,6 +1852,48 @@ CREATE TABLE `metric_event_daily` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `student_group`
+--
+
+DROP TABLE IF EXISTS `student_group`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `student_group` (
+  `id` bigint NOT NULL COMMENT '分组ID（雪花ID，由业务代码生成，非自增）',
+  `teacher_id` bigint NOT NULL COMMENT '所属教师ID（关联sys_user.id）',
+  `name` varchar(50) NOT NULL COMMENT '分组名称',
+  `description` varchar(200) DEFAULT NULL COMMENT '分组描述',
+  `create_by` bigint NOT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` bigint NOT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  PRIMARY KEY (`id`),
+  KEY `idx_student_group_teacher` (`teacher_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='学生分组表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `student_group_member`
+--
+-- 成员表物理删除（同 teacher_subject 的理由）：(group_id, student_id) 复合唯一键
+-- 若叠加软删，移出后重新加入会撞唯一键。因此本表没有 is_deleted/审计列。
+
+DROP TABLE IF EXISTS `student_group_member`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `student_group_member` (
+  `id` bigint NOT NULL COMMENT '主键ID（雪花ID）',
+  `group_id` bigint NOT NULL COMMENT '分组ID（关联student_group.id）',
+  `student_id` bigint NOT NULL COMMENT '学生ID（关联sys_user.id）',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '加入时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_group_student` (`group_id`,`student_id`),
+  KEY `idx_group_member_student` (`student_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='学生分组成员表（物理删除）';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Dumping routines for database 'check-repeat-service'
 --
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
