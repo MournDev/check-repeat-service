@@ -253,6 +253,12 @@ public class StudentMessageServiceImpl implements StudentMessageService {
             message.setStatus("SENT");
             message.setRelatedType(sendDTO.getRelatedType());
             message.setRelatedId(sendDTO.getRelatedId());
+            // 附件随消息一起落库。此前只有一个 // TODO 占位，attachmentIds 收下就丢了，
+            // 于是「带附件发消息」实际只发出去一句纯文本，学生端共享文件列表也永远是空的。
+            // 形状统一走 MessageVO，读端（getMessageList / getSharedFiles）按同一份定义解析。
+            List<MessageVO.MessageAttachmentVO> attachments =
+                    MessageVO.fromFileIds(sendDTO.getAttachmentIds(), fileService::getById);
+            message.setAttachments(MessageVO.toAttachmentsJson(attachments));
             message.setSentTime(LocalDateTime.now());
             message.setCreateTime(LocalDateTime.now());
             message.setUpdateTime(LocalDateTime.now());
@@ -282,10 +288,7 @@ public class StudentMessageServiceImpl implements StudentMessageService {
                 // 【新增】设置 sender 字段，兼容前端判断
                 messageVO.setSender("student"); // ✅ 添加 sender 字段
                             
-                // 如果有附件，也设置到 VO 中
-                if (sendDTO.getAttachmentIds() != null && !sendDTO.getAttachmentIds().isEmpty()) {
-                    // TODO: 加载附件信息并设置到 messageVO
-                }
+                messageVO.setAttachments(attachments);
                             
                 log.info("消息发送成功 - 消息ID: {}, 发送者：{}", message.getId(), realSenderName);
                 return messageVO;
@@ -463,39 +466,30 @@ public class StudentMessageServiceImpl implements StudentMessageService {
                         
             List<SharedFileVO> files = new ArrayList<>();
             for (InstantMessage message : messagesWithAttachments) {
-                try {
-                    //解析附件信息
-                    if (message.getAttachments() != null && !message.getAttachments().isEmpty()) {
-                        ObjectMapper objectMapper = new ObjectMapper();
-                        List<Map<String, Object>> attachments = 
-                            objectMapper.readValue(message.getAttachments(), 
-                                new TypeReference<List<Map<String, Object>>>() {});
-                                    
-                        for (Map<String, Object> attachment : attachments) {
-                            SharedFileVO fileVO = new SharedFileVO();
-                            fileVO.setId(String.valueOf(attachment.get("id")));
-                            fileVO.setName((String) attachment.get("name"));
-                            fileVO.setType(getFileExtension((String) attachment.get("name")));
-                            fileVO.setSize(Long.valueOf(attachment.get("size").toString()));
-                                        
-                            //上传者信息
-                            String senderName = "未知用户";
-                            SysUser sender = sysUserMapper.selectById(message.getSenderId());
-                            if (sender != null) {
-                                senderName = sender.getRealName();
-                            }
-                            fileVO.setUploader(senderName);
-                            fileVO.setUploadTime(message.getSentTime() != null ? 
-                                message.getSentTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd")) : "");
-                                        
-                            //算计数 TODO:需要下载记录表
-                            fileVO.setDownloadCount(0);
-                                        
-                            files.add(fileVO);
-                        }
+                // 按 MessageVO 里的统一定义解析，与写入端、教师端共用同一份形状。
+                // 原先是就地 new ObjectMapper 反序列化成 Map，再靠字符串键取值，
+                // size 缺失时 .toString() 直接 NPE，被下面那层 catch 吞成"这条消息没有附件"。
+                for (MessageVO.MessageAttachmentVO attachment : MessageVO.parseAttachments(message.getAttachments())) {
+                    SharedFileVO fileVO = new SharedFileVO();
+                    fileVO.setId(attachment.getId());
+                    fileVO.setName(attachment.getName());
+                    fileVO.setType(getFileExtension(attachment.getName()));
+                    fileVO.setSize(attachment.getSize() == null ? 0L : attachment.getSize());
+
+                    //上传者信息
+                    String senderName = "未知用户";
+                    SysUser sender = sysUserMapper.selectById(message.getSenderId());
+                    if (sender != null) {
+                        senderName = sender.getRealName();
                     }
-                } catch (Exception e) {
-                    log.warn("解析附件信息失败 - 消息ID: {}", message.getId(), e);
+                    fileVO.setUploader(senderName);
+                    fileVO.setUploadTime(message.getSentTime() != null ?
+                        message.getSentTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd")) : "");
+
+                    //算计数 TODO:需要下载记录表
+                    fileVO.setDownloadCount(0);
+
+                    files.add(fileVO);
                 }
             }
             
@@ -782,6 +776,9 @@ public class StudentMessageServiceImpl implements StudentMessageService {
         messageVO.setStatus(message.getStatus());
         messageVO.setMessageType(message.getMessageType());
         messageVO.setSenderAvatar(message.getSenderAvatar());
+        // 不解析 attachments 的话，追加到消息上的附件在列表接口里会整个消失，
+        // 页面上的 .message-attachments 区块永远不渲染。
+        messageVO.setAttachments(MessageVO.parseAttachments(message.getAttachments()));
         return messageVO;
     }
     

@@ -23,9 +23,6 @@ import com.abin.checkrepeatservice.user.mapper.InstantMessageMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
@@ -43,7 +40,6 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -79,13 +75,6 @@ public class TeacherMessageServiceImpl implements TeacherMessageService {
 
     @Value("${file.upload.base-path}")
     private String uploadBasePath;
-
-    /**
-     * 只用来做 JSON 字符串 ↔ 对象转换。
-     * 与 ReviewWorkflowServiceImpl 处理 json 列的方式一致 —— 不引入 JacksonTypeHandler，
-     * 转换显式地留在 Service 层。
-     */
-    private final ObjectMapper objectMapper = new ObjectMapper();
 
     // ------------------------------------------------------------------ 会话
 
@@ -190,6 +179,9 @@ public class TeacherMessageServiceImpl implements TeacherMessageService {
         message.setStatus(STATUS_SENT);
         message.setRelatedType(sendDTO.getRelatedType());
         message.setRelatedId(sendDTO.getRelatedId());
+        // 附件随消息一起落库：聊天页"选完文件就发一条消息"走的是这条路径，
+        // 附件不写进 attachments 的话，共享文件列表就永远看不到这个文件。
+        message.setAttachments(buildAttachmentsJson(sendDTO.getAttachmentIds()));
         message.setSentTime(LocalDateTime.now());
 
         if (instantMessageMapper.insert(message) <= 0) {
@@ -233,7 +225,8 @@ public class TeacherMessageServiceImpl implements TeacherMessageService {
             message.setMessageType("PRIVATE");
             message.setContentType("FILE");
             message.setContent("[文件] " + fileName);
-            message.setAttachments(buildAttachmentsJson(fileId, fileName, fileSize));
+            message.setAttachments(MessageVO.toAttachmentsJson(Collections.singletonList(
+                    MessageVO.attachment(String.valueOf(fileId), fileName, fileSize, getFileExtension(fileName)))));
             message.setStatus(STATUS_SENT);
             message.setSentTime(LocalDateTime.now());
             instantMessageMapper.insert(message);
@@ -324,7 +317,7 @@ public class TeacherMessageServiceImpl implements TeacherMessageService {
 
         List<SharedFileVO> files = new ArrayList<>();
         for (InstantMessage message : instantMessageMapper.selectList(wrapper)) {
-            for (Map<String, Object> attachment : parseAttachments(message.getAttachments())) {
+            for (MessageVO.MessageAttachmentVO attachment : MessageVO.parseAttachments(message.getAttachments())) {
                 files.add(toSharedFileVO(attachment, message));
             }
         }
@@ -347,8 +340,8 @@ public class TeacherMessageServiceImpl implements TeacherMessageService {
 
         // 一条消息可以带多个附件，所以只摘掉这一个；摘空了才把整条消息软删。
         // （messages 有 @TableLogic，这里改 is_deleted 就是软删，不是物理删除。）
-        List<Map<String, Object>> remaining = parseAttachments(message.getAttachments()).stream()
-                .filter(attachment -> !isSameAttachment(attachment, fileId))
+        List<MessageVO.MessageAttachmentVO> remaining = MessageVO.parseAttachments(message.getAttachments()).stream()
+                .filter(attachment -> !String.valueOf(fileId).equals(attachment.getId()))
                 .collect(Collectors.toList());
 
         if (remaining.isEmpty()) {
@@ -360,7 +353,7 @@ public class TeacherMessageServiceImpl implements TeacherMessageService {
         } else {
             InstantMessage update = new InstantMessage();
             update.setId(message.getId());
-            update.setAttachments(writeAttachments(remaining));
+            update.setAttachments(MessageVO.toAttachmentsJson(remaining));
             instantMessageMapper.updateById(update);
         }
 
@@ -484,6 +477,7 @@ public class TeacherMessageServiceImpl implements TeacherMessageService {
         vo.setContent(message.getContent());
         vo.setStatus(message.getStatus());
         vo.setMessageType(message.getMessageType());
+        vo.setAttachments(MessageVO.parseAttachments(message.getAttachments()));
         vo.setSendTime(message.getSentTime() != null
                 ? message.getSentTime().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME) : "");
         return vo;
@@ -498,12 +492,12 @@ public class TeacherMessageServiceImpl implements TeacherMessageService {
         return member;
     }
 
-    private SharedFileVO toSharedFileVO(Map<String, Object> attachment, InstantMessage message) {
+    private SharedFileVO toSharedFileVO(MessageVO.MessageAttachmentVO attachment, InstantMessage message) {
         SharedFileVO vo = new SharedFileVO();
-        vo.setId(String.valueOf(attachment.get("id")));
-        vo.setName((String) attachment.get("name"));
-        vo.setType(getFileExtension((String) attachment.get("name")));
-        vo.setSize(parseSize(attachment.get("size")));
+        vo.setId(attachment.getId());
+        vo.setName(attachment.getName());
+        vo.setType(getFileExtension(attachment.getName()));
+        vo.setSize(attachment.getSize() == null ? 0L : attachment.getSize());
         vo.setUploader(displayName(sysUserMapper.selectById(message.getSenderId())));
         vo.setUploadTime(message.getSentTime() != null
                 ? message.getSentTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd")) : "");
@@ -512,50 +506,15 @@ public class TeacherMessageServiceImpl implements TeacherMessageService {
         return vo;
     }
 
-    /**
-     * 解析附件 JSON。
-     *
-     * <p>与应用层其它地方不同，这里**不抛**异常：单条脏数据不该让整个共享文件列表打不开。
-     * 解析失败只记日志并当作没有附件。</p>
-     */
-    private List<Map<String, Object>> parseAttachments(String attachmentsJson) {
-        if (!StringUtils.hasText(attachmentsJson)) {
-            return Collections.emptyList();
-        }
-        try {
-            return objectMapper.readValue(attachmentsJson, new TypeReference<List<Map<String, Object>>>() {});
-        } catch (Exception e) {
-            log.warn("解析消息附件失败，按无附件处理 - 原文: {}", attachmentsJson, e);
-            return Collections.emptyList();
-        }
-    }
-
-    private String writeAttachments(List<Map<String, Object>> attachments) {
-        try {
-            return objectMapper.writeValueAsString(attachments);
-        } catch (JsonProcessingException e) {
-            log.error("序列化附件信息失败", e);
-            throw new BusinessException(ResultCode.SYSTEM_ERROR, "附件信息写入失败", null);
-        }
-    }
-
-    private String buildAttachmentsJson(Long fileId, String fileName, Long fileSize) {
-        Map<String, Object> attachment = new LinkedHashMap<>();
-        // 键名必须与读取端（getSharedFiles 解析处）一致：id / name / size
-        attachment.put("id", String.valueOf(fileId));
-        attachment.put("name", fileName);
-        attachment.put("size", fileSize == null ? 0L : fileSize);
-        attachment.put("type", getFileExtension(fileName));
-        return writeAttachments(Collections.singletonList(attachment));
-    }
-
-    private boolean isSameAttachment(Map<String, Object> attachment, Long fileId) {
-        return attachment.get("id") != null
-                && String.valueOf(attachment.get("id")).equals(String.valueOf(fileId));
+    /** 前端传来的附件 ID 列表 → 入库 JSON（形状见 {@link MessageVO#toAttachmentsJson}） */
+    private String buildAttachmentsJson(List<String> attachmentIds) {
+        return MessageVO.toAttachmentsJson(MessageVO.fromFileIds(attachmentIds, fileService::getById));
     }
 
     private boolean containsAttachment(String attachmentsJson, Long fileId) {
-        return parseAttachments(attachmentsJson).stream().anyMatch(a -> isSameAttachment(a, fileId));
+        String target = String.valueOf(fileId);
+        return MessageVO.parseAttachments(attachmentsJson).stream()
+                .anyMatch(attachment -> target.equals(attachment.getId()));
     }
 
     private InstantMessage findAttachmentMessage(Long fileId) {
@@ -631,17 +590,6 @@ public class TeacherMessageServiceImpl implements TeacherMessageService {
         }
         String content = message.getContent() == null ? "" : message.getContent();
         return content.length() > 50 ? content.substring(0, 50) + "..." : content;
-    }
-
-    private Long parseSize(Object size) {
-        if (size == null) {
-            return 0L;
-        }
-        try {
-            return Long.valueOf(size.toString());
-        } catch (NumberFormatException e) {
-            return 0L;
-        }
     }
 
     private String getFileExtension(String fileName) {
