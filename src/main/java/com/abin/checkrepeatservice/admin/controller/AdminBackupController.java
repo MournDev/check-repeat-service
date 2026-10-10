@@ -3,6 +3,7 @@ package com.abin.checkrepeatservice.admin.controller;
 import com.abin.checkrepeatservice.admin.service.Impl.SysBackupServiceImpl;
 import com.abin.checkrepeatservice.admin.service.SysBackupService;
 import com.abin.checkrepeatservice.common.Result;
+import com.abin.checkrepeatservice.common.annotation.OperationLog;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.pojo.entity.SysBackupLog;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -18,6 +19,10 @@ import java.util.Map;
  * 数据库备份管理控制器
  *
  * <p>供「日志中心 - 备份记录」页与「系统配置 - 备份设置」使用。</p>
+ *
+ * <p>职责分离（P1）：备份属基础设施级操作 —— 手动触发会瞬间吃满 DB I/O、改设置
+ * 能直接关掉全站数据兜底，故写操作（触发/改设置）收归超级管理员；历史/状态/
+ * 设置的读取保持 ADMIN 可见（日志中心页面仍可用）。</p>
  */
 @RestController
 @RequestMapping("/api/admin/backup")
@@ -29,9 +34,11 @@ public class AdminBackupController {
     private SysBackupService sysBackupService;
 
     /**
-     * 立即执行一次备份（同步，返回真实结果）
+     * 立即执行一次备份（同步，返回真实结果；仅超级管理员）
      */
     @PostMapping("/trigger")
+    @PreAuthorize("hasAuthority('SUPER_ADMIN')")
+    @OperationLog(type = "admin_backup_trigger", description = "管理员手动触发数据库备份")
     public Result<Map<String, Object>> triggerBackup() {
         log.info("接收手动触发备份请求");
 
@@ -86,9 +93,11 @@ public class AdminBackupController {
     }
 
     /**
-     * 更新备份设置
+     * 更新备份设置（仅超级管理员）
      */
     @PutMapping("/settings")
+    @PreAuthorize("hasAuthority('SUPER_ADMIN')")
+    @OperationLog(type = "admin_backup_settings_update", description = "管理员更新备份设置")
     public Result<Void> updateBackupSettings(@RequestBody Map<String, Object> body) {
         Boolean enabled = body.get("enabled") == null ? null : Boolean.valueOf(body.get("enabled").toString());
         Integer retentionDays = null;

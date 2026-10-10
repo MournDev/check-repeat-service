@@ -23,6 +23,10 @@ import java.util.Map;
 /**
  * 系统配置管理控制器
  * 提供完整的系统配置管理功能
+ *
+ * 职责分离（P1）：本控制器维护 system_param 全量配置（基础/查重/安全/邮件/性能），
+ * 属全局运行时开关，写操作一律收归超级管理员；GET 读取保持 ADMIN 可见
+ * （配置页仍可展示当前值）。export 会导出含密钥类敏感项的配置，同样收归超管。
  */
 @Slf4j
 @RestController
@@ -78,6 +82,7 @@ public class SystemConfigManagementController {
      */
     @PutMapping("/basic")
     @OperationLog(type = "config_basic_update", description = "更新基础配置")
+    @PreAuthorize("hasAuthority('SUPER_ADMIN')")
     public Result<String> updateBasicConfig(@RequestBody Map<String, Object> config) {
         log.info("接收更新基础配置请求: {}", config);
         try {
@@ -96,6 +101,7 @@ public class SystemConfigManagementController {
      */
     @PutMapping("/plagiarism")
     @OperationLog(type = "config_plagiarism_update", description = "更新查重配置")
+    @PreAuthorize("hasAuthority('SUPER_ADMIN')")
     public Result<String> updatePlagiarismConfig(@RequestBody Map<String, Object> config) {
         log.info("接收更新查重配置请求: {}", config);
         try {
@@ -114,6 +120,7 @@ public class SystemConfigManagementController {
      */
     @PutMapping("/security")
     @OperationLog(type = "config_security_update", description = "更新安全配置")
+    @PreAuthorize("hasAuthority('SUPER_ADMIN')")
     public Result<String> updateSecurityConfig(@RequestBody Map<String, Object> config) {
         log.info("接收更新安全配置请求: {}", config);
         try {
@@ -132,6 +139,7 @@ public class SystemConfigManagementController {
      */
     @PutMapping("/email")
     @OperationLog(type = "config_email_update", description = "更新邮件配置")
+    @PreAuthorize("hasAuthority('SUPER_ADMIN')")
     public Result<String> updateEmailConfig(@RequestBody Map<String, Object> config) {
         log.info("接收更新邮件配置请求: {}", config);
         try {
@@ -150,6 +158,7 @@ public class SystemConfigManagementController {
      */
     @PutMapping("/performance")
     @OperationLog(type = "config_performance_update", description = "更新性能配置")
+    @PreAuthorize("hasAuthority('SUPER_ADMIN')")
     public Result<String> updatePerformanceConfig(@RequestBody Map<String, Object> config) {
         log.info("接收更新性能配置请求: {}", config);
         try {
@@ -168,6 +177,7 @@ public class SystemConfigManagementController {
      */
     @PostMapping("/save-all")
     @OperationLog(type = "config_save_all", description = "保存全部配置", recordResult = true)
+    @PreAuthorize("hasAuthority('SUPER_ADMIN')")
     public Result<String> saveAllConfig(@RequestBody Map<String, Object> allConfig) {
         log.info("接收保存全部配置请求");
         try {
@@ -202,9 +212,11 @@ public class SystemConfigManagementController {
 
     /**
      * 8. 测试邮件配置接口
-     * 用途：验证邮件配置是否正确
+     * 用途：验证邮件配置是否正确（仅超级管理员：借全局 SMTP 发信）
      */
     @PostMapping("/test-email")
+    @PreAuthorize("hasAuthority('SUPER_ADMIN')")
+    @OperationLog(type = "config_email_test", description = "管理员发送测试邮件")
     public Result<String> testEmailConfig(@RequestBody Map<String, String> request) {
         String recipientEmail = request.get("recipientEmail");
         log.info("接收测试邮件配置请求: recipientEmail={}", recipientEmail);
@@ -226,10 +238,11 @@ public class SystemConfigManagementController {
 
     /**
      * 9. 导出配置接口
-     * 用途：将当前配置导出为JSON文件
+     * 用途：将当前配置导出为JSON文件（仅超级管理员：导出物含密钥类敏感项）
      * 路径：/api/admin/system/config/export
      */
     @GetMapping("/export")
+    @PreAuthorize("hasAuthority('SUPER_ADMIN')")
     public void exportConfig(HttpServletResponse response) {
         log.info("接收导出配置请求");
         try {
@@ -266,9 +279,11 @@ public class SystemConfigManagementController {
 
     /**
      * 10. 恢复默认配置接口
-     * 用途：将所有配置恢复到系统默认值
+     * 用途：将所有配置恢复到系统默认值（仅超级管理员：会清空全部存量配置）
      */
     @PostMapping("/reset-default")
+    @PreAuthorize("hasAuthority('SUPER_ADMIN')")
+    @OperationLog(type = "config_reset_default", description = "管理员恢复默认配置")
     public Result<String> resetDefaultConfig() {
         log.info("接收恢复默认配置请求");
         try {
@@ -288,9 +303,10 @@ public class SystemConfigManagementController {
 
     /**
      * 11. 刷新配置接口
-     * 用途：强制刷新系统配置缓存
+     * 用途：强制刷新系统配置缓存（仅超级管理员：影响全局运行时）
      */
     @PostMapping("/refresh")
+    @PreAuthorize("hasAuthority('SUPER_ADMIN')")
     public Result<Map<String, Object>> refreshConfig() {
         log.info("接收刷新配置请求");
         try {

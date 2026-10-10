@@ -47,20 +47,13 @@ public class UserDetailsServiceImpl implements UserDetailsService {
             throw new UsernameNotFoundException("用户角色不存在或已被删除");
         }
 
-        // 3. 构建权限列表（Spring Security要求权限以"ROLE_"开头，或直接用角色编码）
+        // 3. 构建权限列表（Spring Security要求权限以"ROLE_"开头，或直接用角色编码）。
+        //    这里只发放用户真实持有的 roleCode；「超级管理员 ⊇ 管理员」的层级关系
+        //    由 SecurityConfig.roleHierarchy() 声明式承担（SUPER_ADMIN implies ADMIN），
+        //    在 URL 规则与 @PreAuthorize 解析时统一展开 —— 不再在发放环节手写补授，
+        //    避免同一层级出现两处来源（P1 职责分离改造，此处历史上曾手工补授过）。
         List<GrantedAuthority> authorities = new ArrayList<>();
         authorities.add(new SimpleGrantedAuthority(role.getRoleCode()));
-
-        // 超级管理员额外持有 ADMIN 权限：本类是全项目权限的唯一来源
-        // （JwtAuthenticationFilter 直接取 userDetails.getAuthorities()），而
-        // SecurityConfig 的 /api/admin/** 等规则与 24 处控制器上的 @PreAuthorize
-        // 一律用 hasAuthority("ADMIN") 把关。上面只加了 roleCode，于是 SUPER_ADMIN
-        // 拿不到 ADMIN —— 能登录，却进不了任何后台页面（403 权限不足）。
-        // 在这里补一次等于"超级管理员 ⊇ 管理员"，一处覆盖全部检查点；
-        // 反过来去 24 处逐个追加 SUPER_ADMIN 则漏掉任何一处都会继续 403。
-        if ("SUPER_ADMIN".equalsIgnoreCase(role.getRoleCode())) {
-            authorities.add(new SimpleGrantedAuthority("ADMIN"));
-        }
 
         // 4. 返回Spring Security的UserDetails对象（封装用户信息与权限）
         return new org.springframework.security.core.userdetails.User(

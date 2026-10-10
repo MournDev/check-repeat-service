@@ -7,6 +7,8 @@ import jakarta.servlet.DispatcherType;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.access.hierarchicalroles.RoleHierarchy;
+import org.springframework.security.access.hierarchicalroles.RoleHierarchyImpl;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
@@ -61,6 +63,27 @@ public class SecurityConfig {
     @Bean
     public AuthenticationManager authenticationManager(AuthenticationConfiguration authConfig) throws Exception {
         return authConfig.getAuthenticationManager();
+    }
+
+    /**
+     * 角色层级（P1 职责分离）：声明式表达「超级管理员 ⊇ 管理员」，
+     * 取代 UserDetailsServiceImpl 发放权限时手写的「超管补授 ADMIN」。
+     *
+     * 生效范围（Spring Security 6.3+，本项目 Boot 3.5.7 / Security 6.5.x）：
+     *   - authorizeHttpRequests 的 URL 规则（/api/admin/** 等的 hasAuthority("ADMIN")）
+     *   - 方法级 @PreAuthorize 的 hasAuthority(...)（SecurityExpressionRoot 解析时先按层级展开可达权限）
+     * 超管据此自动通过全部 ADMIN 检查点；层级单向，ADMIN 不会反过来获得 SUPER_ADMIN，
+     * 因此下面职责分离用的 hasAuthority("SUPER_ADMIN") 检查点只认真实持有者。
+     *
+     * static：层级是纯静态规则，提前实例化不依赖任何业务 bean，避免容器
+     * 过早初始化 SecurityConfig 引发警告或意外的 bean 装配顺序。
+     */
+    @Bean
+    static RoleHierarchy roleHierarchy() {
+        return RoleHierarchyImpl.withDefaultRolePrefix()
+                .role("SUPER_ADMIN").implies("ADMIN")
+                // 刻意不连坐 ADMIN -> TEACHER：保持「管理端 ≠ 教师端」的既有语义
+                .build();
     }
 
     /**

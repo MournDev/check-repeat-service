@@ -102,6 +102,7 @@ public class MessageTemplateController {
      */
     @PostMapping("/create")
     @OperationLog(type = "message_template_create", description = "新增消息模板")
+    @PreAuthorize("hasAuthority('SUPER_ADMIN')")
     public Result<Long> createTemplate(@Valid @RequestBody MessageTemplateReq req) {
         log.info("接收新增消息模板请求: code={}, name={}", req.getTemplateCode(), req.getTemplateName());
         try {
@@ -121,6 +122,7 @@ public class MessageTemplateController {
      */
     @PutMapping("/update")
     @OperationLog(type = "message_template_update", description = "更新消息模板")
+    @PreAuthorize("hasAuthority('SUPER_ADMIN')")
     public Result<String> updateTemplate(@Valid @RequestBody MessageTemplateReq req) {
         log.info("接收更新消息模板请求: id={}, code={}", req.getId(), req.getTemplateCode());
         if (req.getId() == null) {
@@ -142,6 +144,7 @@ public class MessageTemplateController {
      */
     @DeleteMapping("/delete/{id}")
     @OperationLog(type = "message_template_delete", description = "删除消息模板")
+    @PreAuthorize("hasAuthority('SUPER_ADMIN')")
     public Result<String> deleteTemplate(@PathVariable("id") Long id) {
         log.info("接收删除消息模板请求: id={}", id);
         try {
@@ -162,6 +165,7 @@ public class MessageTemplateController {
      */
     @PutMapping("/status/{id}")
     @OperationLog(type = "message_template_status_update", description = "更新消息模板启用状态")
+    @PreAuthorize("hasAuthority('SUPER_ADMIN')")
     public Result<String> updateTemplateStatus(@PathVariable("id") Long id,
                                                @RequestParam(required = false) Integer isActive) {
         log.info("接收更新消息模板状态请求: id={}, isActive={}", id, isActive);
