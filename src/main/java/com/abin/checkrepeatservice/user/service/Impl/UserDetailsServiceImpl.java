@@ -48,12 +48,23 @@ public class UserDetailsServiceImpl implements UserDetailsService {
         }
 
         // 3. 构建权限列表（Spring Security要求权限以"ROLE_"开头，或直接用角色编码）。
-        //    这里只发放用户真实持有的 roleCode；「超级管理员 ⊇ 管理员」的层级关系
-        //    由 SecurityConfig.roleHierarchy() 声明式承担（SUPER_ADMIN implies ADMIN），
-        //    在 URL 规则与 @PreAuthorize 解析时统一展开 —— 不再在发放环节手写补授，
-        //    避免同一层级出现两处来源（P1 职责分离改造，此处历史上曾手工补授过）。
+        //
+        //    「超级管理员 ⊇ 管理员」采取【双保险】，两处必须同时存在、不能只留其一：
+        //      ① 这里发放时补授 ADMIN —— 发放侧兜底。P1 曾只依赖 SecurityConfig 的
+        //         RoleHierarchy，结果线上超管全站 403（/api/admin/** 默认 JSON）：
+        //         层级是否生效取决于「部署 jar 内 SecurityConfig 是否为最新构建」
+        //         与「jar 内打包的 Spring Security ≥ 6.3」（6.3 起 hasAuthority 才接
+        //         RoleHierarchy，见 AuthorizeHttpRequestsConfigurer#withRoleHierarchy）。
+        //         任一条件不满足，超管的 authorities=[SUPER_ADMIN] 直接撞死在
+        //         hasAuthority("ADMIN") 上 —— 这种「登录正常、全后台不可用」的
+        //         事故代价远大于一处冗余发放。
+        //      ② SecurityConfig.roleHierarchy() 声明式层级 —— 框架标准来源，供
+        //        方法级 @PreAuthorize 与后续新增角色/层级演进使用。
         List<GrantedAuthority> authorities = new ArrayList<>();
         authorities.add(new SimpleGrantedAuthority(role.getRoleCode()));
+        if ("SUPER_ADMIN".equalsIgnoreCase(role.getRoleCode())) {
+            authorities.add(new SimpleGrantedAuthority("ADMIN"));
+        }
 
         // 4. 返回Spring Security的UserDetails对象（封装用户信息与权限）
         return new org.springframework.security.core.userdetails.User(

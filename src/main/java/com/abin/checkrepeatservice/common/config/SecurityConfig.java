@@ -66,14 +66,19 @@ public class SecurityConfig {
     }
 
     /**
-     * 角色层级（P1 职责分离）：声明式表达「超级管理员 ⊇ 管理员」，
-     * 取代 UserDetailsServiceImpl 发放权限时手写的「超管补授 ADMIN」。
+     * 角色层级（P1 职责分离）：声明式表达「超级管理员 ⊇ 管理员」。
      *
      * 生效范围（Spring Security 6.3+，本项目 Boot 3.5.7 / Security 6.5.x）：
      *   - authorizeHttpRequests 的 URL 规则（/api/admin/** 等的 hasAuthority("ADMIN")）
-     *   - 方法级 @PreAuthorize 的 hasAuthority(...)（SecurityExpressionRoot 解析时先按层级展开可达权限）
-     * 超管据此自动通过全部 ADMIN 检查点；层级单向，ADMIN 不会反过来获得 SUPER_ADMIN，
-     * 因此下面职责分离用的 hasAuthority("SUPER_ADMIN") 检查点只认真实持有者。
+     *   - 方法级 @PreAuthorize 的 hasAuthority(...)（PrePostMethodSecurityConfiguration 自动注入）
+     * 层级单向，ADMIN 不会反过来获得 SUPER_ADMIN，职责分离的
+     * hasAuthority("SUPER_ADMIN") 检查点只认真实持有者。
+     *
+     * ⚠️ 双保险约定：本 bean 与 UserDetailsServiceImpl 发放侧的超管补授 ADMIN
+     * 【必须同时存在】。这里曾单独作为唯一来源，线上因部署 jar 的构建/依赖版本
+     * 错配（打包的 Security < 6.3 时 hasAuthority 不接层级）导致超管全站 403 ——
+     * 层级生效与否依赖运行时框架行为，而发放侧补授不依赖任何框架接线，
+     * 属于「永远有效」的兜底。二者语义一致，冗余是刻意的纵深防御。
      *
      * static：层级是纯静态规则，提前实例化不依赖任何业务 bean，避免容器
      * 过早初始化 SecurityConfig 引发警告或意外的 bean 装配顺序。
