@@ -155,15 +155,24 @@ public class AdminUserServiceImpl implements AdminUserService {
             return Result.error(ResultCode.SYSTEM_ERROR,"用户不存在");
         }
 
-        // 守护栏（P0）：不可动超管；管理员账号只有超管能改
-        String guardMsg = UserBusinessInfoUtils.checkCanManageUser(user);
-        if (guardMsg != null) {
-            return Result.error(ResultCode.PERMISSION_NO_ACCESS, guardMsg);
-        }
-        // 本方法会顺带更新 status（updateReq.getStatus()），禁用动作同样受"最后一个管理员"保护
-        if (updateReq.getStatus() != null && updateReq.getStatus() == 0
-                && UserBusinessInfoUtils.disablesLastActiveAdmin(user)) {
-            return Result.error(ResultCode.PERMISSION_NO_ACCESS, "系统至少需保留一个启用的管理员");
+        // 自助更新例外：以 JWT 解析出的当前登录人 ID 为准（不信请求体里的 userId/role），
+        // 路径上的目标就是本人时，允许维护自己的姓名/邮箱/手机等资料。checkCanManageUser
+        // 防的是"一个管理员横向拿捏其他管理员"，不能把本人改自己的资料也挡掉——否则
+        // ADMIN（乃至 SUPER_ADMIN）的个人设置页会 40304 自我锁死。
+        // 注意：删除/禁用/重置密码/角色分配等高危操作各有专用接口，守护栏在那些路径上
+        // 照旧生效，本例外只覆盖本接口的资料字段（DTO 本身不含 roleId/username/password）。
+        boolean isSelfUpdate = userId.equals(UserBusinessInfoUtils.getCurrentUserId());
+        if (!isSelfUpdate) {
+            // 守护栏（P0）：不可动超管；管理员账号只有超管能改
+            String guardMsg = UserBusinessInfoUtils.checkCanManageUser(user);
+            if (guardMsg != null) {
+                return Result.error(ResultCode.PERMISSION_NO_ACCESS, guardMsg);
+            }
+            // 本方法会顺带更新 status（updateReq.getStatus()），禁用动作同样受"最后一个管理员"保护
+            if (updateReq.getStatus() != null && updateReq.getStatus() == 0
+                    && UserBusinessInfoUtils.disablesLastActiveAdmin(user)) {
+                return Result.error(ResultCode.PERMISSION_NO_ACCESS, "系统至少需保留一个启用的管理员");
+            }
         }
 
         // 更新用户信息
@@ -177,13 +186,14 @@ public class AdminUserServiceImpl implements AdminUserService {
         // status 已改为可选（UserUpdateReq 不再 @NotNull）：null = 本次不修改状态，
         // 状态变更走 updateUserStatus 专用接口（其守护栏/最后管理员保护更完整）。
         // 直接 setStatus(null) 会把库里状态抹掉，必须跳过。
-        if (updateReq.getStatus() != null) {
+        // 本人自助更新时强制忽略 status：个人资料接口不得变相自我禁用/启用。
+        if (!isSelfUpdate && updateReq.getStatus() != null) {
             user.setStatus(updateReq.getStatus());
         }
 
         sysUserService.updateById(user);
-        
-        log.info("管理员更新用户信息成功: userId={}", userId);
+
+        log.info("管理员更新用户信息成功: userId={}, selfUpdate={}", userId, isSelfUpdate);
         return Result.success("用户信息更新成功");
     }
 
