@@ -5,6 +5,7 @@ import com.abin.checkrepeatservice.admin.vo.RoleCreateReq;
 import com.abin.checkrepeatservice.admin.vo.RoleUpdateReq;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
+import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
 import com.abin.checkrepeatservice.pojo.entity.SysRole;
 import com.abin.checkrepeatservice.pojo.entity.SysUser;
 import com.abin.checkrepeatservice.user.service.SysUserService;
@@ -61,7 +62,13 @@ public class AdminPermissionServiceImpl implements AdminPermissionService {
             if (isRoleCodeExists(createReq.getRoleCode(), null)) {
                 return Result.error(ResultCode.SYSTEM_ERROR,"角色编码已存在");
             }
-            
+
+            // 守护栏（P0）：内置角色编码是鉴权链的锚（hasAuthority / isAdmin / 超管注入
+            // 全按字面量匹配），新建同名角色会分流/伪装内置角色的语义
+            if (UserBusinessInfoUtils.isBuiltInRoleCode(createReq.getRoleCode().trim())) {
+                return Result.error(ResultCode.PERMISSION_NO_ACCESS, "系统内置角色编码不允许使用");
+            }
+
             // 创建新角色
             SysRole newRole = new SysRole();
             newRole.setRoleName(createReq.getRoleName().trim());
@@ -93,7 +100,15 @@ public class AdminPermissionServiceImpl implements AdminPermissionService {
         if (role == null || role.getIsDeleted() == 1) {
             return Result.error(ResultCode.SYSTEM_ERROR,"角色不存在");
         }
-        
+
+        // 守护栏（P0）：内置角色禁止改 roleCode。roleCode 一改，UserDetailsServiceImpl
+        // 的超管注入、SecurityConfig 的 hasAuthority、isAdmin() 全部静默失配，
+        // 该角色所有用户下一请求起集体 403，且不留任何审计痕迹。名称/描述可改。
+        if (UserBusinessInfoUtils.isBuiltInRoleCode(role.getRoleCode())
+                && !role.getRoleCode().equalsIgnoreCase(updateReq.getRoleCode())) {
+            return Result.error(ResultCode.PERMISSION_NO_ACCESS, "系统内置角色不允许修改角色编码");
+        }
+
         // 检查角色编码是否被其他角色使用
         if (!role.getRoleCode().equals(updateReq.getRoleCode())) {
             if (isRoleCodeExists(updateReq.getRoleCode(), roleId)) {
@@ -119,17 +134,34 @@ public class AdminPermissionServiceImpl implements AdminPermissionService {
         if (role == null || role.getIsDeleted() == 1) {
             return Result.error(ResultCode.PARAM_ERROR,"角色不存在");
         }
-        
+
+        // 守护栏（P0）：内置角色不可删 —— 它们是鉴权链的锚点，删掉 STUDENT/TEACHER/ADMIN
+        // 等于抽掉对应角色全部用户的权限来源
+        if (UserBusinessInfoUtils.isBuiltInRoleCode(role.getRoleCode())) {
+            return Result.error(ResultCode.PERMISSION_NO_ACCESS, "系统内置角色不允许删除");
+        }
+
         // 检查是否有用户使用该角色
         if (isRoleInUse(roleId)) {
             return Result.error(ResultCode.PARAM_ERROR,"该角色已被用户使用，无法删除");
         }
-        
-        // 软删除角色
+
+        // 软删除角色。同时把编码改名腾出来：sys_role.role_code 上有唯一索引
+        // （存量修复.sql 段 1.13），已删行若保留原编码，同名新角色将永远建不出来；
+        // 而 isRoleCodeExists 只查未删行，改名不影响去重判断。id 后缀保证改出来的
+        // 编码唯一；超长时截断基名防止超过 varchar(50) 报 1406。
+        String delSuffix = "_del_" + role.getId();
+        String code = role.getRoleCode();
+        if (code.length() + delSuffix.length() > 50) {
+            code = code.substring(0, 50 - delSuffix.length()) + delSuffix;
+        } else {
+            code = code + delSuffix;
+        }
+        role.setRoleCode(code);
         role.setIsDeleted(1);
         sysRoleMapper.updateById(role);
-        
-        log.info("管理员删除角色成功: roleId={}", roleId);
+
+        log.info("管理员删除角色成功: roleId={}, 改码为 {} 腾出原编码", roleId, code);
         return Result.success("角色删除成功");
     }
 
@@ -183,16 +215,35 @@ public class AdminPermissionServiceImpl implements AdminPermissionService {
         if (user == null || user.getIsDeleted() == 1) {
             return Result.error(ResultCode.PARAM_ERROR,"用户不存在");
         }
-        
+
         SysRole role = sysRoleMapper.selectById(roleId);
         if (role == null || role.getIsDeleted() == 1) {
             return Result.error(ResultCode.PARAM_ERROR,"角色不存在");
         }
-        
+
+        // 守护栏（P0）：不可动超管；管理员账号只有超管能改派角色
+        String guardMsg = UserBusinessInfoUtils.checkCanManageUser(user);
+        if (guardMsg != null) {
+            return Result.error(ResultCode.PERMISSION_NO_ACCESS, guardMsg);
+        }
+        // 超管角色与接口彻底隔离：引导入口只有 补初始账号.sql
+        if (UserBusinessInfoUtils.ROLE_SUPER_ADMIN.equals(role.getRoleCode())) {
+            return Result.error(ResultCode.PERMISSION_NO_ACCESS, "超级管理员角色不允许通过接口指派");
+        }
+        if (UserBusinessInfoUtils.ROLE_ADMIN.equals(role.getRoleCode())
+                && !UserBusinessInfoUtils.isSuperAdminOperator()) {
+            return Result.error(ResultCode.PERMISSION_NO_ACCESS, "仅超级管理员可指派管理员角色");
+        }
+        // 把启用中的管理员改派成非管理员角色 = 降级，受"最后一个管理员"保护
+        if (!UserBusinessInfoUtils.ROLE_ADMIN.equals(role.getRoleCode())
+                && UserBusinessInfoUtils.disablesLastActiveAdmin(user)) {
+            return Result.error(ResultCode.PERMISSION_NO_ACCESS, "系统至少需保留一个启用的管理员");
+        }
+
         // 分配角色
         user.setRoleId(roleId);
         sysUserService.updateById(user);
-        
+
         log.info("管理员分配用户角色成功: userId={}, roleId={}", userId, roleId);
         return Result.success("角色分配成功");
     }

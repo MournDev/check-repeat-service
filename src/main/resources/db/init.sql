@@ -1552,6 +1552,7 @@ CREATE TABLE `sys_role` (
   `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
   `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
   PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_role_code` (`role_code`),
   KEY `idx_role_name` (`role_name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='角色权限表';
 /*!40101 SET character_set_client = @saved_cs_client */;

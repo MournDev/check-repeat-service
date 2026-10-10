@@ -2,8 +2,10 @@ package com.abin.checkrepeatservice.common.utils;
 
 import com.abin.checkrepeatservice.user.service.Impl.UserDetailsServiceImpl;
 import com.abin.checkrepeatservice.mapper.SysRoleMapper;
+import com.abin.checkrepeatservice.mapper.SysUserMapper;
 import com.abin.checkrepeatservice.pojo.entity.SysRole;
 import com.abin.checkrepeatservice.pojo.entity.SysUser;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.Assert;
@@ -11,7 +13,11 @@ import org.springframework.util.StringUtils;
 
 import java.lang.reflect.Field;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -136,6 +142,125 @@ public class UserBusinessInfoUtils {
         String roleCode = getCurrentUserRoleCode();
         return "TEACHER".equals(roleCode);
     }
+
+    // ==================== 内置角色与用户操作守护栏（P0） ====================
+
+    /** 内置角色编码：由 补初始账号.sql 播种，是整条鉴权链的锚点，不允许通过接口增删改。 */
+    public static final String ROLE_SUPER_ADMIN = "SUPER_ADMIN";
+    public static final String ROLE_ADMIN = "ADMIN";
+
+    private static final Set<String> BUILT_IN_ROLE_CODES =
+            Set.of("STUDENT", "TEACHER", "ADMIN", "SUPER_ADMIN");
+
+    /**
+     * 是否系统内置角色编码（忽略大小写）。
+     *
+     * 内置角色是鉴权链的锚：UserDetailsServiceImpl 的超管 ADMIN 注入、
+     * SecurityConfig 的 hasAuthority、本类的 isAdmin()/isStudent()/isTeacher()
+     * 全部按这些编码字面量匹配 —— 改码或删除等于静默改权限且不留审计痕迹。
+     */
+    public static boolean isBuiltInRoleCode(String roleCode) {
+        return roleCode != null && BUILT_IN_ROLE_CODES.contains(roleCode.toUpperCase());
+    }
+
+    /**
+     * 按角色ID查角色编码（角色不存在或已软删返回 null）。
+     *
+     * 守护栏专用：**直查数据库、不走 roleCodeCache** —— 那个缓存没有失效机制，
+     * 而这里是"能不能动这个账号"的安全决策，宁可多一次查库，不能吃到改码前的旧值。
+     */
+    public static String getRoleCodeById(Long roleId) {
+        if (roleId == null) {
+            return null;
+        }
+        SysRole role = SpringContextUtil.getBean(SysRoleMapper.class).selectById(roleId);
+        return (role == null || role.getIsDeleted() == 1) ? null : role.getRoleCode();
+    }
+
+    /**
+     * 当前操作人是否超级管理员。角色取不到时按非超管处理（保守放行方向：拒绝）。
+     */
+    public static boolean isSuperAdminOperator() {
+        return ROLE_SUPER_ADMIN.equals(getCurrentUserRoleCode());
+    }
+
+    /**
+     * 用户操作守护栏 · 规则 1+2（增删改/改密/改状态/改角色前统一调用）：
+     *   规则 1 —— 任何人都不可操作超级管理员账号。超管是应急通道，只能由 SQL
+     *     引导产生（补初始账号.sql），接口层面碰都不要碰，否则改码/删号即断通道；
+     *   规则 2 —— 只有超级管理员可以管理管理员账号。否则任意 ADMIN 都能删同僚、
+     *     改同僚密码/角色，管理面被单个管理员横向拿捏（横向提权）。
+     *
+     * @return null=放行；非 null=拒绝原因（调用方转为 403 返回）
+     */
+    public static String checkCanManageUser(SysUser target) {
+        String targetRoleCode = getRoleCodeById(target.getRoleId());
+        if (ROLE_SUPER_ADMIN.equals(targetRoleCode)) {
+            return "不允许操作超级管理员账号";
+        }
+        if (ROLE_ADMIN.equals(targetRoleCode) && !isSuperAdminOperator()) {
+            return "仅超级管理员可管理管理员账号";
+        }
+        return null;
+    }
+
+    /**
+     * 用户操作守护栏 · 规则 3：把 target 禁用/删除/降级后，系统里是否再无
+     * 「启用的管理员」。目标不是 ADMIN、或本来就未启用时恒返回 false（放行）。
+     *
+     * 没有这条规则，最后一个管理员可以被一次性操作清空，后台整体自我锁死，
+     * 只能进库救。超管如确需下线最后一个管理员，先建一个新的管理员即可通过。
+     */
+    public static boolean disablesLastActiveAdmin(SysUser target) {
+        return disablesAllActiveAdmins(List.of(target));
+    }
+
+    /**
+     * 规则 3 的批量形态：把这批用户同时禁用/删除/降级后，系统里是否再无
+     * 「启用的管理员」。逐个单独校验会漏判"两个管理员一批删掉"的场景，
+     * 批量操作必须用本方法整批校验。
+     */
+    public static boolean disablesAllActiveAdmins(Collection<SysUser> targets) {
+        if (targets == null || targets.isEmpty()) {
+            return false;
+        }
+        // 只关心"启用中的 ADMIN 目标"：已禁用/已删除的目标不改变启用管理员数
+        List<Long> affectedIds = new ArrayList<>();
+        for (SysUser target : targets) {
+            if (target == null || target.getId() == null) {
+                continue;
+            }
+            if (target.getIsDeleted() != null && target.getIsDeleted() == 1) {
+                continue;
+            }
+            if (target.getStatus() == null || target.getStatus() != 1) {
+                continue;
+            }
+            if (!ROLE_ADMIN.equals(getRoleCodeById(target.getRoleId()))) {
+                continue;
+            }
+            affectedIds.add(target.getId());
+        }
+        if (affectedIds.isEmpty()) {
+            return false;
+        }
+        SysRole adminRole = SpringContextUtil.getBean(SysRoleMapper.class).selectOne(
+                Wrappers.<SysRole>lambdaQuery()
+                        .eq(SysRole::getRoleCode, ROLE_ADMIN)
+                        .eq(SysRole::getIsDeleted, 0)
+                        .last("LIMIT 1"));
+        if (adminRole == null) {
+            return false;
+        }
+        Long remaining = SpringContextUtil.getBean(SysUserMapper.class).selectCount(
+                Wrappers.<SysUser>lambdaQuery()
+                        .eq(SysUser::getRoleId, adminRole.getId())
+                        .eq(SysUser::getStatus, 1)
+                        .eq(SysUser::getIsDeleted, 0)
+                        .notIn(SysUser::getId, affectedIds));
+        return remaining == null || remaining == 0;
+    }
+
     // 在 UserBusinessInfoUtils.java 中新增如下方法：
 
     public static void setAuditField(Object entity, boolean isNew) {

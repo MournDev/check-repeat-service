@@ -63,12 +63,21 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 String username = jwtUtils.extractUsername(jwt);
                 // 4. 从用户详情服务获取用户信息
                 UserDetails userDetails = userDetailsService.loadUserByUsername(username);
-                // 5. 构建认证令牌并设置到Security上下文
-                // 登录成功后设置认证信息
-                UsernamePasswordAuthenticationToken authentication =
-                        new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
-                authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-                SecurityContextHolder.getContext().setAuthentication(authentication);
+                // 5. 账号被禁用（status=0）后，已签发的 token 必须立即失效。
+                //    此前这里无条件构造已认证 Token：只要 token 未过期（TTL 24h），
+                //    管理员禁用/删除账号都拦不住存量 token，「禁用即时生效」不成立，
+                //    用户守护栏里"禁用问题账号止血"也就没有意义。
+                //    本过滤器每请求都重查用户，isEnabled 判断零额外成本；
+                //    禁用时跳过认证设置，后续 authorizeHttpRequests 按匿名请求处理（401/403）。
+                if (!userDetails.isEnabled()) {
+                    logger.warn("账号已禁用，存量 token 拒绝建立认证: " + request.getRequestURI());
+                } else {
+                    // 构建认证令牌并设置到Security上下文
+                    UsernamePasswordAuthenticationToken authentication =
+                            new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
+                    authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                    SecurityContextHolder.getContext().setAuthentication(authentication);
+                }
             } else if (jwt != null) {
                 // 令牌过期是"带着 token 却被当成匿名"的最常见原因，
                 // 但走到这里会静默继续，最终只表现为一个 401，看不出是过期还是别的。

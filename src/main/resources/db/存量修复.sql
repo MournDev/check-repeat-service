@@ -31,6 +31,9 @@
 --     故存量配置的生效范围不变）。**漏跑它会让新版后端的所有查重任务 500**：
 --     CategorySimilarityThreshold 一旦带上 paperType 字段，MyBatis-Plus 生成的
 --     每一条 SELECT 都会引用 paper_type。必须是「先跑 1.11，再部署后端」。
+--   · 权限守护栏（新版后端）依赖 sys_role.role_code 唯一 —— 跑 1.13 段
+--     （重复编码去重、已软删角色改码腾位、建唯一索引；可重复执行）。建议
+--     「先跑 1.13，再部署后端」：新版 deleteRole 软删时会改码，和本段配合。
 --
 -- 执行方式：**先跑「0. 自检」**看清哪些已经到位，然后按 1 → 4 顺序执行，
 --           最后跑「5. 执行后自检」。
@@ -834,6 +837,13 @@ SELECT paper_type, COUNT(*) AS n
 --   CREATE TABLE IF NOT EXISTS，可重复执行。
 --   student_group_member 是物理删除（无 is_deleted）：(group_id, student_id)
 --   复合唯一键若叠加软删，移出后重新加入会撞唯一键。
+--
+--   ⚠️ 若库里已存在旧结构的 student_group（如缺 teacher_id 列，报
+--      Unknown column 'teacher_id' in 'field list'），CREATE TABLE IF NOT EXISTS
+--      会静默跳过、旧表原样保留。该功能首次上线前任何同名表都不可能有有效数据，
+--      直接先 DROP 再执行下面的建表语句：
+--        DROP TABLE IF EXISTS `student_group_member`;
+--        DROP TABLE IF EXISTS `student_group`;
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS `student_group` (
@@ -859,6 +869,72 @@ CREATE TABLE IF NOT EXISTS `student_group_member` (
   UNIQUE KEY `uk_group_student` (`group_id`,`student_id`),
   KEY `idx_group_member_student` (`student_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='学生分组成员表（物理删除）';
+
+-- ============================================================================
+-- 段 1.13：sys_role.role_code 去重 + 唯一索引（P0 权限守护栏配套）
+--
+-- 背景：role_code 是整条鉴权链的锚 —— UserDetailsServiceImpl 的超管 ADMIN 注入、
+--   SecurityConfig 的 hasAuthority、UserBusinessInfoUtils.isAdmin() 全按它匹配。
+--   init.sql 的列注释写「唯一」但从未建索引，而 补初始账号.sql 只按主键幂等
+--   （其注释明确警告过「同 code 不同 id 会插出重复角色」）。重复编码一旦出现，
+--   所有按 code 反查角色的代码路径行为都不可预测。
+--
+-- 顺序：1.13.1 去重 → 1.13.2 已软删行改码 → 1.13.3 建索引。三条都要跑，
+--   直接建索引会被重复行/已删行撞 1062。
+--
+-- ⚠️ 与代码的约定：新版 AdminPermissionServiceImpl.deleteRole 软删自定义角色时
+--   会同步把编码改成 <code>_del_<id>，腾出原编码供同名新角色使用（否则唯一索引
+--   会让"删了再建同名"永远 1062）。本段 1.13.2 负责用同样思路清历史已删行。
+--
+-- 可重复执行：1.13.1/1.13.2 天然幂等（保留行判定 + _del_ 前缀判断），
+--   1.13.3 重复执行报 1061，--force 下是预期的「已执行过」信号。
+-- ============================================================================
+
+-- 1.13.0 先看清现状：重复编码、以及还占着干净编码的已删行（动手前留档对照）
+SELECT role_code, COUNT(*) AS cnt,
+       SUM(CASE WHEN is_deleted = 0 THEN 1 ELSE 0 END) AS live_cnt
+  FROM sys_role
+ GROUP BY role_code
+HAVING cnt > 1 OR (cnt = 1 AND live_cnt = 0)
+ ORDER BY cnt DESC;
+
+-- 1.13.1 去重：同一 role_code 保留一行，其余行软删，并把引用它们的用户
+--   （含挂在已删重复行上的悬空用户）改挂到保留行。
+--   保留行 = 未删行里 id 最小的一个（init.sql 的 1001/2001/4001 与
+--   补初始账号.sql 的 SUPER_ADMIN 都是最小 id 先建）；全删时才退而取最小 id。
+CREATE TEMPORARY TABLE tmp_role_keep AS
+SELECT role_code,
+       COALESCE(MIN(CASE WHEN is_deleted = 0 THEN id END), MIN(id)) AS keep_id
+  FROM sys_role
+ GROUP BY role_code;
+
+UPDATE sys_user u
+  JOIN sys_role dup ON dup.id = u.role_id
+  JOIN tmp_role_keep k ON k.role_code = dup.role_code
+   SET u.role_id = k.keep_id
+ WHERE dup.id <> k.keep_id;
+
+-- 软删非保留行（只动未删行；已删行保持原状，交 1.13.2 改名）
+UPDATE sys_role r
+  JOIN tmp_role_keep k ON k.role_code = r.role_code
+   SET r.is_deleted = 1,
+       r.delete_time = NOW()
+ WHERE r.id <> k.keep_id
+   AND r.is_deleted = 0;
+
+DROP TEMPORARY TABLE tmp_role_keep;
+
+-- 1.13.2 已软删行改码腾位：<code>_del_<id>。没有这一步，唯一索引会让已删行
+--   永远占住编码。LOCATE 守卫保证重复执行不二次追加；超长时截断基名防 1406。
+UPDATE sys_role
+   SET role_code = IF(CHAR_LENGTH(role_code) + CHAR_LENGTH(CONCAT('_del_', id)) > 50,
+                      CONCAT(LEFT(role_code, 50 - CHAR_LENGTH(CONCAT('_del_', id))), '_del_', id),
+                      CONCAT(role_code, '_del_', id))
+ WHERE is_deleted = 1
+   AND LOCATE('_del_', role_code) = 0;
+
+-- 1.13.3 唯一索引（init.sql 的建表语句已同步声明，新库无需本条）
+ALTER TABLE `sys_role` ADD UNIQUE INDEX `uk_role_code` (`role_code`);
 
 -- ============================================================================
 -- 段 2：similarity_threshold 系列表的 is_deleted 历史 NULL 归零
@@ -1208,6 +1284,25 @@ SELECT COUNT(*)                                            AS total_rows,
        COUNT(DISTINCT paper_type)                          AS distinct_types
   FROM category_similarity_threshold
  WHERE is_deleted = 0;
+
+-- 5.10 段 1.13 角色编码唯一性执行后：期望 dup_codes=0 / deleted_still_clean=0 / uk_index=1
+--      dup_codes           重复编码组数（去重没跑干净会 > 0，索引也就建不上）
+--      deleted_still_clean 还占着干净编码的已删行数（1.13.2 漏跑会 > 0）
+--      uk_index            唯一索引是否到位
+SELECT (SELECT COUNT(*) FROM (
+            SELECT role_code FROM sys_role GROUP BY role_code HAVING COUNT(*) > 1) d)      AS dup_codes,
+       (SELECT COUNT(*) FROM sys_role
+         WHERE is_deleted = 1 AND LOCATE('_del_', role_code) = 0)                          AS deleted_still_clean,
+       (SELECT COUNT(DISTINCT INDEX_NAME) FROM information_schema.STATISTICS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sys_role'
+           AND INDEX_NAME = 'uk_role_code')                                                AS uk_index;
+
+-- 5.10b 悬空引用：每个未删除用户的 role_id 都应指向未删除的角色（去重改挂后应恒为 0）
+SELECT COUNT(*) AS dangling_user_role
+  FROM sys_user u
+  LEFT JOIN sys_role r ON r.id = u.role_id AND r.is_deleted = 0
+ WHERE u.is_deleted = 0
+   AND r.id IS NULL;
 
 
 -- ============================================================================

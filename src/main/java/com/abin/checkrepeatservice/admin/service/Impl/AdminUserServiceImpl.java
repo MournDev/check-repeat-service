@@ -8,6 +8,7 @@ import com.abin.checkrepeatservice.admin.vo.BatchDeleteReq;
 import com.abin.checkrepeatservice.admin.vo.ResetPasswordReq;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
+import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
 import com.abin.checkrepeatservice.pojo.entity.SysUser;
 import com.abin.checkrepeatservice.pojo.entity.SysRole;
 import com.abin.checkrepeatservice.pojo.entity.SysLoginLog;
@@ -100,7 +101,18 @@ public class AdminUserServiceImpl implements AdminUserService {
             if (isUsernameExists(createReq.getUsername())) {
                 return Result.error(ResultCode.SYSTEM_ERROR,"用户名已存在");
             }
-            
+
+            // 守护栏（P0）：角色指派边界 —— 超管账号只能由 SQL 引导产生（补初始账号.sql），
+            // 管理员账号只有超管能创建，防止 ADMIN 横向扩编管理面
+            String createRoleCode = UserBusinessInfoUtils.getRoleCodeById(createReq.getRoleId());
+            if (UserBusinessInfoUtils.ROLE_SUPER_ADMIN.equals(createRoleCode)) {
+                return Result.error(ResultCode.PERMISSION_NO_ACCESS, "超级管理员账号仅能通过数据库引导创建");
+            }
+            if (UserBusinessInfoUtils.ROLE_ADMIN.equals(createRoleCode)
+                    && !UserBusinessInfoUtils.isSuperAdminOperator()) {
+                return Result.error(ResultCode.PERMISSION_NO_ACCESS, "仅超级管理员可创建管理员账号");
+            }
+
             // 创建新用户
             SysUser newUser = new SysUser();
             newUser.setUsername(createReq.getUsername().trim());
@@ -142,7 +154,18 @@ public class AdminUserServiceImpl implements AdminUserService {
         if (user == null || user.getIsDeleted() == 1) {
             return Result.error(ResultCode.SYSTEM_ERROR,"用户不存在");
         }
-        
+
+        // 守护栏（P0）：不可动超管；管理员账号只有超管能改
+        String guardMsg = UserBusinessInfoUtils.checkCanManageUser(user);
+        if (guardMsg != null) {
+            return Result.error(ResultCode.PERMISSION_NO_ACCESS, guardMsg);
+        }
+        // 本方法会顺带更新 status（updateReq.getStatus()），禁用动作同样受"最后一个管理员"保护
+        if (updateReq.getStatus() != null && updateReq.getStatus() == 0
+                && UserBusinessInfoUtils.disablesLastActiveAdmin(user)) {
+            return Result.error(ResultCode.PERMISSION_NO_ACCESS, "系统至少需保留一个启用的管理员");
+        }
+
         // 更新用户信息
         user.setRealName(updateReq.getRealName());
         user.setEmail(updateReq.getEmail());
@@ -166,11 +189,20 @@ public class AdminUserServiceImpl implements AdminUserService {
         if (user == null || user.getIsDeleted() == 1) {
             return Result.error(ResultCode.SYSTEM_ERROR,"用户不存在");
         }
-        
+
+        // 守护栏（P0）：不可动超管；管理员账号只有超管能删；且不可删掉最后一个启用的管理员
+        String guardMsg = UserBusinessInfoUtils.checkCanManageUser(user);
+        if (guardMsg != null) {
+            return Result.error(ResultCode.PERMISSION_NO_ACCESS, guardMsg);
+        }
+        if (UserBusinessInfoUtils.disablesLastActiveAdmin(user)) {
+            return Result.error(ResultCode.PERMISSION_NO_ACCESS, "系统至少需保留一个启用的管理员");
+        }
+
         // 软删除
         user.setIsDeleted(1);
         sysUserService.updateById(user);
-        
+
         log.info("管理员删除用户成功: userId={}", userId);
         return Result.success("用户删除成功");
     }
@@ -182,17 +214,33 @@ public class AdminUserServiceImpl implements AdminUserService {
         if (userIds == null || userIds.isEmpty()) {
             return Result.error(ResultCode.PARAM_ERROR,"请选择要删除的用户");
         }
-        
-        // 批量软删除
+
         List<SysUser> users = sysUserService.listByIds(userIds);
+
+        // 守护栏（P0）：先全量校验、整批通过才动手 —— 部分成功会让操作人误以为清完了
+        for (SysUser user : users) {
+            if (user == null || user.getIsDeleted() == 1) {
+                continue;
+            }
+            String guardMsg = UserBusinessInfoUtils.checkCanManageUser(user);
+            if (guardMsg != null) {
+                return Result.error(ResultCode.PERMISSION_NO_ACCESS, guardMsg);
+            }
+        }
+        // 逐个校验会漏判"两个管理员一批删掉"：整批排除后再验一次剩余启用管理员
+        if (UserBusinessInfoUtils.disablesAllActiveAdmins(users)) {
+            return Result.error(ResultCode.PERMISSION_NO_ACCESS, "批量删除将移除全部启用的管理员，系统至少需保留一个");
+        }
+
+        // 批量软删除
         users.forEach(user -> {
             if (user != null && user.getIsDeleted() == 0) {
                 user.setIsDeleted(1);
             }
         });
-        
+
         sysUserService.updateBatchById(users);
-        
+
         log.info("管理员批量删除用户成功: count={}", userIds.size());
         return Result.success("批量删除成功");
     }
@@ -203,15 +251,24 @@ public class AdminUserServiceImpl implements AdminUserService {
         if (status == null || (status != 0 && status != 1)) {
             return Result.error(ResultCode.PARAM_ERROR,"状态参数无效");
         }
-        
+
         SysUser user = sysUserService.getById(userId);
         if (user == null || user.getIsDeleted() == 1) {
             return Result.error(ResultCode.PARAM_ERROR,"用户不存在");
         }
-        
+
+        // 守护栏（P0）：不可动超管；管理员账号只有超管能禁用；且不可禁用最后一个启用的管理员
+        String guardMsg = UserBusinessInfoUtils.checkCanManageUser(user);
+        if (guardMsg != null) {
+            return Result.error(ResultCode.PERMISSION_NO_ACCESS, guardMsg);
+        }
+        if (status == 0 && UserBusinessInfoUtils.disablesLastActiveAdmin(user)) {
+            return Result.error(ResultCode.PERMISSION_NO_ACCESS, "系统至少需保留一个启用的管理员");
+        }
+
         user.setStatus(status);
         sysUserService.updateById(user);
-        
+
         String statusText = status == 1 ? "启用" : "禁用";
         log.info("管理员{}用户成功: userId={}", statusText, userId);
         return Result.success("用户" + statusText + "成功");
@@ -224,11 +281,17 @@ public class AdminUserServiceImpl implements AdminUserService {
         if (user == null || user.getIsDeleted() == 1) {
             return Result.error(ResultCode.PARAM_ERROR,"用户不存在");
         }
-        
+
+        // 守护栏（P0）：不可动超管；管理员密码只有超管能重置（改密 = 接管账号）
+        String guardMsg = UserBusinessInfoUtils.checkCanManageUser(user);
+        if (guardMsg != null) {
+            return Result.error(ResultCode.PERMISSION_NO_ACCESS, guardMsg);
+        }
+
         // 重置密码
         user.setPassword(passwordEncoder.encode(resetReq.getNewPassword()));
         sysUserService.updateById(user);
-        
+
         log.info("管理员重置用户密码成功: userId={}", userId);
         return Result.success("密码重置成功");
     }

@@ -5,6 +5,7 @@ import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -100,7 +101,30 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(result, resultCode.getHttpStatus());
     }
 
-    // -------------------------- 5. 系统异常（兜底处理） --------------------------
+    // -------------------------- 5. 方法级权限拒绝（@PreAuthorize → 403 而非 500） --------------------------
+    /*
+     * @EnableMethodSecurity 的 @PreAuthorize 拒绝时抛 AccessDeniedException。此前没有
+     * 对应处理器，会落进下面的 Exception 兜底 → 500 +「系统繁忙」：前端把"无权限"
+     * 当成服务端故障展示，排查日志里也只会看到一条误导性的 ERROR。
+     *
+     * 范围说明：只有「已认证用户触发方法级注解拒绝」才会到这里 —— 匿名请求在
+     * 过滤器链上就被拦下走 entry point 了；过滤器链规则的 403 由
+     * AccessDeniedHandlerImpl 直接 sendError，同样不走本方法（其 401 冒充问题
+     * 已由 SecurityConfig 的 ERROR 转发放行规则修正）。
+     */
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<Result<?>> handleAccessDenied(AccessDeniedException e) {
+        log.warn("方法级权限拒绝：{}", e.getMessage());
+        ResultCode resultCode = ResultCode.PERMISSION_NO_ACCESS;
+        Result<?> result = Result.error(
+                resultCode.getCode(),
+                resultCode.getDefaultMsg(),
+                null
+        );
+        return new ResponseEntity<>(result, resultCode.getHttpStatus());
+    }
+
+    // -------------------------- 6. 系统异常（兜底处理） --------------------------
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Result<?>> handleSystemException(Exception e) {
         log.error("系统异常：{}", e.getMessage(), e);
