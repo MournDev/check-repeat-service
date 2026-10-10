@@ -1,6 +1,5 @@
 package com.abin.checkrepeatservice.admin.vo;
 
-import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
 /**
@@ -15,7 +14,10 @@ public class UserUpdateReq {
     private String major;
     private String grade;
     private String className;
-    
-    @NotNull(message = "状态不能为空")
+
+    /**
+     * 账号状态（可选）：null = 不修改状态（状态变更走 updateUserStatus 专用接口）。
+     * 服务层对 null 跳过 setStatus，不会抹掉库里已有的状态。
+     */
     private Integer status;
 }

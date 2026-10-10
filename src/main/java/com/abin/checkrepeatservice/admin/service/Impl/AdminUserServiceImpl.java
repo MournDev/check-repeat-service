@@ -174,8 +174,13 @@ public class AdminUserServiceImpl implements AdminUserService {
         user.setMajor(updateReq.getMajor());
         user.setGrade(updateReq.getGrade());
         user.setClassName(updateReq.getClassName());
-        user.setStatus(updateReq.getStatus());
-        
+        // status 已改为可选（UserUpdateReq 不再 @NotNull）：null = 本次不修改状态，
+        // 状态变更走 updateUserStatus 专用接口（其守护栏/最后管理员保护更完整）。
+        // 直接 setStatus(null) 会把库里状态抹掉，必须跳过。
+        if (updateReq.getStatus() != null) {
+            user.setStatus(updateReq.getStatus());
+        }
+
         sysUserService.updateById(user);
         
         log.info("管理员更新用户信息成功: userId={}", userId);
