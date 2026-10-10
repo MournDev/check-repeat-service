@@ -1,116 +1,163 @@
 package com.abin.checkrepeatservice.monitor.service;
 
 import com.abin.checkrepeatservice.common.Result;
-import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.Timer;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.connection.RedisConnection;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.stereotype.Service;
 
+import java.lang.management.ClassLoadingMXBean;
+import java.lang.management.GarbageCollectorMXBean;
+import java.lang.management.ManagementFactory;
+import java.lang.management.MemoryMXBean;
+import java.lang.management.MemoryUsage;
+import java.lang.management.ThreadMXBean;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
+import java.util.Properties;
 
 /**
  * 应用性能监控服务
- * 基于Micrometer提供应用层面的性能监控
+ *
+ * JVM 指标全部来自 ManagementFactory 的 MXBean（真实瞬时值）：
+ *   - 堆/非堆内存：MemoryMXBean
+ *   - 线程数：ThreadMXBean
+ *   - GC 次数：GarbageCollectorMXBean，按名称归类 young/full
+ *     （G1 Young Generation、PS Scavenge、ParNew、Copy → young；
+ *       G1 Old Generation、PS MarkSweep、ConcurrentMarkSweep → full）
+ *   - 类加载数：ClassLoadingMXBean
+ * HTTP 统计来自 ResponseTimeStore 的进程级累计（本次启动以来，重启清零）。
  */
 @Slf4j
 @Service
 public class ApplicationMonitorService {
 
+    @Resource
+    private ResponseTimeStore responseTimeStore;
+
     @Autowired(required = false)
-    private MeterRegistry meterRegistry;
+    private RedisConnectionFactory redisConnectionFactory;
 
     /**
-     * 记录HTTP请求指标
-     */
-    public void recordHttpRequest(String uri, String method, int status, long durationMs) {
-        if (meterRegistry != null) {
-            try {
-                Timer.Sample sample = Timer.start(meterRegistry);
-                sample.stop(Timer.builder("http.server.requests")
-                        .tag("uri", uri)
-                        .tag("method", method)
-                        .tag("status", String.valueOf(status))
-                        .register(meterRegistry));
-            } catch (Exception e) {
-                log.debug("记录HTTP请求指标失败: {}", e.getMessage());
-            }
-        }
-    }
-
-    /**
-     * 获取应用性能指标
+     * 获取应用性能指标（扁平结构，与 SystemMonitoring 前端字段对齐）
      */
     public Result<Map<String, Object>> getApplicationMetrics() {
         Map<String, Object> metrics = new HashMap<>();
-        
+
         try {
-            if (meterRegistry != null) {
-                // 获取HTTP请求统计
-                Map<String, Object> httpMetrics = new HashMap<>();
-                
-                // 这里可以添加更多基于Micrometer的指标收集
-                // 由于是演示，使用模拟数据
-                
-                httpMetrics.put("totalRequests", 1250);
-                httpMetrics.put("errorRate", 0.8);
-                httpMetrics.put("avgResponseTime", 145);
-                httpMetrics.put("p95ResponseTime", 380);
-                
-                metrics.put("http", httpMetrics);
-            } else {
-                // 如果没有Micrometer，返回基础指标
-                Map<String, Object> basicMetrics = new HashMap<>();
-                basicMetrics.put("totalRequests", 0);
-                basicMetrics.put("errorRate", 0.0);
-                basicMetrics.put("avgResponseTime", 0);
-                metrics.put("http", basicMetrics);
+            MemoryMXBean memoryBean = ManagementFactory.getMemoryMXBean();
+
+            // 堆内存
+            MemoryUsage heap = memoryBean.getHeapMemoryUsage();
+            metrics.put("heapUsed", formatBytes(heap.getUsed()));
+            metrics.put("heapMax", formatBytes(heap.getMax()));
+            metrics.put("heapPercent", percent(heap.getUsed(), heap.getMax()));
+
+            // 非堆内存
+            MemoryUsage nonHeap = memoryBean.getNonHeapMemoryUsage();
+            metrics.put("nonHeapUsed", formatBytes(nonHeap.getUsed()));
+            metrics.put("nonHeapPercent", percent(nonHeap.getUsed(), nonHeap.getMax()));
+
+            // 线程
+            ThreadMXBean threadBean = ManagementFactory.getThreadMXBean();
+            metrics.put("threadCount", threadBean.getThreadCount());
+
+            // GC 次数（按名称归类 young / full）
+            long youngGcCount = 0;
+            long fullGcCount = 0;
+            for (GarbageCollectorMXBean gcBean : ManagementFactory.getGarbageCollectorMXBeans()) {
+                long count = gcBean.getCollectionCount();
+                if (count < 0) {
+                    continue; // -1 表示该收集器不统计次数
+                }
+                if (isYoungCollector(gcBean.getName())) {
+                    youngGcCount += count;
+                } else {
+                    fullGcCount += count;
+                }
             }
-            
+            metrics.put("youngGcCount", youngGcCount);
+            metrics.put("fullGcCount", fullGcCount);
+
+            // 类加载
+            ClassLoadingMXBean classBean = ManagementFactory.getClassLoadingMXBean();
+            metrics.put("loadedClassCount", classBean.getLoadedClassCount());
+
+            // HTTP 请求统计（进程启动以来的真实采集）
+            metrics.put("http", responseTimeStore.globalStats());
+
             // 应用基本信息
             Map<String, Object> appInfo = new HashMap<>();
             appInfo.put("name", "check-repeat-service");
-            appInfo.put("version", "1.0.0");
+            String version = getClass().getPackage().getImplementationVersion();
+            appInfo.put("version", version != null ? version : "0.0.1-SNAPSHOT");
             metrics.put("application", appInfo);
-            
+
             return Result.success("应用性能指标获取成功", metrics);
         } catch (Exception e) {
             log.error("获取应用性能指标失败", e);
-            return Result.error(com.abin.checkrepeatservice.common.enums.ResultCode.SYSTEM_ERROR, 
+            return Result.error(com.abin.checkrepeatservice.common.enums.ResultCode.SYSTEM_ERROR,
                               "获取应用性能指标失败: " + e.getMessage());
         }
     }
 
+    private boolean isYoungCollector(String name) {
+        return name.contains("Young") || name.contains("Scavenge")
+                || name.equals("ParNew") || name.equals("Copy");
+    }
+
     /**
-     * 获取缓存性能指标
+     * 缓存性能指标：Redis 命中/未命中来自真实的 INFO stats
+     * （keyspace_hits / keyspace_misses，Redis 自启动累计）。
+     * 本地缓存没有统一的真实统计源，不再返回伪造数字。
      */
     public Result<Map<String, Object>> getCacheMetrics() {
         Map<String, Object> cacheMetrics = new HashMap<>();
-        
+
         try {
-            // Redis缓存指标（如果有集成Redis）
             Map<String, Object> redisMetrics = new HashMap<>();
-            redisMetrics.put("hitRate", 87.5);
-            redisMetrics.put("missRate", 12.5);
-            redisMetrics.put("connections", 8);
-            redisMetrics.put("status", "healthy");
-            
+            if (redisConnectionFactory != null) {
+                try (RedisConnection conn = redisConnectionFactory.getConnection()) {
+                    Properties stats = conn.info("stats");
+                    long hits = Long.parseLong(stats.getProperty("keyspace_hits", "0"));
+                    long misses = Long.parseLong(stats.getProperty("keyspace_misses", "0"));
+                    long total = hits + misses;
+
+                    redisMetrics.put("hits", hits);
+                    redisMetrics.put("misses", misses);
+                    redisMetrics.put("hitRate", total > 0 ? Math.round(hits * 10000.0 / total) / 100.0 : 0.0);
+                    redisMetrics.put("missRate", total > 0 ? Math.round(misses * 10000.0 / total) / 100.0 : 0.0);
+                    redisMetrics.put("status", "healthy");
+                }
+            } else {
+                redisMetrics.put("status", "unavailable");
+            }
             cacheMetrics.put("redis", redisMetrics);
-            
-            // 本地缓存指标
-            Map<String, Object> localCache = new HashMap<>();
-            localCache.put("hitRate", 92.3);
-            localCache.put("size", 1250);
-            localCache.put("maxSize", 5000);
-            cacheMetrics.put("local", localCache);
-            
+
             return Result.success("缓存性能指标获取成功", cacheMetrics);
         } catch (Exception e) {
             log.error("获取缓存性能指标失败", e);
-            return Result.error(com.abin.checkrepeatservice.common.enums.ResultCode.SYSTEM_ERROR, 
+            return Result.error(com.abin.checkrepeatservice.common.enums.ResultCode.SYSTEM_ERROR,
                               "获取缓存性能指标失败: " + e.getMessage());
         }
+    }
+
+    private int percent(long used, long max) {
+        if (max <= 0) {
+            return 0; // 非堆 max 可能是 -1（未定义上限），此时百分比无意义
+        }
+        return (int) Math.round(used * 100.0 / max);
+    }
+
+    private String formatBytes(long bytes) {
+        if (bytes < 0) {
+            return "-";
+        }
+        if (bytes < 1024) return bytes + "B";
+        if (bytes < 1024 * 1024) return String.format("%.2fKB", bytes / 1024.0);
+        if (bytes < 1024 * 1024 * 1024) return String.format("%.2fMB", bytes / (1024.0 * 1024));
+        return String.format("%.2fGB", bytes / (1024.0 * 1024 * 1024));
     }
 }

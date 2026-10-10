@@ -14,7 +14,6 @@ import java.time.Instant;
 import java.io.File;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Random;
 
 /**
  * 系统监控服务
@@ -66,11 +65,15 @@ public class SystemMonitorService {
             if (osBean instanceof com.sun.management.OperatingSystemMXBean sunOsBean) {
                 double systemLoad = sunOsBean.getSystemLoadAverage();
                 cpuInfo.put("systemLoadAverage", systemLoad >= 0 ? systemLoad : -1);
-                
-                // CPU使用率（近似值）
+
+                // 整机CPU使用率（JDK14+ 的 getCpuLoad；不可用返回 -1）
+                double systemCpuUsage = sunOsBean.getCpuLoad() * 100;
+                cpuInfo.put("systemCpuUsage", systemCpuUsage >= 0 ? Math.round(systemCpuUsage * 100.0) / 100.0 : -1);
+
+                // JVM进程CPU使用率（近似值）
                 double cpuUsage = sunOsBean.getProcessCpuLoad() * 100;
                 cpuInfo.put("processCpuUsage", cpuUsage >= 0 ? Math.round(cpuUsage * 100.0) / 100.0 : -1);
-                
+
                 // JVM进程CPU时间
                 long processCpuTime = sunOsBean.getProcessCpuTime();
                 cpuInfo.put("processCpuTime", processCpuTime);
@@ -123,7 +126,19 @@ public class SystemMonitorService {
             
             double jvmUsage = (double) (totalMemory - freeMemory) / maxMemory * 100;
             memoryInfo.put("jvmUsagePercent", Math.round(jvmUsage * 100.0) / 100.0);
-            
+
+            // 整机物理内存（与 JVM 堆口径区分，供「系统资源」卡片使用）
+            if (osBean instanceof com.sun.management.OperatingSystemMXBean sunOsBean) {
+                long systemTotal = sunOsBean.getTotalMemorySize();
+                long systemFree = sunOsBean.getFreeMemorySize();
+                if (systemTotal > 0) {
+                    memoryInfo.put("systemTotal", formatBytes(systemTotal));
+                    memoryInfo.put("systemUsed", formatBytes(systemTotal - systemFree));
+                    double systemUsage = (double) (systemTotal - systemFree) / systemTotal * 100;
+                    memoryInfo.put("systemMemoryUsagePercent", Math.round(systemUsage * 100.0) / 100.0);
+                }
+            }
+
             memoryInfo.put("status", getMemoryStatus(memoryInfo));
         } catch (Exception e) {
             memoryInfo.put("status", "unknown");
@@ -241,8 +256,7 @@ public class SystemMonitorService {
         } catch (Exception e) {
             diskInfo.put("status", "unknown");
             diskInfo.put("error", e.getMessage());
-            // 返回估算值
-            diskInfo.put("usagePercent", 65.0 + new Random().nextDouble() * 20); // 65-85%
+            // 不返回任何估算值：宁缺毋假，监控页对缺省应显示未知而非随机数
         }
         
         return diskInfo;

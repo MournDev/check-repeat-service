@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.Random;
 import java.util.SortedMap;
 import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * 逐请求响应时间采集器（分钟桶环形缓冲）
@@ -46,16 +47,50 @@ public class ResponseTimeStore {
     private volatile long lastEvictedMinute = -1L;
 
     /**
+     * 进程启动以来的全局累计：请求总数、5xx 错误数、总耗时。
+     * 供 /api/admin/monitor/overview 与 /api/admin/monitor/application 的
+     * totalRequests / avgResponseTime / errorRate 使用。
+     * 与分钟桶同理：只存在内存，进程重启即清零（语义=「本次启动以来」）。
+     */
+    private final AtomicLong totalRequests = new AtomicLong();
+    private final AtomicLong totalErrors = new AtomicLong();
+    private final AtomicLong totalDurationMs = new AtomicLong();
+
+    /**
      * 记录一次请求耗时
      *
      * @param durationMs 耗时（毫秒）
-     * @param status     HTTP 状态码（当前仅用于未来的错误率统计，桶里不做区分）
+     * @param status     HTTP 状态码（用于全局错误率统计，桶里不做区分）
      */
     public void record(long durationMs, int status) {
+        totalRequests.incrementAndGet();
+        totalDurationMs.addAndGet(Math.max(0L, durationMs));
+        if (status >= 500) {
+            totalErrors.incrementAndGet();
+        }
         long minute = currentMinute();
         MinuteBucket bucket = buckets.computeIfAbsent(minute, k -> new MinuteBucket(properties.getMaxSamplesPerBucket()));
         bucket.add(durationMs);
         maybeEvict(minute);
+    }
+
+    /**
+     * 进程启动以来的全局统计快照。
+     *
+     * @return {totalRequests, avgResponseTime(ms), errorRate(%, 两位小数)}
+     */
+    public Map<String, Object> globalStats() {
+        long total = totalRequests.get();
+        long errors = totalErrors.get();
+        long duration = totalDurationMs.get();
+
+        Map<String, Object> stats = new LinkedHashMap<>();
+        stats.put("totalRequests", total);
+        stats.put("avgResponseTime", total > 0 ? duration / total : 0L);
+        stats.put("errorRate", total > 0
+                ? Math.round(errors * 10000.0 / total) / 100.0
+                : 0.0);
+        return stats;
     }
 
     /**

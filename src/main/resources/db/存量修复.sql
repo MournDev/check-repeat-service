@@ -34,6 +34,10 @@
 --   · 权限守护栏（新版后端）依赖 sys_role.role_code 唯一 —— 跑 1.13 段
 --     （重复编码去重、已软删角色改码腾位、建唯一索引；可重复执行）。建议
 --     「先跑 1.13，再部署后端」：新版 deleteRole 软删时会改码，和本段配合。
+--   · SystemMonitoring 性能趋势图无数据、日志每分钟报
+--     Table 'system_metric_minute' doesn't exist —— 跑 1.14 段（建表，
+--     CREATE TABLE IF NOT EXISTS，可重复执行）。采样写入失败只打 warn 不崩，
+--     但缺表时趋势图永远没有数据。必须是「先跑 1.14，再部署后端」。
 --
 -- 执行方式：**先跑「0. 自检」**看清哪些已经到位，然后按 1 → 4 顺序执行，
 --           最后跑「5. 执行后自检」。
@@ -937,6 +941,33 @@ UPDATE sys_role
 ALTER TABLE `sys_role` ADD UNIQUE INDEX `uk_role_code` (`role_code`);
 
 -- ============================================================================
+-- 段 1.14：system_metric_minute 系统资源指标分钟表（SystemMonitoring 性能趋势图配套）
+--
+-- 背景：/api/admin/monitoring/performance 的 1h/24h/7d 趋势数据由
+--   ResourceMetricsService 每分钟采样写入本表。旧版后端用 Random 伪造历史曲线，
+--   新版改为真实采样落库，故本表是新版趋势图的唯一数据源。
+--   DDL 与 init.sql 逐字一致；CREATE TABLE IF NOT EXISTS，可重复执行。
+--   部署顺序：先跑本段，再部署新 jar。
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS `system_metric_minute` (
+  `id`             bigint   NOT NULL                                    COMMENT '主键ID（雪花ID，由业务代码生成，非自增）',
+  `metric_time`    datetime NOT NULL                                    COMMENT '指标时间（分钟精度，秒置零）',
+  `cpu_usage`      double   DEFAULT NULL                                COMMENT '整机CPU使用率%',
+  `jvm_cpu_usage`  double   DEFAULT NULL                                COMMENT 'JVM进程CPU使用率%',
+  `memory_usage`   double   DEFAULT NULL                                COMMENT '整机物理内存使用率%',
+  `jvm_heap_usage` double   DEFAULT NULL                                COMMENT 'JVM堆内存使用率%',
+  `disk_usage`     double   DEFAULT NULL                                COMMENT '磁盘使用率%（jar所在分区）',
+  `db_pool_usage`  double   DEFAULT NULL                                COMMENT '数据库连接池使用率%',
+  `db_active_conn` int      DEFAULT NULL                                COMMENT '数据库活跃连接数',
+  `create_time`    datetime NOT NULL DEFAULT CURRENT_TIMESTAMP          COMMENT '创建时间',
+  `update_time`    datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted`     tinyint  NOT NULL DEFAULT 0                          COMMENT '软删除标记(0-未删除,1-已删除)',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_metric_time` (`metric_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='系统资源指标分钟表';
+
+-- ============================================================================
 -- 段 2：similarity_threshold 系列表的 is_deleted 历史 NULL 归零
 --
 -- 背景：category_similarity_threshold.is_deleted 在 init.sql 里一度是 DEFAULT NULL，
@@ -1207,6 +1238,11 @@ SELECT (SELECT COUNT(*) FROM information_schema.TABLES
        (SELECT COUNT(DISTINCT INDEX_NAME) FROM information_schema.STATISTICS
          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'category_similarity_threshold'
            AND INDEX_NAME IN ('idx_type_college','idx_type_major'))                        AS threshold_indexes;
+
+-- 5.6b 段 1.14 执行后：期望 1
+SELECT COUNT(*) AS has_system_metric_minute
+  FROM information_schema.TABLES
+ WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'system_metric_minute';
 
 -- 5.7 段 1.10 学科领域重构执行后（和 0.7 对照）
 --     期望：has_subject_tables=3 / subject_cols=2 / subject_level1=10 / subject_level2=90

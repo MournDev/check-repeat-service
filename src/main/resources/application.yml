@@ -191,6 +191,11 @@ monitoring:
     window-minutes: 60
     # 每个分钟桶最多保留的原始耗时样本数（蓄水池采样上限），防止流量尖峰打满堆
     max-samples-per-bucket: 10000
+  # 资源指标分钟采样（供 /api/admin/monitoring/performance 的 1h/24h/7d 趋势）
+  # 落库到 system_metric_minute，重启后历史保留
+  resource-metrics:
+    # 数据保留天数，每日 03:40 物理清理更早的数据
+    retention-days: 30
 
 # 报告模块配置
 report:

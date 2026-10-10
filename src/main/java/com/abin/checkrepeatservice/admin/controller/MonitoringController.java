@@ -3,6 +3,7 @@ package com.abin.checkrepeatservice.admin.controller;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.monitor.service.BusinessMetricsService;
+import com.abin.checkrepeatservice.monitor.service.ResourceMetricsService;
 import com.abin.checkrepeatservice.monitor.service.ResponseTimeStore;
 import com.abin.checkrepeatservice.monitor.service.SystemMonitorService;
 import com.abin.checkrepeatservice.monitor.service.DatabaseMonitorService;
@@ -13,8 +14,6 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.annotation.Resource;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 /**
@@ -40,44 +39,48 @@ public class MonitoringController {
     @Resource
     private ResponseTimeStore responseTimeStore;
 
+    @Resource
+    private ResourceMetricsService resourceMetricsService;
+
     /**
-     * 获取系统性能监控数据
-     * 支持CPU、内存、磁盘、数据库等指标
+     * 获取系统性能监控数据（历史趋势）
+     *
+     * 数据来自 system_metric_minute 分钟采样表（ResourceMetricsService 每分钟落一行），
+     * 重启后历史保留。无样本的时间桶补 null，前端显示为断点——宁缺毋假。
+     *
+     * @param metric cpu/memory/disk/database/all，控制返回哪些序列
+     * @param period 1h（12点/5分钟均值）、24h（24点/小时均值）、7d（7点/日均值）
      */
     @GetMapping("/performance")
-    @Operation(summary = "系统性能监控", description = "获取CPU、内存、磁盘、数据库等实时性能数据")
+    @Operation(summary = "系统性能监控", description = "获取CPU、内存、磁盘、数据库等历史性能趋势（分钟采样落库）")
     public Result<Map<String, Object>> getPerformanceData(
             @RequestParam(defaultValue = "all") String metric,
             @RequestParam(defaultValue = "1h") String period) {
-        
+
         log.info("接收获取系统性能监控数据请求: metric={}, period={}", metric, period);
-        
+
         try {
-            Map<String, Object> data = new HashMap<>();
-            
-            // 获取真实的系统监控数据
+            Map<String, Object> trend = resourceMetricsService.getPerformanceTrend(period);
+
+            // 按 metric 过滤序列，timestamps 始终保留
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("timestamps", trend.get("timestamps"));
             switch (metric.toLowerCase()) {
-                case "cpu":
-                    data.putAll(getCpuPerformanceData(period));
-                    break;
-                case "memory":
-                    data.putAll(getMemoryPerformanceData(period));
-                    break;
-                case "disk":
-                    data.putAll(getDiskPerformanceData(period));
-                    break;
-                case "database":
-                    data.putAll(getDatabasePerformanceData(period));
-                    break;
-                case "all":
-                default:
-                    data.putAll(getAllPerformanceData(period));
-                    break;
+                case "cpu" -> data.put("cpuUsage", trend.get("cpuUsage"));
+                case "memory" -> data.put("memoryUsage", trend.get("memoryUsage"));
+                case "disk" -> data.put("diskUsage", trend.get("diskUsage"));
+                case "database" -> data.put("dbConnections", trend.get("dbConnections"));
+                default -> {
+                    data.put("cpuUsage", trend.get("cpuUsage"));
+                    data.put("memoryUsage", trend.get("memoryUsage"));
+                    data.put("diskUsage", trend.get("diskUsage"));
+                    data.put("dbConnections", trend.get("dbConnections"));
+                }
             }
-            
+
             log.info("系统性能监控数据获取成功");
             return Result.success("系统性能监控数据获取成功", data);
-            
+
         } catch (Exception e) {
             log.error("获取系统性能监控数据失败: {}", e.getMessage(), e);
             return Result.error(ResultCode.SYSTEM_ERROR, "获取系统性能监控数据失败: " + e.getMessage());
@@ -85,75 +88,58 @@ public class MonitoringController {
     }
 
     /**
-     * 获取当前资源使用率
-     * 返回实时的CPU、内存、磁盘使用情况
+     * 获取当前资源使用率（瞬时快照）
+     *
+     * 口径说明：cpuUsage / memoryUsage 是【操作系统整机】口径（与页面「系统资源」语义一致）；
+     * jvmCpuUsage / jvmHeapUsage 额外返回 JVM 进程口径。diskUsage 为 jar 所在分区。
+     * 某项采集不到时该字段缺省，不返回估算值。
      */
     @GetMapping("/resources")
-    @Operation(summary = "当前资源使用率", description = "获取当前实时的系统资源使用率")
+    @Operation(summary = "当前资源使用率", description = "获取当前实时的系统资源使用率（整机口径）")
     public Result<Map<String, Object>> getResourceUsage() {
         log.info("接收获取当前资源使用率请求");
-        
+
         try {
             Map<String, Object> resources = new HashMap<>();
-            
-            // 获取真实的系统状态
+
             var systemStatus = systemMonitorService.getSystemStatus();
             if (systemStatus.isSuccess()) {
                 Map<String, Object> statusData = (Map<String, Object>) systemStatus.getData();
-                
-                // CPU使用率
+
+                // CPU：整机口径 + JVM 进程口径
                 Map<String, Object> cpuInfo = (Map<String, Object>) statusData.get("cpu");
                 if (cpuInfo != null) {
-                    Double cpuUsage = (Double) cpuInfo.get("processCpuUsage");
-                    if (cpuUsage != null && cpuUsage >= 0) {
-                        resources.put("cpuUsage", Math.round(cpuUsage * 100.0) / 100.0);
-                    }
+                    putIfNonNegative(resources, "cpuUsage", (Double) cpuInfo.get("systemCpuUsage"));
+                    putIfNonNegative(resources, "jvmCpuUsage", (Double) cpuInfo.get("processCpuUsage"));
                 }
-                
-                // 内存使用率
+
+                // 内存：整机物理内存口径 + JVM 堆口径
                 Map<String, Object> memoryInfo = (Map<String, Object>) statusData.get("memory");
                 if (memoryInfo != null) {
-                    Double heapUsage = (Double) memoryInfo.get("heapUsagePercent");
-                    if (heapUsage != null) {
-                        resources.put("memoryUsage", Math.round(heapUsage * 100.0) / 100.0);
-                    }
+                    putIfNonNegative(resources, "memoryUsage", (Double) memoryInfo.get("systemMemoryUsagePercent"));
+                    putIfNonNegative(resources, "jvmHeapUsage", (Double) memoryInfo.get("heapUsagePercent"));
                 }
-                
-                // 磁盘使用率（如果系统提供）
+
+                // 磁盘使用率
                 Map<String, Object> diskInfo = (Map<String, Object>) statusData.get("disk");
                 if (diskInfo != null) {
-                    Double diskUsage = (Double) diskInfo.get("usagePercent");
-                    if (diskUsage != null) {
-                        resources.put("diskUsage", Math.round(diskUsage * 100.0) / 100.0);
-                    }
-                }
-                
-                // 线程数（作为连接数参考）
-                Map<String, Object> threadInfo = (Map<String, Object>) statusData.get("threads");
-                if (threadInfo != null) {
-                    Integer threadCount = (Integer) threadInfo.get("threadCount");
-                    if (threadCount != null) {
-                        resources.put("connections", threadCount);
-                    }
+                    putIfNonNegative(resources, "diskUsage", (Double) diskInfo.get("usagePercent"));
                 }
             }
-            
-            // 获取数据库连接池使用率
+
+            // 数据库连接池使用率
             var dbStatus = databaseMonitorService.getDatabaseStatus();
             if (dbStatus.isSuccess()) {
                 Map<String, Object> dbData = (Map<String, Object>) dbStatus.getData();
-                Map<String, Object> poolInfo = (Map<String, Object>) dbData.get("connectionPool");
-                if (poolInfo != null) {
-                    Double usageRate = (Double) poolInfo.get("usageRate");
-                    if (usageRate != null) {
-                        resources.put("dbPoolUsage", Math.round(usageRate * 100.0) / 100.0);
-                    }
+                Double usageRate = (Double) dbData.get("poolUsageRate");
+                if (usageRate != null) {
+                    resources.put("dbPoolUsage", usageRate);
                 }
             }
-            
+
             log.info("当前资源使用率获取成功");
             return Result.success("当前资源使用率获取成功", resources);
-            
+
         } catch (Exception e) {
             log.error("获取当前资源使用率失败: {}", e.getMessage(), e);
             return Result.error(ResultCode.SYSTEM_ERROR, "获取当前资源使用率失败: " + e.getMessage());
@@ -254,201 +240,12 @@ public class MonitoringController {
         }
     }
 
-    // ===== 私有辅助方法 =====
-
     /**
-     * 获取CPU性能数据
+     * 采集语义里 -1 / null 表示"不可用"（JMX 约定），此时字段缺省，不下发假值
      */
-    private Map<String, Object> getCpuPerformanceData(String period) {
-        Map<String, Object> data = new HashMap<>();
-        List<Double> cpuUsages = new ArrayList<>();
-        List<String> timestamps = new ArrayList<>();
-        
-        try {
-            // 获取当前CPU使用率作为基准
-            var systemStatus = systemMonitorService.getSystemStatus();
-            if (systemStatus.isSuccess()) {
-                Map<String, Object> statusData = (Map<String, Object>) systemStatus.getData();
-                Map<String, Object> cpuInfo = (Map<String, Object>) statusData.get("cpu");
-                if (cpuInfo != null) {
-                    Double currentCpu = (Double) cpuInfo.get("processCpuUsage");
-                    if (currentCpu != null && currentCpu >= 0) {
-                        int pointCount = getPointCount(period);
-                        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("HH:mm");
-                        
-                        // 生成历史数据点（基于当前值波动）
-                        Random random = new Random();
-                        for (int i = 0; i < pointCount; i++) {
-                            // 在当前值基础上±10%的波动
-                            double fluctuation = (random.nextDouble() - 0.5) * 0.2; // ±10%
-                            double usage = Math.max(0, Math.min(100, currentCpu * (1 + fluctuation)));
-                            cpuUsages.add(Math.round(usage * 100.0) / 100.0);
-                            
-                            // 时间戳
-                            LocalDateTime timePoint = LocalDateTime.now().minusMinutes((pointCount - i - 1) * getIntervalMinutes(period));
-                            timestamps.add(timePoint.format(formatter));
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) {
-            log.warn("获取CPU性能数据失败: {}", e.getMessage());
-        }
-        
-        data.put("cpuUsage", cpuUsages);
-        data.put("timestamps", timestamps);
-        return data;
-    }
-
-    /**
-     * 获取内存性能数据
-     */
-    private Map<String, Object> getMemoryPerformanceData(String period) {
-        Map<String, Object> data = new HashMap<>();
-        List<Double> memoryUsages = new ArrayList<>();
-        List<String> timestamps = new ArrayList<>();
-        
-        try {
-            var systemStatus = systemMonitorService.getSystemStatus();
-            if (systemStatus.isSuccess()) {
-                Map<String, Object> statusData = (Map<String, Object>) systemStatus.getData();
-                Map<String, Object> memoryInfo = (Map<String, Object>) statusData.get("memory");
-                if (memoryInfo != null) {
-                    Double currentMemory = (Double) memoryInfo.get("heapUsagePercent");
-                    if (currentMemory != null) {
-                        int pointCount = getPointCount(period);
-                        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("HH:mm");
-                        
-                        Random random = new Random();
-                        for (int i = 0; i < pointCount; i++) {
-                            double fluctuation = (random.nextDouble() - 0.5) * 0.15; // ±7.5%
-                            double usage = Math.max(0, Math.min(100, currentMemory * (1 + fluctuation)));
-                            memoryUsages.add(Math.round(usage * 100.0) / 100.0);
-                            
-                            LocalDateTime timePoint = LocalDateTime.now().minusMinutes((pointCount - i - 1) * getIntervalMinutes(period));
-                            timestamps.add(timePoint.format(formatter));
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) {
-            log.warn("获取内存性能数据失败: {}", e.getMessage());
-        }
-        
-        data.put("memoryUsage", memoryUsages);
-        data.put("timestamps", timestamps);
-        return data;
-    }
-
-    /**
-     * 获取磁盘性能数据
-     */
-    private Map<String, Object> getDiskPerformanceData(String period) {
-        Map<String, Object> data = new HashMap<>();
-        List<Double> diskUsages = new ArrayList<>();
-        List<String> timestamps = new ArrayList<>();
-        
-        // 磁盘使用率通常比较稳定，这里使用估算值
-        try {
-            int pointCount = getPointCount(period);
-            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("HH:mm");
-            Random random = new Random();
-            
-            // 假设磁盘使用率为65%左右
-            double baseUsage = 65.0;
-            for (int i = 0; i < pointCount; i++) {
-                double fluctuation = (random.nextDouble() - 0.5) * 0.1; // ±5%
-                double usage = Math.max(0, Math.min(100, baseUsage * (1 + fluctuation)));
-                diskUsages.add(Math.round(usage * 100.0) / 100.0);
-                
-                LocalDateTime timePoint = LocalDateTime.now().minusMinutes((pointCount - i - 1) * getIntervalMinutes(period));
-                timestamps.add(timePoint.format(formatter));
-            }
-        } catch (Exception e) {
-            log.warn("获取磁盘性能数据失败: {}", e.getMessage());
-        }
-        
-        data.put("diskUsage", diskUsages);
-        data.put("timestamps", timestamps);
-        return data;
-    }
-
-    /**
-     * 获取数据库性能数据
-     */
-    private Map<String, Object> getDatabasePerformanceData(String period) {
-        Map<String, Object> data = new HashMap<>();
-        List<Integer> dbConnections = new ArrayList<>();
-        List<String> timestamps = new ArrayList<>();
-        
-        try {
-            var dbStatus = databaseMonitorService.getDatabaseStatus();
-            if (dbStatus.isSuccess()) {
-                Map<String, Object> dbData = (Map<String, Object>) dbStatus.getData();
-                Map<String, Object> poolInfo = (Map<String, Object>) dbData.get("connectionPool");
-                if (poolInfo != null) {
-                    Integer currentConnections = (Integer) poolInfo.get("activeConnections");
-                    if (currentConnections != null) {
-                        int pointCount = getPointCount(period);
-                        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("HH:mm");
-                        
-                        Random random = new Random();
-                        for (int i = 0; i < pointCount; i++) {
-                            // 在当前连接数基础上±20%波动
-                            int fluctuation = (int) ((random.nextDouble() - 0.5) * currentConnections * 0.4);
-                            int connections = Math.max(0, currentConnections + fluctuation);
-                            dbConnections.add(connections);
-                            
-                            LocalDateTime timePoint = LocalDateTime.now().minusMinutes((pointCount - i - 1) * getIntervalMinutes(period));
-                            timestamps.add(timePoint.format(formatter));
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) {
-            log.warn("获取数据库性能数据失败: {}", e.getMessage());
-        }
-        
-        data.put("dbConnections", dbConnections);
-        data.put("timestamps", timestamps);
-        return data;
-    }
-
-    /**
-     * 获取所有性能数据
-     */
-    private Map<String, Object> getAllPerformanceData(String period) {
-        Map<String, Object> data = new HashMap<>();
-        
-        data.putAll(getCpuPerformanceData(period));
-        data.putAll(getMemoryPerformanceData(period));
-        data.putAll(getDiskPerformanceData(period));
-        data.putAll(getDatabasePerformanceData(period));
-        
-        return data;
-    }
-
-    /**
-     * 根据时间段获取数据点数量
-     */
-    private int getPointCount(String period) {
-        switch (period.toLowerCase()) {
-            case "1h": return 12;  // 每5分钟一个点
-            case "24h": return 24; // 每小时一个点
-            case "7d": return 7;   // 每天一个点
-            default: return 12;
-        }
-    }
-
-    /**
-     * 根据时间段获取间隔分钟数
-     */
-    private int getIntervalMinutes(String period) {
-        switch (period.toLowerCase()) {
-            case "1h": return 5;   // 5分钟
-            case "24h": return 60; // 1小时
-            case "7d": return 1440; // 1天
-            default: return 5;
+    private void putIfNonNegative(Map<String, Object> target, String key, Double value) {
+        if (value != null && value >= 0) {
+            target.put(key, value);
         }
     }
 }

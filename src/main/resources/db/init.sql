@@ -1853,6 +1853,39 @@ CREATE TABLE `metric_event_daily` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `system_metric_minute`
+--
+-- 系统资源指标分钟表：给 SystemMonitoring 的性能趋势图
+-- （GET /api/admin/monitoring/performance，period=1h/24h/7d）供数。
+-- ResourceMetricsService 每分钟采样一行（metric_time 秒置零），
+-- uk_metric_time + upsert 保证同一分钟只有一行。每分钟一行，30 天约 4.3 万行，
+-- 由 ResourceMetricsService 每日清理 retention-days 之前的数据。
+-- 对已有数据的库（本表可能还不存在）请改用 db/存量修复.sql 段 1.14，
+-- 那段是 CREATE TABLE IF NOT EXISTS，可重复执行。
+--
+
+DROP TABLE IF EXISTS `system_metric_minute`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `system_metric_minute` (
+  `id`             bigint   NOT NULL                                    COMMENT '主键ID（雪花ID，由业务代码生成，非自增）',
+  `metric_time`    datetime NOT NULL                                    COMMENT '指标时间（分钟精度，秒置零）',
+  `cpu_usage`      double   DEFAULT NULL                                COMMENT '整机CPU使用率%',
+  `jvm_cpu_usage`  double   DEFAULT NULL                                COMMENT 'JVM进程CPU使用率%',
+  `memory_usage`   double   DEFAULT NULL                                COMMENT '整机物理内存使用率%',
+  `jvm_heap_usage` double   DEFAULT NULL                                COMMENT 'JVM堆内存使用率%',
+  `disk_usage`     double   DEFAULT NULL                                COMMENT '磁盘使用率%（jar所在分区）',
+  `db_pool_usage`  double   DEFAULT NULL                                COMMENT '数据库连接池使用率%',
+  `db_active_conn` int      DEFAULT NULL                                COMMENT '数据库活跃连接数',
+  `create_time`    datetime NOT NULL DEFAULT CURRENT_TIMESTAMP          COMMENT '创建时间',
+  `update_time`    datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted`     tinyint  NOT NULL DEFAULT 0                          COMMENT '软删除标记(0-未删除,1-已删除)',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_metric_time` (`metric_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='系统资源指标分钟表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Table structure for table `student_group`
 --
 
