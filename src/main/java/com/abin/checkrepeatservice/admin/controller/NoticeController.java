@@ -253,36 +253,6 @@ public class NoticeController {
         }
     }
 
-    // ==================== 测试 ====================
-
-    /**
-     * 发送一条测试通知给当前管理员（同步插入，前端刷新即可见）
-     */
-    @PostMapping("/test")
-    public Result<SysNotice> sendTestNotice() {
-        try {
-            Long userId = UserBusinessInfoUtils.getCurrentUserId();
-            return Result.success("测试通知发送成功", sysNoticeService.createTestNotice(userId, 0));
-        } catch (Exception e) {
-            log.error("发送测试通知失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "发送测试通知失败: " + e.getMessage());
-        }
-    }
-
-    /**
-     * 发送一条紧急优先级的测试通知（priority = 2，会同时体现在「紧急通知」统计里）
-     */
-    @PostMapping("/test-priority")
-    public Result<SysNotice> sendTestNoticeWithPriority() {
-        try {
-            Long userId = UserBusinessInfoUtils.getCurrentUserId();
-            return Result.success("紧急测试通知发送成功", sysNoticeService.createTestNotice(userId, 2));
-        } catch (Exception e) {
-            log.error("发送紧急测试通知失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "发送紧急测试通知失败: " + e.getMessage());
-        }
-    }
-
     // ==================== 内部工具 ====================
 
     /**

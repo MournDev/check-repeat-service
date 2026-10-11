@@ -115,12 +115,4 @@ public interface SysNoticeService extends IService<SysNotice> {
      * @return 实际影响行数
      */
     Integer clearAllNotices(Long userId);
-
-    /**
-     * 给当前用户插入一条测试通知（同步插入，便于前端拿到 200 后立刻刷新到数据）
-     * @param userId 当前用户ID
-     * @param priority 优先级：0-普通，2-紧急（null 视为 0）
-     * @return 插入后的实体（含生成的 id 与 createTime）
-     */
-    SysNotice createTestNotice(Long userId, Integer priority);
 }

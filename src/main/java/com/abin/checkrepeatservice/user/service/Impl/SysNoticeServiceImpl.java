@@ -211,31 +211,6 @@ public class SysNoticeServiceImpl extends ServiceImpl<SysNoticeMapper, SysNotice
         return sysNoticeMapper.delete(wrapper);
     }
 
-    // ------------------------------ 测试通知 ------------------------------
-
-    @Override
-    public SysNotice createTestNotice(Long userId, Integer priority) {
-        int effectivePriority = (priority == null) ? 0 : priority;
-        boolean urgent = effectivePriority == 2;
-
-        SysNotice notice = new SysNotice();
-        notice.setUserId(userId);
-        notice.setNoticeType(5); // 5 = 系统通知（与前端 NOTICE_TYPES 对应）
-        notice.setNoticeTitle(urgent ? "【测试】紧急通知" : "【测试】普通通知");
-        notice.setNoticeContent(urgent
-                ? "这是一条紧急优先级的测试通知，由管理端「通知管理」页手动触发。"
-                : "这是一条普通优先级的测试通知，由管理端「通知管理」页手动触发。");
-        notice.setIsRead(0);
-        notice.setPriority(effectivePriority);
-        notice.setIsDeleted(0);
-
-        // 同步插入（不走 sendNotice）：前端拿到 200 后会立刻 fetchList()+fetchStats()，
-        // 异步插入会变成「提示成功但列表是空的」这种竞态
-        this.save(notice);
-        log.info("测试通知写入成功：userId={}, noticeId={}, priority={}", userId, notice.getId(), effectivePriority);
-        return notice;
-    }
-
     // ------------------------------ 内部工具 ------------------------------
 
     /**
