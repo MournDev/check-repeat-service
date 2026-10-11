@@ -2,6 +2,7 @@ package com.abin.checkrepeatservice.admin.service.Impl;
 
 import com.abin.checkrepeatservice.admin.mapper.CheckResultMapper;
 import com.abin.checkrepeatservice.admin.service.AdminDashboardService;
+import com.abin.checkrepeatservice.admin.service.SysBackupService;
 import com.abin.checkrepeatservice.admin.vo.CollegePaperStatsVO;
 import com.abin.checkrepeatservice.admin.vo.MajorPaperStatsVO;
 import com.abin.checkrepeatservice.common.Result;
@@ -11,6 +12,7 @@ import com.abin.checkrepeatservice.monitor.service.DatabaseMonitorService;
 import com.abin.checkrepeatservice.monitor.service.SystemMonitorService;
 import com.abin.checkrepeatservice.pojo.entity.CheckResult;
 import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
+import com.abin.checkrepeatservice.pojo.entity.SysBackupLog;
 import com.abin.checkrepeatservice.pojo.entity.SysLoginLog;
 import com.abin.checkrepeatservice.pojo.entity.SysUser;
 import com.abin.checkrepeatservice.user.mapper.SysLoginLogMapper;
@@ -50,6 +52,9 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
     
     @Resource
     private DatabaseMonitorService databaseMonitorService;
+
+    @Resource
+    private SysBackupService sysBackupService;
 
     @Override
     public Result<Map<String, Object>> getSystemStats() {
@@ -172,7 +177,20 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
             // 7. 系统监控信息
             Map<String, Object> systemMonitor = getSystemMonitorInfo();
             stats.put("systemMonitor", systemMonitor);
-            
+
+            // 7.1 今日访问：仪表盘"今日访问"卡片读顶层 todayVisits，语义取今日登录日志条数
+            // （此前接口未输出该字段，前端恒显示 0）
+            Long todayVisits = sysLoginLogMapper.selectCount(new LambdaQueryWrapper<SysLoginLog>()
+                    .ge(SysLoginLog::getLoginTime, todayStart));
+            stats.put("todayVisits", todayVisits);
+
+            // 7.2 最后备份时间：取 sys_backup_log 最新一条（含失败记录，备份页本身也展示全部记录）。
+            // 无任何备份记录时不放该字段，前端兜底显示"暂无"。
+            SysBackupLog lastBackup = sysBackupService.getLastBackup();
+            if (lastBackup != null && lastBackup.getCreateTime() != null) {
+                stats.put("lastBackup", lastBackup.getCreateTime());
+            }
+
             // 8. 日志审计统计
             Map<String, Object> auditStats = getAuditStatistics();
             stats.put("auditStats", auditStats);
@@ -413,8 +431,31 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
                     if (uptime != null) {
                         monitorInfo.put("uptime", uptime);
                     }
+                    // Java 版本：SystemMonitorService 在同一 runtime map 里已提供 javaVersion，
+                    // 此前这里只取了 uptime，前端"系统版本"因此恒显示"未知"
+                    Object javaVersion = runtimeInfo.get("javaVersion");
+                    if (javaVersion != null) {
+                        monitorInfo.put("javaVersion", javaVersion);
+                    }
                 }
-                
+
+                // 数据库类型/版本：DatabaseMonitorService 从 JDBC metadata 取 productName/version。
+                // 独立 try/catch —— 取库信息失败不能拖垮其余监控项，留空让前端兜底"未知"。
+                try {
+                    Map<String, Object> dbStatus = databaseMonitorService.getDatabaseStatus().getData();
+                    if (dbStatus != null) {
+                        Map<String, Object> dbInfo = (Map<String, Object>) dbStatus.get("databaseInfo");
+                        if (dbInfo != null && dbInfo.get("productName") != null) {
+                            String productName = (String) dbInfo.get("productName");
+                            String productVersion = (String) dbInfo.get("productVersion");
+                            monitorInfo.put("databaseType",
+                                    productVersion != null ? productName + " " + productVersion : productName);
+                        }
+                    }
+                } catch (Exception dbEx) {
+                    log.warn("获取数据库类型失败: {}", dbEx.getMessage());
+                }
+
                 // 健康度评分
                 Integer healthScore = (Integer) systemStatus.get("healthScore");
                 if (healthScore != null) {
