@@ -120,7 +120,9 @@ check:
       dic-path: classpath:dic/
   local:
     enabled: true
+    # 引擎比对时是否走检测缓存（DetectionCacheService，缓存库内论文分词+SimHash）
     cache-enabled: true
+    # ttl 缓存策略的条目过期时间（小时），策略切换为 ttl 时生效
     cache-expire-hours: 24
   third-party:
     enabled: false
@@ -274,16 +276,17 @@ backup:
 
 # 定时任务开关
 # 本应用此前**没有** @EnableScheduling，因此下面这些 @Scheduled 方法虽然写了，
-# 却从未执行过。补上注解后它们会立刻生效，其中两个会按库里的历史数据改数据：
+# 却从未执行过。补上注解后它们会立刻生效，其中超时扫描会按库里的历史数据改数据：
 # 与其让"上线"成为它们第一次运行，不如默认关闭，确认过输出再逐个打开。
 # （AutoBackupScheduler 不在这里，它由 system_param.backup_enabled 控制，
-#   也就是「系统配置」页上的那个开关。）
+#   也就是「系统配置」页上的那个开关。查重任务清理则由「性能配置」驱动。）
 schedule:
   check-task:
     # 把 check_status='checking' 且已超 1 小时的任务标记为失败 —— 会写库
     timeout-scan-enabled: false
-    # 清理 30 天前的已完成/失败/取消任务 —— 当前实现只打日志，未真删
-    cleanup-enabled: false
+    # 旧任务清理已改由「性能配置」页（system_config 表 performance 键的
+    # autoCleanup/cleanupInterval）动态驱动：软删除 30 天前的终态任务，
+    # 保存即生效，无需此开关。
   data-integrity:
     # 每天 3:00 校验并修复一致性：插入查重结果、改写论文重复率与完成标记 —— 会写库
     enabled: false

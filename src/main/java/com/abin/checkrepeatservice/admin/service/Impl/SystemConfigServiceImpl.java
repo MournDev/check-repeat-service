@@ -4,11 +4,14 @@ import com.abin.checkrepeatservice.admin.dto.PerformanceConfigDTO;
 import com.abin.checkrepeatservice.admin.mapper.SystemConfigMapper;
 import com.abin.checkrepeatservice.admin.service.SystemConfigService;
 import com.abin.checkrepeatservice.common.Result;
+import com.abin.checkrepeatservice.common.cache.DetectionCacheService;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.pojo.entity.SystemConfig;
 import com.alibaba.fastjson.JSON;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,9 +26,24 @@ import java.util.Map;
 @Slf4j
 @Service
 public class SystemConfigServiceImpl implements SystemConfigService {
-    
+
     @Autowired
     private SystemConfigMapper systemConfigMapper;
+
+    /**
+     * 查重任务线程池（AsyncConfig.checkTaskExecutor）。
+     * 最大并发数（maxConcurrent）保存后即时热更新到该池，无需重启。
+     */
+    @Autowired
+    @Qualifier("checkTaskExecutor")
+    private ThreadPoolTaskExecutor checkTaskExecutor;
+
+    /**
+     * 查重检测缓存（LocalCheckEngine 比对语料的分词文本+SimHash 缓存）。
+     * cacheStrategy/cacheSize 保存后调用 reconfigure 热更新，运行期即时生效。
+     */
+    @Autowired
+    private DetectionCacheService detectionCacheService;
     
     // 配置键常量
     private static final String PERFORMANCE_CONFIG_KEY = "performance";
@@ -97,22 +115,26 @@ public class SystemConfigServiceImpl implements SystemConfigService {
     public void applyPerformanceConfig(PerformanceConfigDTO config) {
         try {
             log.info("开始应用性能配置: {}", config);
-            
-            // 这里可以集成实际的系统组件来应用配置
-            // 示例：更新线程池配置
+
+            // 1. 最大并发数 → 查重线程池热更新（运行时即时生效，无需重启）
             updateThreadPoolConfig(config.getMaxConcurrent());
-            
-            // 示例：更新队列大小
-            updateQueueSize(config.getQueueSize());
-            
-            // 示例：更新缓存策略
-            updateCacheStrategy(config.getCacheStrategy(), config.getCacheSize());
-            
-            // 示例：更新自动清理配置
-            updateAutoCleanup(config.getAutoCleanup(), config.getCleanupInterval());
-            
+
+            // 2. 队列大小：LinkedBlockingQueue 容量创建后不可变，JDK 线程池不支持运行时改队列容量，
+            //    只能持久化并由 AsyncConfig 在下次启动时读取生效
+            log.info("查重队列大小已持久化为: {}（队列容量运行期不可变，重启后生效）", config.getQueueSize());
+
+            // 3. 缓存策略/大小 → 查重检测缓存热更新（库内论文分词+SimHash 缓存，运行期即时生效），
+            //    LocalCheckEngine 比对时省掉 MinIO 读取与分词/SimHash 重算
+            detectionCacheService.reconfigure(config.getCacheStrategy(), config.getCacheSize());
+            log.info("检测缓存已热更新: 策略={}, 容量={}MB", config.getCacheStrategy(), config.getCacheSize());
+
+            // 4. 自动清理：CheckTaskScheduler.autoCleanupTick 每小时自检时实时读取
+            //    本配置（autoCleanup/cleanupInterval），保存即生效，无需推送
+            log.info("自动清理配置已存档: 开关={}, 周期={}小时（调度任务按此动态执行）",
+                    config.getAutoCleanup(), config.getCleanupInterval());
+
             log.info("性能配置应用完成");
-            
+
         } catch (Exception e) {
             log.error("应用性能配置失败: {}", e.getMessage(), e);
             // 不抛出异常，避免影响主流程
@@ -166,35 +188,27 @@ public class SystemConfigServiceImpl implements SystemConfigService {
     }
     
     /**
-     * 更新线程池配置（示例实现）
+     * 热更新查重线程池最大并发数。
+     * ThreadPoolTaskExecutor.setCorePoolSize/setMaxPoolSize 在运行期会同步到底层
+     * java.util.concurrent.ThreadPoolExecutor，对后续提交的任务立即生效。
+     * 调整顺序必须保证任意时刻 core <= max，否则 JVM 会抛 IllegalArgumentException。
      */
     private void updateThreadPoolConfig(Integer maxConcurrent) {
-        log.info("更新线程池最大并发数为: {}", maxConcurrent);
-        // 实际实现中这里会调用线程池管理器来更新配置
-    }
-    
-    /**
-     * 更新队列大小（示例实现）
-     */
-    private void updateQueueSize(Integer queueSize) {
-        log.info("更新查重队列大小为: {}", queueSize);
-        // 实际实现中这里会调用队列管理器来更新配置
-    }
-    
-    /**
-     * 更新缓存策略（示例实现）
-     */
-    private void updateCacheStrategy(String cacheStrategy, Integer cacheSize) {
-        log.info("更新缓存策略为: {}, 缓存大小: {}MB", cacheStrategy, cacheSize);
-        // 实际实现中这里会调用缓存管理器来更新配置
-    }
-    
-    /**
-     * 更新自动清理配置（示例实现）
-     */
-    private void updateAutoCleanup(Boolean autoCleanup, Integer cleanupInterval) {
-        log.info("更新自动清理配置: 开关={}, 周期={}小时", autoCleanup, cleanupInterval);
-        // 实际实现中这里会调用定时任务调度器来更新配置
+        if (maxConcurrent == null) {
+            return;
+        }
+        int newMax = Math.max(1, Math.min(100, maxConcurrent));
+        int currentCore = checkTaskExecutor.getCorePoolSize();
+        if (currentCore > newMax) {
+            // 收缩：先降 core 再降 max
+            checkTaskExecutor.setCorePoolSize(newMax);
+            checkTaskExecutor.setMaxPoolSize(newMax);
+        } else {
+            // 扩张或持平：先升 max（core 保持不动，仍 <= max）
+            checkTaskExecutor.setMaxPoolSize(newMax);
+        }
+        log.info("查重线程池已热更新: maxPoolSize={}, corePoolSize={}, queueCapacity={}(不可变)",
+                newMax, checkTaskExecutor.getCorePoolSize(), checkTaskExecutor.getQueueCapacity());
     }
     
     // ==================== 新增配置管理方法实现 ====================
