@@ -2,6 +2,7 @@ package com.abin.checkrepeatservice.admin.controller;
 
 import com.abin.checkrepeatservice.admin.mapper.CheckResultMapper;
 import com.abin.checkrepeatservice.admin.service.DataStatService;
+import com.abin.checkrepeatservice.monitor.service.SystemMonitorService;
 import com.abin.checkrepeatservice.admin.vo.CollegePaperStatsVO;
 import com.abin.checkrepeatservice.admin.vo.StatQueryReq;
 import com.abin.checkrepeatservice.common.Result;
@@ -46,6 +47,9 @@ public class AdminSchoolController {
     
     @Resource
     private SysLoginLogMapper sysLoginLogMapper;
+
+    @Resource
+    private SystemMonitorService systemMonitorService;
 
     /**
      * 获取学校概览数据
@@ -295,16 +299,25 @@ public class AdminSchoolController {
     }
     
     /**
-     * 从数据库获取系统负载信息
+     * 获取真实系统负载（整机CPU使用率，取自 SystemMonitorService，底层 MXBean 数据）。
+     * 取不到（JDK 不支持 getCpuLoad 等场景）退回 JVM 进程 CPU 使用率，再取不到返回 null，
+     * 让前端显示未知，绝不返回随机假数据。
      */
     private Integer getSystemLoadFromDatabase() {
         try {
-            // 这里可以根据实际情况查询系统参数表或其他监控表
-            // 暂时返回随机值作为示例
-            return new java.util.Random().nextInt(30) + 30; // 30-60之间的随机值
+            Map<String, Object> cpuInfo = systemMonitorService.getCpuInfo();
+            Object systemCpuUsage = cpuInfo.get("systemCpuUsage");
+            if (systemCpuUsage instanceof Number n && n.doubleValue() >= 0) {
+                return (int) Math.round(n.doubleValue());
+            }
+            Object processCpuUsage = cpuInfo.get("processCpuUsage");
+            if (processCpuUsage instanceof Number n && n.doubleValue() >= 0) {
+                return (int) Math.round(n.doubleValue());
+            }
+            return null;
         } catch (Exception e) {
-            log.warn("获取系统负载信息失败，使用默认值: {}", e.getMessage());
-            return 45; // 默认值
+            log.warn("获取系统负载信息失败: {}", e.getMessage());
+            return null;
         }
     }
 }
