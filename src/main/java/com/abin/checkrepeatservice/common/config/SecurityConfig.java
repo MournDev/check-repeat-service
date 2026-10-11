@@ -121,6 +121,9 @@ public class SecurityConfig {
                         // 否则 /ws/info 会直接 401。握手放行不等于免鉴权：
                         // STOMP CONNECT 帧仍由 WebSocketChannelInterceptor 校验 JWT，无有效 token 照样拒绝。
                         .requestMatchers("/api/auth/**", "/api/avatar/**", "/api/papers/**", "/api/file/**", "/api/minio/**", "/ws/**").permitAll()
+                        // 系统状态查询（维护模式开关+公告）：前端未登录也要能拉取，
+                        // 用于登录页/刷新时判断是否显示维护面板；且维护拦截器将其列入白名单
+                        .requestMatchers("/api/system/status").permitAll()
                         // 容器 healthcheck 与 deploy.sh 都用它做探活，必须匿名可访问
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         // Prometheus 抓取端点：限管理员。

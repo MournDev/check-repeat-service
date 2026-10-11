@@ -202,8 +202,7 @@ public class AdminRuleConfigController {
         defaultConfig.put("version", "v2.1.0");
         defaultConfig.put("defaultLanguage", "zh-CN");
         defaultConfig.put("timezone", "Asia/Shanghai");
-        defaultConfig.put("maintenanceMode", false);
-        defaultConfig.put("maintenanceNotice", "系统维护中，请稍后再试...");
+        // （maintenanceMode/maintenanceNotice 已废弃：维护模式唯一真值源是 system_param 表）
         return defaultConfig;
     }
     
@@ -495,13 +494,12 @@ public class AdminRuleConfigController {
     private void insertDefaultConfigs() {
         try {
             // 基础配置
+            // （不再写入 maintenanceMode/maintenanceNotice：维护模式唯一真值源是 system_param 表）
             Map<String, Object> basicConfig = new HashMap<>();
             basicConfig.put("systemName", "论文查重管理系统");
             basicConfig.put("version", "v2.1.0");
             basicConfig.put("defaultLanguage", "zh-CN");
             basicConfig.put("timezone", "Asia/Shanghai");
-            basicConfig.put("maintenanceMode", false);
-            basicConfig.put("maintenanceNotice", "系统维护中，请稍后再试...");
             saveConfig("system_basic", basicConfig, "系统基础配置");
             
             // 查重配置

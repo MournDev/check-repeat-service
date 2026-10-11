@@ -349,13 +349,13 @@ public class SystemConfigManagementController {
         }
         
         // 返回默认配置
+        // （maintenanceMode/maintenanceNotice 已废弃：维护模式唯一真值源是 system_param 表，
+        //   走 /api/system/status 与 PUT /api/admin/system/maintenance）
         Map<String, Object> defaultConfig = new HashMap<>();
         defaultConfig.put("systemName", "论文查重管理系统");
         defaultConfig.put("version", "v2.1.0");
         defaultConfig.put("defaultLanguage", "zh-CN");
         defaultConfig.put("timezone", "Asia/Shanghai");
-        defaultConfig.put("maintenanceMode", false);
-        defaultConfig.put("maintenanceNotice", "系统维护中，请稍后再试...");
         return defaultConfig;
     }
 
