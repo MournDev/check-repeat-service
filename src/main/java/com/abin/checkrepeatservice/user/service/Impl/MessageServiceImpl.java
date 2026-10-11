@@ -6,7 +6,9 @@ import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.common.websocket.WebSocketMessage;
 import com.abin.checkrepeatservice.common.websocket.WebSocketSender;
 import com.abin.checkrepeatservice.common.utils.TemplateRenderUtils;
+import com.abin.checkrepeatservice.mapper.SysUserMapper;
 import com.abin.checkrepeatservice.pojo.entity.MessageTemplate;
+import com.abin.checkrepeatservice.pojo.entity.SysUser;
 import com.abin.checkrepeatservice.pojo.entity.SystemMessage;
 import com.abin.checkrepeatservice.user.dto.MessageSendDTO;
 import com.abin.checkrepeatservice.user.mapper.MessageTemplateMapper;
@@ -33,6 +35,9 @@ public class MessageServiceImpl implements MessageService {
 
     @Resource
     private MessageTemplateMapper messageTemplateMapper;
+
+    @Resource
+    private SysUserMapper sysUserMapper;
 
     @Resource
     private WebSocketSender webSocketSender;
@@ -124,6 +129,14 @@ public class MessageServiceImpl implements MessageService {
                 return Result.error(ResultCode.PARAM_ERROR,"消息内容不能为空");
             }
 
+            // 通知开关拦截：被用户关闭的类型直接跳过（不落库、不推送）。
+            // 按成功返回——对调用方而言"用户不想收"不是发送失败，无需重试或告警。
+            if (isMutedByReceiver(message)) {
+                log.info("用户已关闭该类型通知，跳过发送 - 接收者: {}, 类型: {}, 标题: {}",
+                        message.getReceiverId(), message.getMessageType(), message.getTitle());
+                return Result.success("用户已关闭该类型通知，已跳过发送", true);
+            }
+
             // 设置默认值
             if (message.getSenderId() == null) {
                 message.setSenderId(0L); // 系统发送
@@ -152,6 +165,50 @@ public class MessageServiceImpl implements MessageService {
             log.error("发送站内信失败 - 接收者: {}, 标题: {}", message.getReceiverId(), message.getTitle(), e);
             return Result.error(ResultCode.SYSTEM_ERROR,"消息发送异常");
         }
+    }
+
+    /**
+     * 判断该消息是否被接收者的「通知开关」拦截。
+     *
+     * 消费规则（2026-10-11 补全，此前 4 个开关字段只有保存/回显，无消费者）：
+     * - ANNOUNCEMENT   → notifySystemAnnouncement，关闭则拦截
+     * - SYSTEM_ERROR   → notifySystemError，关闭则拦截（防御性接入，目前尚无此场景）
+     * - EMERGENCY / 安全警告类 → 强制发送，永不拦截（业界惯例：紧急与安全通知不受开关控制，
+     *   notifySecurityWarning 字段保留但刻意不消费）
+     * - 其余业务类型（assignment/confirm/reject/system 等模板类型）→ 无对应开关，不拦截
+     * - notifyEmail 为邮件通道预留字段，站内信通道不消费
+     *
+     * 开关为 null（存量数据）视为开启，保证老用户行为不变。
+     */
+    private boolean isMutedByReceiver(SystemMessage message) {
+        String type = message.getMessageType();
+        if (type == null) {
+            return false;
+        }
+        Integer toggle;
+        switch (type.toUpperCase()) {
+            case "ANNOUNCEMENT" -> toggle = queryNotifyToggle(message.getReceiverId(), "ANNOUNCEMENT");
+            case "SYSTEM_ERROR" -> toggle = queryNotifyToggle(message.getReceiverId(), "SYSTEM_ERROR");
+            default -> {
+                return false;
+            }
+        }
+        return toggle != null && toggle == 0;
+    }
+
+    /**
+     * 查接收者的通知开关值。直查库不走缓存——开关更新低频，且发送本身也是低频路径。
+     */
+    private Integer queryNotifyToggle(Long receiverId, String messageType) {
+        SysUser receiver = sysUserMapper.selectById(receiverId);
+        if (receiver == null) {
+            return null;
+        }
+        return switch (messageType) {
+            case "ANNOUNCEMENT" -> receiver.getNotifySystemAnnouncement();
+            case "SYSTEM_ERROR" -> receiver.getNotifySystemError();
+            default -> null;
+        };
     }
 
     /**
