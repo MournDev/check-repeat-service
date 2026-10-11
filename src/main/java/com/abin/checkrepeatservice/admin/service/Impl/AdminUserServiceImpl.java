@@ -191,6 +191,28 @@ public class AdminUserServiceImpl implements AdminUserService {
             user.setStatus(updateReq.getStatus());
         }
 
+        // 个人设置页「通知设置 + 个人偏好」：全部可选，null = 本次不修改。
+        // 用户管理页的编辑对话框不带这些字段（null），不会被顺带抹掉；
+        // 个人设置页的 saveSettings 则会带上全部 6 个字段一次提交。
+        if (updateReq.getNotifySystemError() != null) {
+            user.setNotifySystemError(Boolean.TRUE.equals(updateReq.getNotifySystemError()) ? 1 : 0);
+        }
+        if (updateReq.getNotifySecurityWarning() != null) {
+            user.setNotifySecurityWarning(Boolean.TRUE.equals(updateReq.getNotifySecurityWarning()) ? 1 : 0);
+        }
+        if (updateReq.getNotifySystemAnnouncement() != null) {
+            user.setNotifySystemAnnouncement(Boolean.TRUE.equals(updateReq.getNotifySystemAnnouncement()) ? 1 : 0);
+        }
+        if (updateReq.getNotifyEmail() != null) {
+            user.setNotifyEmail(Boolean.TRUE.equals(updateReq.getNotifyEmail()) ? 1 : 0);
+        }
+        if (updateReq.getLogRetentionDays() != null) {
+            user.setLogRetentionDays(updateReq.getLogRetentionDays());
+        }
+        if (updateReq.getBackupFrequency() != null) {
+            user.setBackupFrequency(updateReq.getBackupFrequency());
+        }
+
         sysUserService.updateById(user);
 
         log.info("管理员更新用户信息成功: userId={}, selfUpdate={}", userId, isSelfUpdate);

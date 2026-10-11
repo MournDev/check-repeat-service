@@ -186,7 +186,43 @@ public class SysUser extends BaseEntity {
      */
     @TableField("review_deadline")
     private Integer reviewDeadline;
-    
+
+    /**
+     * 通知开关-系统异常：0-关，1-开（管理员个人设置页）
+     */
+    @TableField("notify_system_error")
+    private Integer notifySystemError;
+
+    /**
+     * 通知开关-安全警告：0-关，1-开（管理员个人设置页）
+     */
+    @TableField("notify_security_warning")
+    private Integer notifySecurityWarning;
+
+    /**
+     * 通知开关-系统公告：0-关，1-开
+     */
+    @TableField("notify_system_announcement")
+    private Integer notifySystemAnnouncement;
+
+    /**
+     * 通知开关-邮件通知：0-关，1-开
+     */
+    @TableField("notify_email")
+    private Integer notifyEmail;
+
+    /**
+     * 个人偏好-操作日志保留天数（30~365）
+     */
+    @TableField("log_retention_days")
+    private Integer logRetentionDays;
+
+    /**
+     * 个人偏好-数据备份频率：daily/weekly/monthly
+     */
+    @TableField("backup_frequency")
+    private String backupFrequency;
+
     /**
      * 角色名称（冗余字段，便于显示）
      */

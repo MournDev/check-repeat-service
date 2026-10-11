@@ -71,4 +71,22 @@ public class LoginVO {
     /** 最后登录时间（展示用） */
     private LocalDateTime lastLoginTime;
 
+    /** 通知开关-系统异常（管理员个人设置页回显用） */
+    private Boolean notifySystemError;
+
+    /** 通知开关-安全警告（管理员个人设置页回显用） */
+    private Boolean notifySecurityWarning;
+
+    /** 通知开关-系统公告（个人设置页回显用） */
+    private Boolean notifySystemAnnouncement;
+
+    /** 通知开关-邮件通知（个人设置页回显用） */
+    private Boolean notifyEmail;
+
+    /** 个人偏好-操作日志保留天数（个人设置页回显用） */
+    private Integer logRetentionDays;
+
+    /** 个人偏好-数据备份频率：daily/weekly/monthly（个人设置页回显用） */
+    private String backupFrequency;
+
 }

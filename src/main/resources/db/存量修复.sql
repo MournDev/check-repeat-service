@@ -154,6 +154,13 @@ SELECT (SELECT COUNT(*) FROM information_schema.COLUMNS
          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'category_similarity_threshold'
            AND INDEX_NAME = 'idx_type_paper_type')                                        AS threshold_pt_index;
 
+-- 0.10 段 1.15 个人设置「通知/偏好」6 列的前置现状（没跑过段 1.15 的库上期望 0）
+SELECT COUNT(*) AS sys_user_pref_cols_present FROM information_schema.COLUMNS
+ WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sys_user'
+   AND COLUMN_NAME IN ('notify_system_error','notify_security_warning',
+                       'notify_system_announcement','notify_email',
+                       'log_retention_days','backup_frequency');
+
 
 -- ============================================================================
 -- 段 1：库结构对齐（sys_user 合并教师/学生属性 等 9 处）
@@ -968,6 +975,28 @@ CREATE TABLE IF NOT EXISTS `system_metric_minute` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='系统资源指标分钟表';
 
 -- ============================================================================
+-- 段 1.15：sys_user 个人设置「通知开关 + 个人偏好」6 列
+--
+-- 背景：管理员端个人设置页（UserSettings.vue）的「通知设置」（系统异常/安全警告/
+--   系统公告/邮件通知 4 个开关）与「系统偏好」（操作日志保留天数、数据备份频率）
+--   此前是纯前端 UI——保存时跟着 PUT /api/admin/users/{userId} 一起提交，但
+--   UserUpdateReq 没有对应字段，被 Jackson 静默丢弃，刷新后全部回到默认值。
+--   新版后端把这 6 个字段落到 sys_user（每用户一份，跟随本人资料走
+--   updateUser 的本人自助更新路径）。
+--   列全部 NOT NULL 带默认值：存量行由 ALTER 自动回填默认值，无需额外 UPDATE。
+--   ⚠️ 必须是「先跑本段，再部署后端」：SysUser 实体一旦带上这些字段，
+--   MyBatis-Plus 生成的每一条 SELECT 都会引用它们，缺列即全站 500（同 1.11 教训）。
+-- ============================================================================
+
+ALTER TABLE `sys_user`
+  ADD COLUMN `notify_system_error`        tinyint     NOT NULL DEFAULT '1'     COMMENT '通知开关-系统异常：0-关，1-开（管理员个人设置页）',
+  ADD COLUMN `notify_security_warning`    tinyint     NOT NULL DEFAULT '1'     COMMENT '通知开关-安全警告：0-关，1-开（管理员个人设置页）',
+  ADD COLUMN `notify_system_announcement` tinyint     NOT NULL DEFAULT '1'     COMMENT '通知开关-系统公告：0-关，1-开',
+  ADD COLUMN `notify_email`               tinyint     NOT NULL DEFAULT '1'     COMMENT '通知开关-邮件通知：0-关，1-开',
+  ADD COLUMN `log_retention_days`         int         NOT NULL DEFAULT '90'    COMMENT '个人偏好-操作日志保留天数（30~365）',
+  ADD COLUMN `backup_frequency`           varchar(20) NOT NULL DEFAULT 'daily' COMMENT '个人偏好-数据备份频率：daily/weekly/monthly';
+
+-- ============================================================================
 -- 段 2：similarity_threshold 系列表的 is_deleted 历史 NULL 归零
 --
 -- 背景：category_similarity_threshold.is_deleted 在 init.sql 里一度是 DEFAULT NULL，
@@ -1339,6 +1368,13 @@ SELECT COUNT(*) AS dangling_user_role
   LEFT JOIN sys_role r ON r.id = u.role_id AND r.is_deleted = 0
  WHERE u.is_deleted = 0
    AND r.id IS NULL;
+
+-- 5.11 段 1.15 个人设置 6 列执行后（和 0.10 对照）：期望 6
+SELECT COUNT(*) AS sys_user_pref_cols_present FROM information_schema.COLUMNS
+ WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sys_user'
+   AND COLUMN_NAME IN ('notify_system_error','notify_security_warning',
+                       'notify_system_announcement','notify_email',
+                       'log_retention_days','backup_frequency');
 
 
 -- ============================================================================

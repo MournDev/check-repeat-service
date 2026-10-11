@@ -261,6 +261,14 @@ public class AuthServiceImpl implements AuthService {
         loginVO.setAvatar(sysUser.getAvatar());
         loginVO.setLastLoginTime(sysUser.getLastLoginTime()); // 最后登录时间
 
+        // 个人设置页「通知设置 + 个人偏好」随登录一并下发，前端 userStore 可直接回显
+        loginVO.setNotifySystemError(Integer.valueOf(1).equals(sysUser.getNotifySystemError()));
+        loginVO.setNotifySecurityWarning(Integer.valueOf(1).equals(sysUser.getNotifySecurityWarning()));
+        loginVO.setNotifySystemAnnouncement(Integer.valueOf(1).equals(sysUser.getNotifySystemAnnouncement()));
+        loginVO.setNotifyEmail(Integer.valueOf(1).equals(sysUser.getNotifyEmail()));
+        loginVO.setLogRetentionDays(sysUser.getLogRetentionDays());
+        loginVO.setBackupFrequency(sysUser.getBackupFrequency());
+
 
         log.info("用户登录成功：用户名={}，角色={}，令牌过期时间={}",
                 loginReq.getUsername(), sysRole.getRoleCode(), loginVO.getExpireTime());
