@@ -10,7 +10,6 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
-import java.util.concurrent.Executor;
 import java.util.concurrent.ThreadPoolExecutor;
 
 /**
@@ -24,7 +23,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 public class AsyncConfig {
 
     @Bean("checkTaskExecutor")
-    public Executor checkTaskExecutor(SystemConfigMapper systemConfigMapper) {
+    public ThreadPoolTaskExecutor checkTaskExecutor(SystemConfigMapper systemConfigMapper) {
         PerformanceConfigDTO perf = loadPerformanceConfigWithFallback(systemConfigMapper);
         // 防御性夹取，与 PerformanceConfigDTO 校验范围一致
         int maxConcurrent = Math.max(1, Math.min(100,
@@ -61,7 +60,7 @@ public class AsyncConfig {
      * 通用异步任务线程池
      */
     @Bean("asyncExecutor")
-    public Executor asyncExecutor() {
+    public ThreadPoolTaskExecutor asyncExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         
         executor.setCorePoolSize(3);
