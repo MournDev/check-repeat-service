@@ -1,7 +1,7 @@
 package com.abin.checkrepeatservice.user.service;
 
 import com.abin.checkrepeatservice.pojo.entity.Major;
-import com.abin.checkrepeatservice.pojo.entity.SysUser;
+import com.abin.checkrepeatservice.user.vo.AdvisorMaxCountVO;
 import com.baomidou.mybatisplus.extension.service.IService;
 
 /**
@@ -26,7 +26,7 @@ public interface SysUserMajorService extends IService<Major> {
      * @param targetUserId 目标教师ID
      * @param majorId 专业ID（保留以兼容既有接口契约，当前不参与写入）
      * @param newMaxCount 新的指导任务上限
-     * @return 修改后的教师（SysUser）
+     * @return 修改结果（仅含回显所需字段，不返回实体以免泄露敏感字段）
      */
-    SysUser modifyAdvisorMaxCount(Long operatorId, Long targetUserId, Long majorId, Integer newMaxCount);
+    AdvisorMaxCountVO modifyAdvisorMaxCount(Long operatorId, Long targetUserId, Long majorId, Integer newMaxCount);
 }

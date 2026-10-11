@@ -5,6 +5,7 @@ import com.abin.checkrepeatservice.pojo.entity.SysUser;
 import com.abin.checkrepeatservice.user.mapper.SysUserMajorMapper;
 import com.abin.checkrepeatservice.user.service.SysUserMajorService;
 import com.abin.checkrepeatservice.user.service.SysUserService;
+import com.abin.checkrepeatservice.user.vo.AdvisorMaxCountVO;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import jakarta.annotation.Resource;
 import org.springframework.stereotype.Service;
@@ -46,7 +47,7 @@ public class SysUserMajorServiceImpl extends ServiceImpl<SysUserMajorMapper, Maj
      * majorId 保留在签名中以兼容既有接口契约，当前不参与写入。
      */
     @Override
-    public SysUser modifyAdvisorMaxCount(Long operatorId, Long targetUserId, Long majorId, Integer newMaxCount) {
+    public AdvisorMaxCountVO modifyAdvisorMaxCount(Long operatorId, Long targetUserId, Long majorId, Integer newMaxCount) {
         // 1. 前置权限校验
         this.checkModifyMaxCountAuth(operatorId, targetUserId, majorId);
 
@@ -68,6 +69,11 @@ public class SysUserMajorServiceImpl extends ServiceImpl<SysUserMajorMapper, Maj
         targetTeacher.setMaxReviewCount(newMaxCount);
         sysUserService.updateById(targetTeacher);
 
-        return targetTeacher;
+        // 5. 只回传回显所需字段，绝不返回实体（含密码哈希等敏感字段）
+        AdvisorMaxCountVO vo = new AdvisorMaxCountVO();
+        vo.setTargetUserId(targetTeacher.getId());
+        vo.setRealName(targetTeacher.getRealName());
+        vo.setMaxReviewCount(targetTeacher.getMaxReviewCount());
+        return vo;
     }
 }

@@ -32,9 +32,12 @@ public class SysUser extends BaseEntity {
 
     /**
      * 密码（BCrypt加密存储）
+     * 安全底线：永远禁止通过 HTTP 响应序列化出去（含哈希）。注册/改密/登录均走独立
+     * DTO/参数，不依赖本字段做客户端反序列化，加 @JsonIgnore 无任何功能影响。
      */
     @TableField("password")
     @NotBlank(message = "密码不能为空")
+    @com.fasterxml.jackson.annotation.JsonIgnore
     private String password;
 
     /**

@@ -1,8 +1,8 @@
 package com.abin.checkrepeatservice.user.controller;
 
 import com.abin.checkrepeatservice.common.Result;
-import com.abin.checkrepeatservice.pojo.entity.SysUser;
 import com.abin.checkrepeatservice.user.service.SysUserMajorService;
+import com.abin.checkrepeatservice.user.vo.AdvisorMaxCountVO;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import io.swagger.annotations.ApiParam;
@@ -34,7 +34,7 @@ public class SysUserMajorController {
      */
     @PostMapping("/modify-advisor-max-count")
     @ApiOperation(value = "修改指导任务上限", notes = "仅管理员可操作，新上限需在1-50之间")
-    public Result<SysUser> modifyAdvisorMaxCount(
+    public Result<AdvisorMaxCountVO> modifyAdvisorMaxCount(
             // 从RequestAttribute获取当前登录用户ID（避免前端传参篡改）
             @RequestAttribute("loginUserId") Long operatorId,
             @ApiParam(value = "目标教师ID", required = true) @RequestParam @NotNull Long targetUserId,
@@ -42,7 +42,7 @@ public class SysUserMajorController {
             @ApiParam(value = "新指导任务上限（1-50）", required = true)
             @RequestParam @NotNull @Min(1) @Max(50) Integer newMaxCount
     ) {
-        SysUser result = sysUserMajorService.modifyAdvisorMaxCount(
+        AdvisorMaxCountVO result = sysUserMajorService.modifyAdvisorMaxCount(
                 operatorId, targetUserId, majorId, newMaxCount
         );
         return Result.success("指导任务上限修改成功", result);
