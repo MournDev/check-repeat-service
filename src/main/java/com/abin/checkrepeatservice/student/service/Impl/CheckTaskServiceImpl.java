@@ -544,8 +544,10 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
             com.abin.checkrepeatservice.pojo.entity.PaperStatusLog statusLog = 
                 new com.abin.checkrepeatservice.pojo.entity.PaperStatusLog();
             statusLog.setPaperId(paperId);
-            statusLog.setOldStatus(Integer.parseInt(oldStatus)); // 转换为整数（根据数据库定义）
-            statusLog.setNewStatus(Integer.parseInt(newStatus));
+            // 状态值即 DictConstants.PaperStatus 的字符串字典值，与库列 varchar(50) 直接对应，
+            // 严禁 Integer.parseInt（"auditing" 这类值会抛异常且被本 catch 吞掉，日志静默丢失）
+            statusLog.setOldStatus(oldStatus);
+            statusLog.setNewStatus(newStatus);
             statusLog.setStatusReason(reason);
             UserBusinessInfoUtils.setAuditField(statusLog, true);
             paperStatusLogMapper.insert(statusLog);

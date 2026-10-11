@@ -266,6 +266,137 @@ public class NotificationFacadeService {
     }
 
     /**
+     * 发送指导记录待确认通知给学生（论文全生命周期 P1）
+     */
+    public void sendGuidanceCreatedNotice(Long recordId, String paperTitle, Long studentId,
+                                          String teacherName, Integer round) {
+        try {
+            SysUser student = userQueryService.getUserById(studentId);
+            if (student == null || !StringUtils.hasText(student.getEmail())) {
+                log.warn("无法发送指导记录通知：学生不存在或邮箱为空, studentId={}", studentId);
+                return;
+            }
+
+            Map<String, Object> params = new HashMap<>();
+            params.put("studentName", student.getRealName());
+            params.put("paperTitle", paperTitle);
+            params.put("teacherName", teacherName);
+            params.put("round", String.valueOf(round));
+            params.put("createTime", LocalDateTime.now().toString());
+
+            boolean success = emailService.sendTaskCompletionEmail(
+                    student.getEmail(), NoticeType.GUIDANCE_CREATED, params, recordId, "PAPER");
+
+            log.info("指导记录待确认通知发送{}：student={}, round={}",
+                    success ? "成功" : "失败", student.getRealName(), round);
+
+        } catch (Exception e) {
+            log.error("发送指导记录待确认通知异常：recordId={}, studentId={}", recordId, studentId, e);
+        }
+    }
+
+    /**
+     * 发送指导记录已确认通知给指导教师（论文全生命周期 P1）
+     */
+    public void sendGuidanceConfirmedNotice(Long paperId, String paperTitle, Long teacherId,
+                                            String studentName, Integer round) {
+        try {
+            SysUser advisor = userQueryService.getAdvisorById(teacherId);
+            if (advisor == null || !StringUtils.hasText(advisor.getEmail())) {
+                log.warn("无法发送指导记录确认通知：教师不存在或邮箱为空, teacherId={}", teacherId);
+                return;
+            }
+
+            Map<String, Object> params = new HashMap<>();
+            params.put("advisorName", advisor.getRealName());
+            params.put("paperTitle", paperTitle);
+            params.put("studentName", studentName);
+            params.put("round", String.valueOf(round));
+            params.put("confirmTime", LocalDateTime.now().toString());
+
+            boolean success = emailService.sendTaskCompletionEmail(
+                    advisor.getEmail(), NoticeType.GUIDANCE_CONFIRMED, params, paperId, "PAPER");
+
+            log.info("指导记录确认通知发送{}：teacher={}, paperTitle={}, round={}",
+                    success ? "成功" : "失败", advisor.getRealName(), paperTitle, round);
+
+        } catch (Exception e) {
+            log.error("发送指导记录确认通知异常：paperId={}, teacherId={}", paperId, teacherId, e);
+        }
+    }
+
+    /**
+     * 发送评阅任务通知给评阅教师（论文全生命周期 P2）
+     */
+    public void sendReviewAssignNotice(Long reviewerId, Long paperId, String paperTitle,
+                                       LocalDateTime deadline, String method) {
+        try {
+            SysUser teacher = userQueryService.getAdvisorById(reviewerId);
+            if (teacher == null || !StringUtils.hasText(teacher.getEmail())) {
+                log.warn("无法发送评阅任务通知：教师不存在或邮箱为空, reviewerId={}", reviewerId);
+                return;
+            }
+
+            Map<String, Object> params = new HashMap<>();
+            params.put("teacherName", teacher.getRealName());
+            params.put("paperTitle", paperTitle);
+            params.put("deadline", deadline == null ? "未设置" : deadline.toString());
+            params.put("method", "offline".equals(method) ? "线下评阅（请线下评阅后回填结果并上传扫描件）" : "线上评阅");
+
+            boolean success = emailService.sendTaskCompletionEmail(
+                    teacher.getEmail(), NoticeType.REVIEW_ASSIGN, params, paperId, "PAPER");
+
+            log.info("评阅任务通知发送{}：reviewer={}，paperTitle={}",
+                    success ? "成功" : "失败", teacher.getRealName(), paperTitle);
+
+        } catch (Exception e) {
+            log.error("发送评阅任务通知异常：paperId={}，reviewerId={}", paperId, reviewerId, e);
+        }
+    }
+
+    /**
+     * 发送答辩结论通知给学生（论文全生命周期 P3）。
+     *
+     * 由答辩组长提交结论后触发：终期 pass 时学生论文进入 defense_passed（成绩已回写 final_score），
+     * fail 退回修改，postpone 缓辩择期重排。score/grade 仅 pass 时非空。
+     */
+    public void sendDefenseResultNotice(Long paperId, String paperTitle, Long studentId,
+                                        String batchNo, String result, String score, String grade) {
+        try {
+            SysUser student = userQueryService.getUserById(studentId);
+            if (student == null || !StringUtils.hasText(student.getEmail())) {
+                log.warn("无法发送答辩结论通知：学生不存在或邮箱为空, studentId={}", studentId);
+                return;
+            }
+
+            String resultText = switch (result) {
+                case "pass" -> "通过";
+                case "fail" -> "不通过（需退回修改后重新安排答辩）";
+                case "postpone" -> "缓辩（择期重新安排答辩批次）";
+                default -> result;
+            };
+
+            Map<String, Object> params = new HashMap<>();
+            params.put("studentName", student.getRealName());
+            params.put("paperTitle", paperTitle);
+            params.put("batchNo", batchNo);
+            params.put("result", resultText);
+            params.put("score", score == null ? "—" : score);
+            params.put("grade", grade == null ? "—" : grade);
+            params.put("submitTime", LocalDateTime.now().toString());
+
+            boolean success = emailService.sendTaskCompletionEmail(
+                    student.getEmail(), NoticeType.DEFENSE_RESULT, params, paperId, "PAPER");
+
+            log.info("答辩结论通知发送{}：student={}，batchNo={}，result={}",
+                    success ? "成功" : "失败", student.getRealName(), batchNo, result);
+
+        } catch (Exception e) {
+            log.error("发送答辩结论通知异常：paperId={}，studentId={}，batchNo={}", paperId, studentId, batchNo, e);
+        }
+    }
+
+    /**
      * 发送系统公告通知
      */
     public void sendSystemAnnouncement(String title, String content, String toEmail, Long userId) {

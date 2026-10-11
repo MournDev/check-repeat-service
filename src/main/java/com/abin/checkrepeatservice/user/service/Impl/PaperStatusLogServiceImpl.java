@@ -15,7 +15,7 @@ public class PaperStatusLogServiceImpl extends ServiceImpl<PaperStatusLogMapper,
     private PaperStatusLogMapper paperStatusLogMapper;
 
     @Override
-    public void recordStatusLog(Long paperId, Integer oldStatus, Integer newStatus,
+    public void recordStatusLog(Long paperId, String oldStatus, String newStatus,
                                 String statusReason, Long operateUserId, String operateIp) {
         // 构建日志实体
         PaperStatusLog log = new PaperStatusLog();

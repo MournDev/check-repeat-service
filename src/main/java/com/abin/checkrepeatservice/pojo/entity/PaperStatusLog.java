@@ -26,18 +26,20 @@ public class PaperStatusLog extends BaseEntity {
     private Long paperId;
 
     /**
-     * 变更前状态（非空，如0-草稿）
+     * 变更前状态（对应 paper_status 字典值，如 auditing；库列为 varchar(50)）。
+     *
+     * ⚠️ 历史踩坑：此字段曾声明为 Integer，而 DictConstants.PaperStatus 的状态值是
+     * "auditing" 这类字符串，Integer.parseInt 直接抛 NumberFormatException 且被
+     * try/catch 吞掉——状态日志静默写不进去，学生端时间线无数据（P1 已修复）。
      */
-    @NotNull(message = "变更前状态不能为空")
     @TableField("old_status")
-    private Integer oldStatus;
+    private String oldStatus;
 
     /**
-     * 变更后状态（非空，如1-已提交）
+     * 变更后状态（对应 paper_status 字典值，如 completed；库列为 varchar(50)）
      */
-    @NotNull(message = "变更后状态不能为空")
     @TableField("new_status")
-    private Integer newStatus;
+    private String newStatus;
 
     /**
      * 状态变更原因（非空，最大500字符）

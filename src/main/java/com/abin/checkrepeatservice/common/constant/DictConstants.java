@@ -62,17 +62,39 @@ public class DictConstants {
 
 
     /**
-     * 论文状态字典值
+     * 论文状态字典值。
+     *
+     * P1（2026-10）起状态机扩展为「论文全生命周期阶段门」模型：
+     * pending → assigned → checking → auditing(初审) → completed(初审通过)
+     *   → reviewing(评阅,P2启用) → mid_defense(中期答辩,P3启用) → final_defense(终期答辩,P3启用)
+     *   → defense_passed → finalized(定稿) → archived(归档,P4启用)
+     * 任一阶段门不通过 → rejected → 退回修改重新提交（重走当前阶段门）。
+     * 阶段门流转校验统一走 common/component/PaperStageGate，禁止散落各处自行判断。
      */
     public static class PaperStatus {
 
         public static final String PENDING = "pending";// 待分配
         public static final String ASSIGNED = "assigned";// 已分配
         public static final String CHECKING = "checking";// 待查重
-        public static final String AUDITING = "auditing";// 待审核
-        public static final String COMPLETED = "completed";// 审核通过
+        public static final String AUDITING = "auditing";// 待审核（导师初审）
+        public static final String COMPLETED = "completed";// 审核通过（语义收窄为初审通过）
         public static final String REJECTED = "rejected";// 审核不通过
         public static final String WITHDRAWN = "withdrawn";// 已取消
+
+        // ==================== P1 新增阶段门状态 ====================
+
+        /** 评阅中：初审通过，评阅任务已下发（P2 评阅任务启用） */
+        public static final String REVIEWING = "reviewing";
+        /** 中期答辩：中期批次已安排（P3 答辩管理启用） */
+        public static final String MID_DEFENSE = "mid_defense";
+        /** 终期答辩：终期批次已安排（P3 答辩管理启用） */
+        public static final String FINAL_DEFENSE = "final_defense";
+        /** 答辩通过：答辩组结论为通过（P3 起写入） */
+        public static final String DEFENSE_PASSED = "defense_passed";
+        /** 定稿：指导教师定稿确认（P4 起写入） */
+        public static final String FINALIZED = "finalized";
+        /** 已归档：材料包归档完成，已生成归档编号（P4 起写入） */
+        public static final String ARCHIVED = "archived";
     }
 
     // 论文类型的取值域不在这里：见 common/enums/PaperTypeEnum。

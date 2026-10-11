@@ -146,6 +146,20 @@ admin:
     max-paper-size: 209715200
     max-concurrent-check: 2
   jwt-expiration: 86400000
+  # 评阅任务分配（论文全生命周期 P2）
+  review-assign:
+    avoid-advisor: true           # 评阅人回避规则：指导教师不评阅本人指导的论文（评阅公正性默认约束）
+    max-per-teacher: 10           # 单个教师同时进行中的评阅任务上限（自动分配/超时改派的容量控制）
+    auto-reassign: true           # 评阅超时后自动改派（false 时仅标记超时，由管理员在分配页手动补派）
+    deadline-days: 7              # 未显式指定截止时间/超时改派时的默认评阅期限（天）
+  # 答辩管理（论文全生命周期 P3）
+  defense:
+    # 答辩回避规则：指导教师默认不参与本人学生的评分（评阅公正性默认约束，终期答辩尤为关键）
+    avoid-advisor: true
+    # 答辩组最少成员数（含组长，1 组长 + N 成员，默认 3 = 1 组长 + 2 成员）
+    min-members: 3
+    # 答辩通知提前天数：答辩前 N 天给学生发提醒邮件（0=不提前，仅结论通知）
+    notify-days-before: 1
 
 # MyBatis-Plus配置
 mybatis-plus:
@@ -290,3 +304,7 @@ schedule:
   data-integrity:
     # 每天 3:00 校验并修复一致性：插入查重结果、改写论文重复率与完成标记 —— 会写库
     enabled: false
+  review-assign:
+    # 每 10 分钟扫描评阅截止时间已过仍待评阅的任务：标记已超时转派并按
+    # admin.review-assign.auto-reassign 自动改派 —— 会写库，默认关闭
+    timeout-enabled: false

@@ -1,5 +1,7 @@
 package com.abin.checkrepeatservice.teacher.service.Impl;
 
+import com.abin.checkrepeatservice.admin.service.ReviewWorkflowService;
+import com.abin.checkrepeatservice.admin.vo.ReviewWorkflowVO;
 import com.abin.checkrepeatservice.common.Exception.BusinessException;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.constant.DictConstants;
@@ -71,6 +73,13 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
 
     @Resource
     private BusinessMetricsService businessMetricsService;
+
+    /**
+     * P2 接线：多级初审工作流配置（单行配置表）。导师初审通过后按此决定
+     * 是直接 completed（既有单轮行为）还是进入多级初审链条。
+     */
+    @Resource
+    private ReviewWorkflowService reviewWorkflowService;
 
     // 批量审核最大数量（从配置文件获取）
     @Value("${review.batch.max-count}")
@@ -150,6 +159,14 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
         }
 
         // 3. 批量处理审核（统计成功/失败数量）
+        // P2 接线：工作流配置整个请求只读一次（单行配置表，请求内不会变化）。
+        // 启用且配置了步骤 → 导师初审通过后进入多级初审链条；否则保持既有单轮行为。
+        ReviewWorkflowVO workflowConfig = reviewWorkflowService.getWorkflow();
+        boolean hasMultiLevelWorkflow = Boolean.TRUE.equals(workflowConfig.getEnabled())
+                && workflowConfig.getSteps() != null && !workflowConfig.getSteps().isEmpty();
+        String firstStepName = hasMultiLevelWorkflow
+                ? workflowConfig.getSteps().get(0).getName() : null;
+
         int successCount = 0;
         List<String> failReasons = new ArrayList<>();
         for (Long paperId : paperIds) {
@@ -203,15 +220,26 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
                 save(reviewRecord);
 
                 // 3.4 更新论文状态（3-审核通过，4-审核不通过）
+                // P2 接线：启用多级初审时，导师初审通过不直接 completed，而是保持 auditing
+                // 并置 workflow_step=1 进入工作流链条，由 TeacherWorkflowReviewService 逐步推进；
+                // 任一步驳回 → rejected，全部步骤通过 → completed（见 TeacherWorkflowReviewServiceImpl）。
                 PaperInfo updatePaper = new PaperInfo();
                 updatePaper.setId(paperId);
                 String oldStatus = paperInfo.getPaperStatus();
+                String statusReason;
                 if (reviewStatus.equals(3)) { // 3-审核通过
-                    // 审核通过，设置为完成状态
-                    updatePaper.setPaperStatus(DictConstants.PaperStatus.COMPLETED);
-                } else if (reviewStatus.equals(4)) { // 4-审核不通过
-                    // 审核不通过，设置为驳回状态
+                    if (hasMultiLevelWorkflow) {
+                        updatePaper.setPaperStatus(DictConstants.PaperStatus.AUDITING);
+                        updatePaper.setWorkflowStep(1);
+                        statusReason = "导师初审通过，进入多级初审第1步：" + firstStepName;
+                    } else {
+                        updatePaper.setPaperStatus(DictConstants.PaperStatus.COMPLETED);
+                        statusReason = "导师审核通过";
+                    }
+                } else { // 4-审核不通过
                     updatePaper.setPaperStatus(DictConstants.PaperStatus.REJECTED);
+                    updatePaper.setWorkflowStep(0);
+                    statusReason = "导师审核不通过";
                 }
                 paperInfoMapper.updateById(updatePaper);
                 
@@ -229,9 +257,8 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
                 log.info("论文审核成功：论文 ID={}，审核结果={}，审核记录 ID={}",
                         paperId, reviewStatus.equals(DictConstants.PaperStatus.COMPLETED) ? "通过" : "不通过", reviewRecord.getId());
                 
-                // 3.5 记录论文状态变更日志（AUDITING → COMPLETED/REJECTED）
-                recordPaperStatusLog(paperId, oldStatus, updatePaper.getPaperStatus(), 
-                    reviewStatus.equals(3) ? "导师审核通过" : "导师审核不通过");
+                // 3.5 记录论文状态变更日志（AUDITING → COMPLETED/REJECTED 或进入多级初审）
+                recordPaperStatusLog(paperId, oldStatus, updatePaper.getPaperStatus(), statusReason);
 
             } catch (Exception e) {
                 log.error("论文审核失败（论文ID：{}）：", paperId, e);
@@ -386,6 +413,8 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
         PaperInfo updatePaper = new PaperInfo();
         updatePaper.setId(paperId);
         updatePaper.setPaperStatus(DictConstants.PaperStatus.AUDITING); // 2-待审核
+        // P2 接线：重新发起审核回到导师初审起点，多级初审进度一并归零
+        updatePaper.setWorkflowStep(0);
         paperInfoMapper.updateById(updatePaper);
 
         log.info("论文重新发起审核成功：论文ID={}，指导教师ID={}", paperId, currentTeacherId);
@@ -401,8 +430,10 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
             com.abin.checkrepeatservice.pojo.entity.PaperStatusLog statusLog = 
                 new com.abin.checkrepeatservice.pojo.entity.PaperStatusLog();
             statusLog.setPaperId(paperId);
-            statusLog.setOldStatus(Integer.parseInt(oldStatus));
-            statusLog.setNewStatus(Integer.parseInt(newStatus));
+            // 状态值即 DictConstants.PaperStatus 的字符串字典值，与库列 varchar(50) 直接对应，
+            // 严禁 Integer.parseInt（"auditing" 这类值会抛异常且被本 catch 吞掉，日志静默丢失）
+            statusLog.setOldStatus(oldStatus);
+            statusLog.setNewStatus(newStatus);
             statusLog.setStatusReason(reason);
             UserBusinessInfoUtils.setAuditField(statusLog, true);
             paperStatusLogMapper.insert(statusLog);
