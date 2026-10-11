@@ -17,6 +17,7 @@ public class LatestPaperDTO {
     private LocalDateTime submitTime;
     private LocalDateTime approveTime;
     private String advisorName;
+    private String allocationStatus; // 导师分配状态（pending/confirmed/rejected/pending_reassign）
     private String feedback;
     private Integer wordCount;
     private BigDecimal similarity;      // 查重率

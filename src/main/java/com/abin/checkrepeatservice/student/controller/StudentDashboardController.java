@@ -6,10 +6,15 @@ import com.abin.checkrepeatservice.common.utils.JwtUtils;
 import com.abin.checkrepeatservice.student.dto.*;
 import com.abin.checkrepeatservice.student.service.Impl.StudentDashboardService;
 import jakarta.annotation.Resource;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import java.util.List;
 
 @RestController
@@ -159,6 +164,31 @@ public class StudentDashboardController {
         } catch (Exception e) {
             log.error("获取进度跟踪信息失败", e);
             return Result.error(ResultCode.SYSTEM_ERROR, "获取进度跟踪信息失败");
+        }
+    }
+
+    // 导出工作台数据（统计概览 + 论文明细，xlsx）
+    @GetMapping("/export")
+    public void exportDashboardData(
+            @RequestHeader("Authorization") String token,
+            HttpServletResponse response) {
+        try {
+            Long studentId = JwtUtil.getUserIdFromToken(token);
+            response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+            response.setCharacterEncoding("utf-8");
+            String fileName = URLEncoder.encode("工作台数据_" + LocalDate.now(), StandardCharsets.UTF_8)
+                    .replaceAll("\\+", "%20");
+            response.setHeader("Content-Disposition", "attachment; filename*=utf-8''" + fileName + ".xlsx");
+            dashboardService.exportDashboardData(studentId, response.getOutputStream());
+        } catch (Exception e) {
+            log.error("导出工作台数据失败", e);
+            response.reset();
+            response.setContentType("application/json");
+            response.setCharacterEncoding("utf-8");
+            try {
+                response.getWriter().write("{\"code\":500,\"message\":\"导出工作台数据失败\"}");
+            } catch (IOException ignored) {
+            }
         }
     }
 }
