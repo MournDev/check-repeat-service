@@ -121,6 +121,9 @@ public class SecurityConfig {
                         // 否则 /ws/info 会直接 401。握手放行不等于免鉴权：
                         // STOMP CONNECT 帧仍由 WebSocketChannelInterceptor 校验 JWT，无有效 token 照样拒绝。
                         .requestMatchers("/api/auth/**", "/api/avatar/**", "/api/papers/**", "/api/file/**", "/api/minio/**", "/ws/**").permitAll()
+                        // P5 报告验真：对齐行业报告验真惯例，凭报告编号匿名验证报告真伪，
+                        // 只回元数据（标题打码/指标/时间），不回报告文件与正文；接口内有 IP 限流
+                        .requestMatchers("/api/report/verify/**").permitAll()
                         // 系统状态查询（维护模式开关+公告）：前端未登录也要能拉取，
                         // 用于登录页/刷新时判断是否显示维护面板；且维护拦截器将其列入白名单
                         .requestMatchers("/api/system/status").permitAll()

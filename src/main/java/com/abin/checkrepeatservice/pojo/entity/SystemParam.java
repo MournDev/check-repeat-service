@@ -6,6 +6,7 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
@@ -102,6 +103,30 @@ public class SystemParam extends BaseEntity{
      */
     @TableField("backup_retention_days")
     private Integer backupRetentionDays;
+
+    /**
+     * 成绩加权合成 · 指导分权重（论文全生命周期 P5，百分比：20 表示 20%）
+     * 对应表字段：guidance_weight
+     *
+     * 读取口径（ScoreComposeService）：NULL 按"未配置"逐项回落默认值
+     * （指导20 / 评阅30 / 答辩50）；三项显式配置值合计 ≠ 100 时抛 40915 拒绝合成。
+     */
+    @TableField("guidance_weight")
+    private BigDecimal guidanceWeight;
+
+    /**
+     * 成绩加权合成 · 评阅分权重（百分比），NULL 回落默认 30
+     * 对应表字段：review_weight
+     */
+    @TableField("review_weight")
+    private BigDecimal reviewWeight;
+
+    /**
+     * 成绩加权合成 · 答辩分权重（百分比），NULL 回落默认 50
+     * 对应表字段：defense_weight
+     */
+    @TableField("defense_weight")
+    private BigDecimal defenseWeight;
 
 
 }

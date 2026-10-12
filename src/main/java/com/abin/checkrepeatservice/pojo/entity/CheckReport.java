@@ -35,4 +35,10 @@ public class CheckReport extends BaseEntity {
      * 报告文件类型（默认pdf）
      */
     private String reportType;
+
+    /**
+     * 报告内容哈希（P5 验真码：对关键要素 JSON+盐做 SHA-256，
+     * 验真接口重算比对以判定报告真伪；PDF 字节含生成时间戳不可复现，故不用文件字节）
+     */
+    private String contentHash;
 }

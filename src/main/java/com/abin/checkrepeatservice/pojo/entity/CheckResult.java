@@ -42,9 +42,22 @@ public class CheckResult extends BaseEntity {
 
     /**
      * 重复率（非空，百分比形式，如25.32表示25.32%）
+     * P5 起与新口径对齐：非引用命中句字数/正文字数
      */
     @TableField("repeat_rate")
     private BigDecimal repeatRate;
+
+    /**
+     * 单篇最大相似比（P5：最大单篇来源命中字数占正文字数百分比）
+     */
+    @TableField("max_per_source")
+    private BigDecimal maxPerSource;
+
+    /**
+     * 引用率（P5：引用句命中字数占正文字数百分比）
+     */
+    @TableField("citation_rate")
+    private BigDecimal citationRate;
 
     /**
      * 查重来源（非空，LOCAL-本地库，THIRD_PARTY-第三方API）

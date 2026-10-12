@@ -44,9 +44,22 @@ public class CheckTask extends BaseEntity {
 
     /**
      * 查重重复率（如：15.32表示15.32%，任务失败时可为空）
+     * P5 起新任务口径升级为"总相似比"（非引用命中句字数/正文字数），存量行保留旧口径（整篇最大余弦）
      */
     @TableField("check_rate")
     private BigDecimal checkRate;
+
+    /**
+     * 单篇最大相似比（P5：最大单篇来源命中字数占正文字数百分比）
+     */
+    @TableField("max_per_source")
+    private BigDecimal maxPerSource;
+
+    /**
+     * 引用率（P5：句尾带 [n] 引注的命中句字数占正文字数百分比，不计入总相似比）
+     */
+    @TableField("citation_rate")
+    private BigDecimal citationRate;
 
     /**
      * 任务开始时间

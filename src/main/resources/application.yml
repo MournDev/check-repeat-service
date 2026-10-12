@@ -133,6 +133,13 @@ check:
     enabled: false
     model-path: /models/bert-similarity
     gpu-enabled: false
+  # P5 句级标注：命中判定阈值（%）与候选论文数上限
+  sentence:
+    threshold: 50
+    max-candidates: 50
+  # P5 导师查重签核门槛：true 时评阅分配前必须存在 qualified=1 的签核记录
+  signoff:
+    required: true
 
 # 管理端查重规则配置
 admin:

@@ -154,6 +154,13 @@ public class PaperInfo extends BaseEntity implements Serializable {
     private BigDecimal similarityRate;
 
     /**
+     * 学位类型（P5 检测策略集匹配维度：undergraduate-本科/master-硕士/doctor-博士，
+     * 存量数据默认本科；对应字典 degree_type）
+     */
+    @TableField("degree_type")
+    private String degreeType;
+
+    /**
      * 查重结果
      */
     @TableField("check_result")

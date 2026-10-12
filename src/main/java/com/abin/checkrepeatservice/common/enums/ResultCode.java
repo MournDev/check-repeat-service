@@ -45,6 +45,11 @@ public enum ResultCode {
     BUSINESS_NO_REPEAT(40909, HttpStatus.CONFLICT, "无需重复操作"),
     BUSINESS_ILLEGAL(40910, HttpStatus.CONFLICT, "指导老师不合法"),
     BUSINESS_NO_TASK_MAX(40911, HttpStatus.CONFLICT, "当前老师可指导学生人数已达上限"),
+    BUSINESS_CHECK_NOT_SIGNOFF(40912, HttpStatus.CONFLICT, "查重报告未经导师签核，不可进入评阅分配"),
+    BUSINESS_CHECK_ALREADY_SIGNOFF(40913, HttpStatus.CONFLICT, "该报告已签核，请勿重复操作"),
+    BUSINESS_SCORE_NO_GUIDANCE(40914, HttpStatus.CONFLICT, "指导评分缺失，无法合成总评成绩"),
+    BUSINESS_WEIGHT_INVALID(40915, HttpStatus.CONFLICT, "成绩权重配置非法（三项权重合计必须等于100）"),
+    BUSINESS_QUOTA_EXCEEDED(40916, HttpStatus.CONFLICT, "本学院当月查重额度不足，请联系管理员"),
 
     // ====================== 5. 系统错误（HTTP 500） ======================
     SYSTEM_ERROR(50001, HttpStatus.INTERNAL_SERVER_ERROR, "系统繁忙，请稍后重试"),
