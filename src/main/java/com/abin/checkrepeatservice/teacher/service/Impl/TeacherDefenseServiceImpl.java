@@ -325,6 +325,16 @@ public class TeacherDefenseServiceImpl implements TeacherDefenseService {
                     req.getGrade());
         }
 
+        // P6a：终期答辩通过 → 邀请学生评价指导教师（软提醒：只此一次邀请，不重复催办、
+        // 不卡定稿/归档阶段门；门面吞异常，绝不阻断答辩主流程）。
+        // 只认终期 pass——中期通过还未结束指导关系，此时评价为时过早。
+        if (paper != null && paper.getStudentId() != null
+                && DefenseBatch.TYPE_FINAL.equals(batch.getBatchType())
+                && DefenseRecord.RESULT_PASS.equals(req.getResult())) {
+            notificationFacadeService.sendAdvisorEvalInviteNotice(paper.getId(),
+                    paper.getPaperTitle(), paper.getStudentId());
+        }
+
         // P5：加权合成成功时额外通知学生总评成绩已出（门面吞异常，不影响主流程）；
         // 合成失败的论文不发本通知，避免给学生"成绩已出"的误导
         if (paper != null && paper.getStudentId() != null && synthesizedScore != null) {

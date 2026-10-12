@@ -536,6 +536,37 @@ public class NotificationFacadeService {
     }
 
     /**
+     * 发送导师评价邀请通知给学生（论文全生命周期 P6a）。
+     *
+     * 终期答辩结论 pass（defense_passed 推进成功）后触发，软提醒定位——只邀请一次，
+     * 不重复催办、不卡定稿/归档。与 sendCheckSignoffRejectedNotice 同一套兜底口径：
+     * 取不到学生/邮箱只告警返回，任何异常内部吞掉只记日志，绝不阻断答辩主流程。
+     */
+    public void sendAdvisorEvalInviteNotice(Long paperId, String paperTitle, Long studentId) {
+        try {
+            SysUser student = userQueryService.getUserById(studentId);
+            if (student == null || !StringUtils.hasText(student.getEmail())) {
+                log.warn("无法发送导师评价邀请：学生不存在或邮箱为空, studentId={}", studentId);
+                return;
+            }
+
+            Map<String, Object> params = new HashMap<>();
+            params.put("studentName", student.getRealName());
+            params.put("paperTitle", paperTitle);
+            params.put("submitTime", LocalDateTime.now().toString());
+
+            boolean success = emailService.sendTaskCompletionEmail(
+                    student.getEmail(), NoticeType.ADVISOR_EVAL_INVITE, params, paperId, "PAPER");
+
+            log.info("导师评价邀请发送{}：student={}，paperTitle={}",
+                    success ? "成功" : "失败", student.getRealName(), paperTitle);
+
+        } catch (Exception e) {
+            log.error("发送导师评价邀请异常：paperId={}，studentId={}", paperId, studentId, e);
+        }
+    }
+
+    /**
      * 构建老师分配通知内容（给老师）
      */
     private String buildAdvisorAssignmentContent(Map<String, Object> params) {
