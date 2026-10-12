@@ -167,6 +167,10 @@ admin:
     min-members: 3
     # 答辩通知提前天数：答辩前 N 天给学生发提醒邮件（0=不提前，仅结论通知）
     notify-days-before: 1
+  # 导师评价（论文全生命周期 P6a：学生对指导教师的评价，软提醒不卡阶段门）
+  advisor-eval:
+    # 评价窗口：终期答辩通过后 N 天内可提交评价（存量无状态日志论文不限窗口）
+    window-days: 30
 
 # MyBatis-Plus配置
 mybatis-plus:

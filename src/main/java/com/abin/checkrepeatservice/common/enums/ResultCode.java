@@ -50,6 +50,9 @@ public enum ResultCode {
     BUSINESS_SCORE_NO_GUIDANCE(40914, HttpStatus.CONFLICT, "指导评分缺失，无法合成总评成绩"),
     BUSINESS_WEIGHT_INVALID(40915, HttpStatus.CONFLICT, "成绩权重配置非法（三项权重合计必须等于100）"),
     BUSINESS_QUOTA_EXCEEDED(40916, HttpStatus.CONFLICT, "本学院当月查重额度不足，请联系管理员"),
+    BUSINESS_EVAL_NOT_READY(40917, HttpStatus.CONFLICT, "论文尚未通过终期答辩，暂不可评价导师"),
+    BUSINESS_EVAL_ALREADY_SUBMITTED(40918, HttpStatus.CONFLICT, "您已提交过导师评价，请勿重复提交"),
+    BUSINESS_EVAL_WINDOW_CLOSED(40919, HttpStatus.CONFLICT, "导师评价窗口已关闭"),
 
     // ====================== 5. 系统错误（HTTP 500） ======================
     SYSTEM_ERROR(50001, HttpStatus.INTERNAL_SERVER_ERROR, "系统繁忙，请稍后重试"),

@@ -17,6 +17,9 @@ public enum NoticeType {
     CHECK_SIGNOFF_REJECTED("查重报告签核退回", "您的论文查重报告未通过导师签核，请按导师意见修改后重新提交"),
     // P5：终期答辩通过且总评成绩加权合成成功回写 final_score 后发给学生的通知
     SCORE_SYNTHESIZED("总评成绩已合成", "您的论文总评成绩已合成完成，请登录系统查看详情"),
+    // P6a：终期答辩 pass 后发给学生的导师评价邀请（软提醒，不卡定稿/归档门槛）。
+    // EmailService 未为其定制模板，走 buildTaskSubject/buildTaskContent 的 default 分支
+    ADVISOR_EVAL_INVITE("导师评价邀请", "您已通过终期答辩，欢迎对指导教师的指导工作作出评价"),
     SYSTEM_ANNOUNCEMENT("系统公告", "系统发布重要公告"),
     ACCOUNT_ACTIVATION("账户激活", "请激活您的账户"),
     PASSWORD_RESET("密码重置", "请重置您的密码");

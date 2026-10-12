@@ -46,6 +46,11 @@ public class DictConstants {
     public static final String DICT_MESSAGE_TYPE = "message_type";
 
     /**
+     * 导师评价标签字典类型（论文全生命周期 P6a：学生对导师的预设标签白名单）
+     */
+    public static final String DICT_ADVISOR_EVAL_TAG = "advisor_eval_tag";
+
+    /**
      * 消息优先级类型
      */
     public static final String MESSAGE_PRIORITY = "message_priority";
