@@ -3,6 +3,7 @@ package com.abin.checkrepeatservice.student.service.Impl;
 
 import com.abin.checkrepeatservice.admin.mapper.CheckResultMapper;
 import com.abin.checkrepeatservice.admin.mapper.CompareLibMapper;
+import com.abin.checkrepeatservice.admin.service.CollegeQuotaService;
 import com.abin.checkrepeatservice.user.mapper.PaperStatusLogMapper;
 import cn.hutool.core.date.DateTime;
 import com.abin.checkrepeatservice.common.Exception.BusinessException;
@@ -115,6 +116,10 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
     @Resource
     private ApplicationEventPublisher eventPublisher;
 
+    // P5 学院月度查重额度：新建任务落库前校验并扣减
+    @Resource
+    private CollegeQuotaService collegeQuotaService;
+
     // Apache Tika：提取文件文本内容
     private final Tika tika = new Tika();
 
@@ -148,6 +153,10 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
      */
     @Transactional(rollbackFor = Exception.class)
     protected Result<CheckResultVO> createCheckTaskInternal(Long paperId, PaperInfo paperInfo) {
+        // P5 学院月度额度：任务真正落库前校验并扣减学院当月额度。
+        // 重试路径复用已存在任务（重新入队），不走本新建入口，不会重复扣减。
+        collegeQuotaService.checkAndConsume(paperInfo.getCollegeId());
+
         // 1. 创建 PENDING 状态的任务（不立即改为 CHECKING）
         CheckTask checkTask = new CheckTask();
         checkTask.setPaperId(paperId);
@@ -724,6 +733,9 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
         dto.setPaperId(checkTask.getPaperId());
         dto.setCheckStatus(checkTask.getCheckStatus());
         dto.setCheckRate(checkTask.getCheckRate() != null ? checkTask.getCheckRate().doubleValue() : null);
+        // P5 新指标：存量任务为 null，前端按「—」展示
+        dto.setMaxPerSource(checkTask.getMaxPerSource() != null ? checkTask.getMaxPerSource().doubleValue() : null);
+        dto.setCitationRate(checkTask.getCitationRate() != null ? checkTask.getCitationRate().doubleValue() : null);
         dto.setStartTime(checkTask.getStartTime());
         dto.setEndTime(checkTask.getEndTime());
         dto.setFailReason(checkTask.getFailReason());

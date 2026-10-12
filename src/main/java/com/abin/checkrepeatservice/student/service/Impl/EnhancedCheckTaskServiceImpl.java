@@ -1,5 +1,6 @@
 package com.abin.checkrepeatservice.student.service.Impl;
 
+import com.abin.checkrepeatservice.admin.service.CollegeQuotaService;
 import com.abin.checkrepeatservice.common.Exception.BusinessException;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.engine.CheckEngineManager;
@@ -74,6 +75,10 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
     // 合格判定阈值改为按学生所属学院/专业解析（专业 > 学院 > 全局 > yml 兜底）
     @Resource
     private SimilarityThresholdResolver similarityThresholdResolver;
+
+    // P5 学院月度查重额度：新建任务落库前校验并扣减
+    @Resource
+    private CollegeQuotaService collegeQuotaService;
     
     private final Tika tika = new Tika();
     
@@ -90,7 +95,11 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
         
         // 2. 解析引擎类型
         List<CheckEngineTypeEnum> engines = parseEngineTypes(engineTypes);
-        
+
+        // P5 学院月度额度：任务真正落库前校验并扣减学院当月额度。
+        // 重试路径复用已存在任务，不走本新建入口，不会重复扣减。
+        collegeQuotaService.checkAndConsume(paperInfo.getCollegeId());
+
         // 3. 创建任务
         CheckTask checkTask = new CheckTask();
         checkTask.setPaperId(paperId);
@@ -452,6 +461,9 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
         dto.setPaperId(task.getPaperId());
         dto.setCheckStatus(task.getCheckStatus());
         dto.setCheckRate(task.getCheckRate() != null ? task.getCheckRate().doubleValue() : null);
+        // P5 新指标：存量任务为 null，前端按「—」展示
+        dto.setMaxPerSource(task.getMaxPerSource() != null ? task.getMaxPerSource().doubleValue() : null);
+        dto.setCitationRate(task.getCitationRate() != null ? task.getCitationRate().doubleValue() : null);
         dto.setStartTime(task.getStartTime());
         dto.setEndTime(task.getEndTime());
         dto.setFailReason(task.getFailReason());

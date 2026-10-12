@@ -44,8 +44,21 @@ public class CheckTaskResultDTO {
 
     /**
      * 重复率（如：15.32 → 15.32%）
+     *
+     * P5 起新任务语义升级为「总相似比」（非引用命中句字数/正文字数），
+     * 存量任务保留旧口径（整篇最大余弦），不迁移。
      */
     private Double checkRate;
+
+    /**
+     * 单篇最大相似比（如：12.34 → 12.34%，P5 新指标；存量任务为 null）
+     */
+    private Double maxPerSource;
+
+    /**
+     * 引用率（如：3.21 → 3.21%，P5 新指标，引用命中不计入总相似比；存量任务为 null）
+     */
+    private Double citationRate;
 
     /**
      * 任务开始时间
