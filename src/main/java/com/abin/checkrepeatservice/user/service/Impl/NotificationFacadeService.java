@@ -472,6 +472,70 @@ public class NotificationFacadeService {
     }
 
     /**
+     * 发送查重报告签核退回通知给学生（论文全生命周期 P5）。
+     *
+     * 由导师签核 qualified=0（查重报告不合格）后触发：学生需按导师意见修改后重新提交再检。
+     * 与 sendDefenseResultNotice 同一套兜底口径——取不到学生/邮箱只告警返回，
+     * 任何异常内部吞掉只记日志，绝不阻断签核主流程。
+     */
+    public void sendCheckSignoffRejectedNotice(Long studentId, String paperTitle) {
+        try {
+            SysUser student = userQueryService.getUserById(studentId);
+            if (student == null || !StringUtils.hasText(student.getEmail())) {
+                log.warn("无法发送签核退回通知：学生不存在或邮箱为空, studentId={}", studentId);
+                return;
+            }
+
+            Map<String, Object> params = new HashMap<>();
+            params.put("studentName", student.getRealName());
+            params.put("paperTitle", paperTitle);
+            params.put("submitTime", LocalDateTime.now().toString());
+
+            // 无 paperId 入参（签核服务侧只持有学生与标题），审计 related_id 传 null，
+            // 与 sendAccountActivationNotice 的 null relatedId 口径一致
+            boolean success = emailService.sendTaskCompletionEmail(
+                    student.getEmail(), NoticeType.CHECK_SIGNOFF_REJECTED, params, null, "PAPER");
+
+            log.info("查重报告签核退回通知发送{}：student={}，paperTitle={}",
+                    success ? "成功" : "失败", student.getRealName(), paperTitle);
+
+        } catch (Exception e) {
+            log.error("发送查重报告签核退回通知异常：paperTitle={}，studentId={}", paperTitle, studentId, e);
+        }
+    }
+
+    /**
+     * 发送总评成绩合成通知给学生（论文全生命周期 P5）。
+     *
+     * 终期答辩通过、加权合成（指导/评阅/答辩按 system_param 权重）成功回写 final_score 后触发；
+     * 合成失败（缺指导分 40914 / 权重非法 40915）走不到这里，由管理端重算兜底。异常内部吞掉。
+     */
+    public void sendScoreSynthesizedNotice(Long paperId, String paperTitle, Long studentId, String finalScore) {
+        try {
+            SysUser student = userQueryService.getUserById(studentId);
+            if (student == null || !StringUtils.hasText(student.getEmail())) {
+                log.warn("无法发送总评成绩通知：学生不存在或邮箱为空, studentId={}", studentId);
+                return;
+            }
+
+            Map<String, Object> params = new HashMap<>();
+            params.put("studentName", student.getRealName());
+            params.put("paperTitle", paperTitle);
+            params.put("finalScore", finalScore);
+            params.put("submitTime", LocalDateTime.now().toString());
+
+            boolean success = emailService.sendTaskCompletionEmail(
+                    student.getEmail(), NoticeType.SCORE_SYNTHESIZED, params, paperId, "PAPER");
+
+            log.info("总评成绩通知发送{}：student={}，paperTitle={}，finalScore={}",
+                    success ? "成功" : "失败", student.getRealName(), paperTitle, finalScore);
+
+        } catch (Exception e) {
+            log.error("发送总评成绩通知异常：paperId={}，studentId={}", paperId, studentId, e);
+        }
+    }
+
+    /**
      * 构建老师分配通知内容（给老师）
      */
     private String buildAdvisorAssignmentContent(Map<String, Object> params) {

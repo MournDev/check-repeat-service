@@ -10,11 +10,15 @@ import com.abin.checkrepeatservice.common.constant.DictConstants;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
 import com.abin.checkrepeatservice.mapper.SysUserMapper;
+import com.abin.checkrepeatservice.pojo.entity.CheckTask;
+import com.abin.checkrepeatservice.pojo.entity.PaperCheckSignoff;
 import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
 import com.abin.checkrepeatservice.pojo.entity.PaperSubmit;
 import com.abin.checkrepeatservice.pojo.entity.ReviewAssignment;
 import com.abin.checkrepeatservice.pojo.entity.SysUser;
+import com.abin.checkrepeatservice.student.mapper.CheckTaskMapper;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
+import com.abin.checkrepeatservice.teacher.mapper.PaperCheckSignoffMapper;
 import com.abin.checkrepeatservice.teacher.mapper.ReviewAssignmentMapper;
 import com.abin.checkrepeatservice.teacher.vo.ReviewAssignVO;
 import com.abin.checkrepeatservice.user.service.PaperStatusLogService;
@@ -68,6 +72,12 @@ public class AdminReviewAssignServiceImpl implements AdminReviewAssignService {
     private PaperSubmitMapper paperSubmitMapper;
 
     @Resource
+    private CheckTaskMapper checkTaskMapper;
+
+    @Resource
+    private PaperCheckSignoffMapper paperCheckSignoffMapper;
+
+    @Resource
     private SysUserMapper sysUserMapper;
 
     @Resource
@@ -91,6 +101,13 @@ public class AdminReviewAssignServiceImpl implements AdminReviewAssignService {
     @Value("${admin.review-assign.deadline-days:7}")
     private int deadlineDays;
 
+    /**
+     * 查重签核门槛开关（论文全生命周期 P5）：默认开启。
+     * true 时评阅分配前必须存在合格签核；灰度/应急可通过 check.signoff.required=false 整体关闭。
+     */
+    @Value("${check.signoff.required:true}")
+    private boolean checkSignoffRequired;
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Result<Map<String, Object>> allocate(ReviewAllocateReq req) {
@@ -106,6 +123,33 @@ public class AdminReviewAssignServiceImpl implements AdminReviewAssignService {
                 && !DictConstants.PaperStatus.REVIEWING.equals(paperStatus)) {
             throw new BusinessException(ResultCode.PERMISSION_NOT_STATUS,
                     "评阅任务只能在初审通过后分配，论文当前状态：" + paperStatus);
+        }
+
+        // 1.5 查重签核门槛（论文全生命周期 P5）：check.signoff.required=true 时，
+        // 该论文最新一次 completed 查重任务必须已有导师签核且结论为合格（qualified=1），
+        // 否则一律以 40912 拦下。语义口径：
+        //   - 没有 completed 查重任务 → 无法签核 → 同样 40912（流程上学生必须先完成一次成功查重）；
+        //   - 有任务但无签核记录 → 导师尚未在教师端签核 → 40912；
+        //   - 最新签核 qualified=0（不合格退回）→ 查重未过、论文在退回修改环节 → 40912。
+        // 正确操作路径：管理员推动学生完成再检，并让导师在教师端
+        // POST /api/teacher/papers/{paperId}/check-signoff 签核合格后再来分配评阅；
+        // 不提供绕过入口，防止查重未过的论文流入评阅环节。重复检测会产生新任务、
+        // 新任务对应新签核（(paper_id, task_id) 唯一），所以这里永远校验"最新任务"的签核。
+        if (checkSignoffRequired) {
+            CheckTask latestTask = checkTaskMapper.selectOne(new LambdaQueryWrapper<CheckTask>()
+                    .eq(CheckTask::getPaperId, req.getPaperId())
+                    .eq(CheckTask::getCheckStatus, DictConstants.CheckStatus.COMPLETED)
+                    .orderByDesc(CheckTask::getCreateTime)
+                    .orderByDesc(CheckTask::getId)
+                    .last("LIMIT 1"));
+            PaperCheckSignoff signoff = latestTask == null ? null
+                    : paperCheckSignoffMapper.selectOne(new LambdaQueryWrapper<PaperCheckSignoff>()
+                            .eq(PaperCheckSignoff::getPaperId, req.getPaperId())
+                            .eq(PaperCheckSignoff::getTaskId, latestTask.getId())
+                            .last("LIMIT 1"));
+            if (signoff == null || !Integer.valueOf(1).equals(signoff.getQualified())) {
+                throw new BusinessException(ResultCode.BUSINESS_CHECK_NOT_SIGNOFF);
+            }
         }
 
         // 2. 分配方式与评阅人集合解析

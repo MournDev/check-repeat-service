@@ -11,6 +11,12 @@ public enum NoticeType {
     GUIDANCE_CONFIRMED("指导记录已确认", "学生已确认您的指导记录，可查看学生反馈"),
     REVIEW_ASSIGN("评阅任务通知", "您有新的论文评阅任务，请及时登录系统处理"),
     DEFENSE_RESULT("答辩结论通知", "您的答辩结论已出，请登录系统查看详情"),
+    // P5：导师签核 qualified=0（查重报告不合格）时发给学生的退回通知，
+    // 提醒学生按导师意见修改后重新提交再检。EmailService 未为其定制模板，
+    // 走 buildTaskSubject/buildTaskContent 的 default 分支（取 title + buildDefaultContent）
+    CHECK_SIGNOFF_REJECTED("查重报告签核退回", "您的论文查重报告未通过导师签核，请按导师意见修改后重新提交"),
+    // P5：终期答辩通过且总评成绩加权合成成功回写 final_score 后发给学生的通知
+    SCORE_SYNTHESIZED("总评成绩已合成", "您的论文总评成绩已合成完成，请登录系统查看详情"),
     SYSTEM_ANNOUNCEMENT("系统公告", "系统发布重要公告"),
     ACCOUNT_ACTIVATION("账户激活", "请激活您的账户"),
     PASSWORD_RESET("密码重置", "请重置您的密码");

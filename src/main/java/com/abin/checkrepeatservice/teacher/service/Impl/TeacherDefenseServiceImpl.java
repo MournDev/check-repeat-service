@@ -10,6 +10,7 @@ import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.component.PaperStageGate;
 import com.abin.checkrepeatservice.common.constant.DictConstants;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
+import com.abin.checkrepeatservice.common.service.ScoreComposeService;
 import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
 import com.abin.checkrepeatservice.mapper.SysUserMapper;
 import com.abin.checkrepeatservice.pojo.entity.DefenseBatch;
@@ -32,6 +33,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -80,6 +82,13 @@ public class TeacherDefenseServiceImpl implements TeacherDefenseService {
 
     @Resource
     private NotificationFacadeService notificationFacadeService;
+
+    /**
+     * 总评成绩加权合成（论文全生命周期 P5）：终期 pass 回写 final_score 时调用。
+     * 答辩现场分（req.score）从"直接回写"降级为合成中的"答辩分"数据源。
+     */
+    @Resource
+    private ScoreComposeService scoreComposeService;
 
     @Override
     public Result<List<DefenseBatchVO>> listMyBatches() {
@@ -240,6 +249,8 @@ public class TeacherDefenseServiceImpl implements TeacherDefenseService {
         // 中期批次 pass：阶段门推进 mid_defense → final_defense（进入终期答辩门槛，等管理员安排终期批次）
         // 中期 fail：阶段门推进 mid_defense → rejected
         // postpone：状态不推进，论文保持原状态，择期重排批次即可
+        // P5：合成成功的总评成绩暂存于此，用于阶段门推进后补发成绩通知
+        BigDecimal synthesizedScore = null;
         PaperInfo paper = paperInfoMapper.selectById(record.getPaperId());
         if (paper != null) {
             String currentStatus = paper.getPaperStatus();
@@ -267,9 +278,20 @@ public class TeacherDefenseServiceImpl implements TeacherDefenseService {
                 PaperInfo updatePaper = new PaperInfo();
                 updatePaper.setId(paper.getId());
                 updatePaper.setPaperStatus(targetStatus);
-                // 终期通过时回写 final_score
+                // 终期通过时回写 final_score：P5 起改为加权合成
+                //（指导分×w1% + 评阅分×w2% + 答辩分×w3%，权重来自 system_param 三列，
+                // 组长录入的 req.score 只作为其中"答辩分"数据源，不再直接回写）。
+                // 阶段门推进逻辑一字未动——合成失败（缺指导分 40914 / 权重非法 40915 /
+                // 任何意外）只吞掉并记日志，final_score 留空照样放行 defense_passed；
+                // 存量已答辩数据不回刷，失败论文由管理端
+                // POST /api/admin/thesis/{paperId}/recompute-score 重算兜底。
                 if (isFinal && DefenseRecord.RESULT_PASS.equals(req.getResult())) {
-                    updatePaper.setFinalScore(req.getScore());
+                    try {
+                        synthesizedScore = scoreComposeService.compose(paper.getId());
+                        updatePaper.setFinalScore(synthesizedScore);
+                    } catch (Exception e) {
+                        log.error("总评成绩合成失败，不阻断阶段门，paperId={}", paper.getId(), e);
+                    }
                 }
                 paperInfoMapper.updateById(updatePaper);
                 paperStatusLogService.recordStatusLog(paper.getId(), currentStatus, targetStatus,
@@ -301,6 +323,13 @@ public class TeacherDefenseServiceImpl implements TeacherDefenseService {
                     batch.getBatchNo(), req.getResult(),
                     req.getScore() == null ? null : req.getScore().toPlainString(),
                     req.getGrade());
+        }
+
+        // P5：加权合成成功时额外通知学生总评成绩已出（门面吞异常，不影响主流程）；
+        // 合成失败的论文不发本通知，避免给学生"成绩已出"的误导
+        if (paper != null && paper.getStudentId() != null && synthesizedScore != null) {
+            notificationFacadeService.sendScoreSynthesizedNotice(paper.getId(),
+                    paper.getPaperTitle(), paper.getStudentId(), synthesizedScore.toPlainString());
         }
 
         log.info("答辩结论提交成功：recordId={}，batchId={}，paperId={}，result={}，operatorId={}",
