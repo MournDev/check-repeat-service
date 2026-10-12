@@ -160,7 +160,7 @@ SELECT COUNT(*) AS check_defense_group_member FROM information_schema.tables
 SELECT COUNT(*) AS check_defense_record FROM information_schema.tables
  WHERE table_schema = DATABASE() AND table_name = 'defense_record';
 
--- 5.4 答辩相关字典条数：期望 18（6 个字典类型 × 合计 18 条数据）
+-- 5.4 答辩相关字典条数：期望 17（批次状态3 + 类型2 + 方式2 + 组角色2 + 结论3 + 等级5）
 --     sys_dict_data 表无 is_deleted 列，勿加此过滤
 SELECT COUNT(*) AS check_defense_dict FROM sys_dict_data
  WHERE dict_type IN ('defense_batch_status', 'defense_batch_type', 'defense_mode',
