@@ -139,7 +139,7 @@ public class PaperInfo extends BaseEntity implements Serializable {
     private String paperStatus;
 
     /**
-     * 当前多级初审步骤（论文全生命周期 P2，列见 db/补论文全生命周期P2.sql）：
+     * 当前多级初审步骤（论文全生命周期 P2，列见 db/init.sql 与 db/存量修复.sql 段 1.16）：
      * 0-未进入工作流（导师初审中/已完成/未启用工作流）；
      * 1..N-初审工作流第 N 步审批中（步骤定义在 review_workflow.steps，1-based）。
      * 仅在 paper_status=auditing 且启用工作流时有意义。

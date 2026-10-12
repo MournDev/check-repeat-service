@@ -102,7 +102,7 @@ public class AdminUserServiceImpl implements AdminUserService {
                 return Result.error(ResultCode.SYSTEM_ERROR,"用户名已存在");
             }
 
-            // 守护栏（P0）：角色指派边界 —— 超管账号只能由 SQL 引导产生（补初始账号.sql），
+            // 守护栏（P0）：角色指派边界 —— 超管账号只能由 SQL 引导产生（种子数据.sql 段 11），
             // 管理员账号只有超管能创建，防止 ADMIN 横向扩编管理面
             String createRoleCode = UserBusinessInfoUtils.getRoleCodeById(createReq.getRoleId());
             if (UserBusinessInfoUtils.ROLE_SUPER_ADMIN.equals(createRoleCode)) {

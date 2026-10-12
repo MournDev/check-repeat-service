@@ -8,7 +8,7 @@ import lombok.EqualsAndHashCode;
 import java.time.LocalDateTime;
 
 /**
- * 指导记录实体类（对应数据库表：guidance_record，见 db/补论文全生命周期P1.sql）。
+ * 指导记录实体类（对应数据库表：guidance_record，见 db/init.sql 与 db/种子数据.sql 段 10）。
  *
  * 业务规则（论文全生命周期 P1）：
  *  - 教师对其指导关系内的论文发起指导记录，学生确认后固化；

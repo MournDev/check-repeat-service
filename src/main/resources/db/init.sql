@@ -1,9 +1,9 @@
--- ⚠️⚠️ 本文件含 63 条 DROP TABLE —— 只允许对**空库**整份执行。⚠️⚠️
+-- ⚠️⚠️ 本文件含 76 条 DROP TABLE —— 只允许对**空库**整份执行。⚠️⚠️
 -- ⚠️⚠️ 线上库、以及任何已有数据的库，整份跑 = 清空全部数据，且不可恢复。⚠️⚠️
--- 已有数据的库要改结构，请照本文件另写一份只含本次变更的 ALTER 脚本手工跑。
+-- 已有数据的库要改结构，请跑同目录 存量修复.sql（幂等 ALTER/DDL 补救）。
 -- 各脚本什么时候该跑、什么时候绝对不能跑，见同目录 README.md。
 -- ============================================================================
--- 建表脚本 —— 本仓库唯一的表结构来源（59 张表）。
+-- 建表脚本 —— 本仓库唯一的表结构来源（76 张表）。
 --
 -- 由「旧一体化系统导出的库结构 + 按实体类和 Mapper XML 校正」而来，与 Java 实体 /
 -- MyBatis-Plus 的约定对齐（逻辑删除列 is_deleted、create_*/update_* 审计列、字典取值）。
@@ -11,8 +11,8 @@
 --
 -- 执行约定：
 --   · 开头是 DROP TABLE IF EXISTS，**只能对空库整份执行**；
---   · 已有数据的库要改结构，请照本文件写一份只含本次变更的 ALTER 脚本手工跑，
---     不要整份重跑（会清数据）；
+--   · 已有数据的库补结构差量，跑同目录 存量修复.sql（幂等，可重复执行），
+--     不要整份重跑本文件（会清数据）；
 --   · 初始数据见同目录 种子数据.sql；存量库的结构/数据补救见 存量修复.sql。
 -- ============================================================================
 
@@ -107,6 +107,37 @@ CREATE TABLE `admin_task_intervene_log` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_task_type_id` (`task_type`,`task_id`) COMMENT '避免同一任务重复记录干预日志'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='管理员任务干预日志表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `advisor_evaluation`
+--
+
+DROP TABLE IF EXISTS `advisor_evaluation`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `advisor_evaluation` (
+  `id`                 bigint       NOT NULL COMMENT '主键ID（雪花）',
+  `paper_id`           bigint       NOT NULL COMMENT '论文ID（关联paper_info.id）',
+  `student_id`         bigint       NOT NULL COMMENT '评价学生ID（关联sys_user.id；仅管理端实名可见，教师端永不返回）',
+  `teacher_id`         bigint       NOT NULL COMMENT '被评价导师ID（关联sys_user.id，提交时取 paper_info.teacher_id 快照）',
+  `score_timeliness`   tinyint      NOT NULL COMMENT '指导及时性（1-5星）',
+  `score_quality`      tinyint      NOT NULL COMMENT '反馈质量（1-5星）',
+  `score_attitude`     tinyint      NOT NULL COMMENT '责任心态度（1-5星）',
+  `score_professional` tinyint      NOT NULL COMMENT '专业能力（1-5星）',
+  `score_overall`      tinyint      NOT NULL COMMENT '总体满意度（1-5星；导师评价分=avg/5×100）',
+  `tags`               varchar(500) DEFAULT NULL COMMENT '预设标签（JSON数组，元素为字典 advisor_eval_tag 的 dict_value）',
+  `comment`            varchar(500) DEFAULT NULL COMMENT '文字评语（选填，jsoup 纯文本清洗后落库）',
+  `create_by`          bigint       DEFAULT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time`        datetime     DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by`          bigint       DEFAULT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time`        datetime     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted`         tinyint      DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_paper_id` (`paper_id`),
+  KEY `idx_teacher` (`teacher_id`, `is_deleted`),
+  KEY `idx_student` (`student_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='导师评价表（论文全生命周期P6a：学生对指导教师评价，教师端仅见聚合）';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -276,6 +307,59 @@ CREATE TABLE `category_similarity_threshold` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `check_college_quota`
+--
+
+DROP TABLE IF EXISTS `check_college_quota`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `check_college_quota` (
+  `id`          bigint   NOT NULL COMMENT '主键ID（雪花）',
+  `college_id`  bigint   NOT NULL COMMENT '学院ID（关联college.id）',
+  `quota_month` char(7)  NOT NULL COMMENT '额度月份（yyyy-MM，如2026-10）',
+  `total_quota` int      NOT NULL COMMENT '当月总额度（次）',
+  `used_quota`  int      NOT NULL DEFAULT '0' COMMENT '当月已用额度（次）',
+  `create_by`   bigint   DEFAULT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by`   bigint   DEFAULT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted`  tinyint  DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by`   bigint   DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_college_month` (`college_id`, `quota_month`),
+  KEY `idx_ccq_month` (`quota_month`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='学院月度查重额度表（论文全生命周期P5）';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `check_policy`
+--
+
+DROP TABLE IF EXISTS `check_policy`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `check_policy` (
+  `id`             bigint        NOT NULL COMMENT '主键ID（雪花）',
+  `degree_type`    varchar(20)   NOT NULL COMMENT '学位类型：undergraduate-本科 / master-硕士 / doctor-博士（唯一）',
+  `threshold`      decimal(5,2)  NOT NULL COMMENT '合格阈值（总相似比百分比，如20.00表示20%）',
+  `max_per_source` decimal(5,2)  DEFAULT NULL COMMENT '单篇最大相似比上限（百分比，可空=不启用该项校验）',
+  `max_check_count` int          DEFAULT NULL COMMENT '每篇论文最多查重次数（可空=沿用全局 admin.check-rule.default-max-count）',
+  `check_interval` int           DEFAULT NULL COMMENT '两次查重间隔秒数（可空=沿用全局 admin.check-rule.default-interval）',
+  `enabled`        tinyint       NOT NULL DEFAULT '1' COMMENT '是否启用：1-启用 / 0-停用',
+  `create_by`      bigint        DEFAULT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time`    datetime      DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by`      bigint        DEFAULT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time`    datetime      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted`     tinyint       DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by`      bigint        DEFAULT NULL COMMENT '删除人ID',
+  `delete_time`    datetime      DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_degree_type` (`degree_type`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='学位检测策略集（论文全生命周期P5，超管维护）';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Table structure for table `check_report`
 --
 
@@ -298,6 +382,7 @@ CREATE TABLE `check_report` (
   `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
   `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
   `total_similarity` decimal(5,2) DEFAULT NULL COMMENT '总相似度',
+  `content_hash` varchar(64) DEFAULT NULL COMMENT '报告内容哈希（P5：SHA-256(关键要素JSON+盐) 小写 hex，公开验真接口重算比对；历史报告为 NULL 视为不可验真）',
   `report_generate_time` timestamp NULL DEFAULT NULL COMMENT '报告生成时间',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_report_no` (`report_no`),
@@ -320,6 +405,8 @@ CREATE TABLE `check_result` (
   `submit_id` bigint DEFAULT NULL COMMENT '论文提交ID（关联paper_submit.id）',
   `rule_id` bigint DEFAULT NULL COMMENT '查重规则ID（关联check_rule.id）',
   `repeat_rate` decimal(5,2) DEFAULT NULL COMMENT '重复率（百分比，如25.32）',
+  `max_per_source` decimal(5,2) DEFAULT NULL COMMENT '单篇最大相似比（P5 新口径，与 check_task 同义）',
+  `citation_rate` decimal(5,2) DEFAULT NULL COMMENT '引用率（P5 新口径，与 check_task 同义）',
   `check_source` varchar(50) DEFAULT NULL COMMENT '查重来源（LOCAL-本地库，THIRD_PARTY-第三方API）',
   `most_similar_paper` varchar(200) DEFAULT NULL COMMENT '最相似论文标题',
   `similar_paper_id` bigint DEFAULT NULL COMMENT '最相似论文ID（本地库专用）',
@@ -381,6 +468,36 @@ CREATE TABLE `check_rule` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `check_sentence_hit`
+--
+
+DROP TABLE IF EXISTS `check_sentence_hit`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `check_sentence_hit` (
+  `id`              bigint        NOT NULL COMMENT '主键ID（雪花）',
+  `task_id`         bigint        NOT NULL COMMENT '查重任务ID（关联check_task.id）',
+  `sentence_index`  int           NOT NULL COMMENT '句子序号（正文剔除参考文献区块后，从0开始）',
+  `sentence_text`   varchar(1000) NOT NULL COMMENT '句子文本（超1000字符截断）',
+  `start_offset`    int           DEFAULT NULL COMMENT '句子在正文中的起始偏移',
+  `similarity`      decimal(5,2)  NOT NULL COMMENT '句相似度（如82.35表示82.35%）',
+  `is_citation`     tinyint       NOT NULL DEFAULT '0' COMMENT '是否引用句：1-句尾带[n]引注且文档存在参考文献区块（引用命中不计入总相似比）/ 0-普通命中',
+  `hit_paper_id`    bigint        DEFAULT NULL COMMENT '命中来源论文ID（关联paper_info.id）',
+  `hit_paper_title` varchar(200)  DEFAULT NULL COMMENT '命中来源论文标题（冗余，明细页直接展示）',
+  `create_by`       bigint        DEFAULT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time`     datetime      DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by`       bigint        DEFAULT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time`     datetime      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted`      tinyint       DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by`       bigint        DEFAULT NULL COMMENT '删除人ID',
+  `delete_time`     datetime      DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_csh_task` (`task_id`),
+  KEY `idx_csh_hit_paper` (`hit_paper_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='句级标红明细表（论文全生命周期P5）';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Table structure for table `check_task`
 --
 
@@ -394,6 +511,8 @@ CREATE TABLE `check_task` (
   `report_id` bigint DEFAULT NULL COMMENT '对应的查重报告ID（关联check_report.id，任务成功时生成）',
   `task_no` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL COMMENT '任务编号（如“CHECK20240512001”，唯一）',
   `check_rate` decimal(5,2) DEFAULT NULL COMMENT '查重重复率（如15.32表示15.32%）',
+  `max_per_source` decimal(5,2) DEFAULT NULL COMMENT '单篇最大相似比（P5 新口径：所有来源中单篇贡献的最大重复占比，如 12.34 表示 12.34%。存量行为旧口径，不迁移）',
+  `citation_rate` decimal(5,2) DEFAULT NULL COMMENT '引用率（P5：引用命中句字数 / 正文字数，如 3.21 表示 3.21%）',
   `check_status` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT 'pending' COMMENT '任务状态（pending-待查重，checking-查重中，completed-查重成功，failure-查重失败）。默认值必须是字典内的值：漏赋值的 INSERT 若落进 0 这种字典外的值，按状态筛选的查询就永远看不到它',
   `start_time` datetime DEFAULT NULL COMMENT '任务开始时间',
   `end_time` datetime DEFAULT NULL COMMENT '任务结束时间',
@@ -552,6 +671,98 @@ CREATE TABLE `conversations` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `defense_batch`
+--
+
+DROP TABLE IF EXISTS `defense_batch`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `defense_batch` (
+  `id`            bigint        NOT NULL COMMENT '主键ID（雪花）',
+  `batch_no`      varchar(32)   NOT NULL COMMENT '批次编号（人工或系统生成，唯一）',
+  `batch_type`    varchar(16)   NOT NULL DEFAULT 'final' COMMENT '批次类型：mid_term-中期答辩 / final-终期答辩',
+  `college_id`    bigint        DEFAULT NULL COMMENT '学院ID（关联college.id，可空表示全校批次）',
+  `defense_date`  datetime      NOT NULL COMMENT '答辩时间',
+  `location`      varchar(128)  DEFAULT NULL COMMENT '地点：线下填教室、线上填会议链接',
+  `mode`          varchar(16)   NOT NULL DEFAULT 'offline' COMMENT '答辩方式：online-线上 / offline-线下',
+  `leader_id`     bigint        DEFAULT NULL COMMENT '答辩组长ID（关联sys_user.id，组长主持并汇总结论）',
+  `secretary_id`  bigint        DEFAULT NULL COMMENT '答辩秘书ID（关联sys_user.id，负责记录与线下回填）',
+  `status`        tinyint       NOT NULL DEFAULT '0' COMMENT '批次状态：0-筹备中 / 1-进行中 / 2-已结束',
+  `remark`        varchar(255)  DEFAULT NULL COMMENT '备注（可空）',
+  `create_by`     bigint        DEFAULT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time`   datetime      DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by`     bigint        DEFAULT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time`   datetime      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted`    tinyint       DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by`     bigint        DEFAULT NULL COMMENT '删除人ID',
+  `delete_time`   datetime      DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_batch_no` (`batch_no`),
+  KEY `idx_batch_type_date` (`batch_type`, `defense_date`),
+  KEY `idx_college_status` (`college_id`, `status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='答辩批次表（论文全生命周期P3，中期/终期共用）';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `defense_group_member`
+--
+
+DROP TABLE IF EXISTS `defense_group_member`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `defense_group_member` (
+  `id`          bigint       NOT NULL COMMENT '主键ID（雪花）',
+  `batch_id`    bigint       NOT NULL COMMENT '批次ID（关联defense_batch.id）',
+  `teacher_id`  bigint       NOT NULL COMMENT '教师ID（关联sys_user.id）',
+  `group_role`  varchar(16)  NOT NULL DEFAULT 'member' COMMENT '组角色：leader-组长 / member-成员',
+  `create_by`   bigint       DEFAULT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time` datetime     DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by`   bigint       DEFAULT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time` datetime     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted`  tinyint      DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by`   bigint       DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime     DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_batch_teacher` (`batch_id`, `teacher_id`),
+  KEY `idx_teacher_id` (`teacher_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='答辩组成员表（论文全生命周期P3）';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `defense_record`
+--
+
+DROP TABLE IF EXISTS `defense_record`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `defense_record` (
+  `id`             bigint        NOT NULL COMMENT '主键ID（雪花）',
+  `batch_id`       bigint        NOT NULL COMMENT '批次ID（关联defense_batch.id）',
+  `paper_id`       bigint        NOT NULL COMMENT '论文ID（关联paper_info.id）',
+  `student_id`     bigint        NOT NULL COMMENT '学生ID（关联sys_user.id）',
+  `defense_order`  int           DEFAULT NULL COMMENT '答辩顺序号（同批次内人工编排，可空）',
+  `score`          decimal(5,2)  DEFAULT NULL COMMENT '综合得分（0-100，组长汇总后写入）',
+  `grade`          varchar(8)    DEFAULT NULL COMMENT '等级：优/良/中/及格/不及格',
+  `result`         varchar(16)   DEFAULT NULL COMMENT '结论：pass-通过 / fail-不通过 / postpone-缓辩',
+  `comment`        text          COMMENT '答辩记录（纯文本，入库前已做XSS清洗）',
+  `attachment_id`   bigint        DEFAULT NULL COMMENT '线下答辩表扫描件（关联file_info.id，可空）',
+  `submit_by`      bigint        DEFAULT NULL COMMENT '结论提交人ID（通常为组长，关联sys_user.id）',
+  `submit_time`    datetime      DEFAULT NULL COMMENT '结论提交时间',
+  `create_by`      bigint        DEFAULT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time`    datetime      DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by`      bigint        DEFAULT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time`    datetime      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted`     tinyint       DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by`      bigint        DEFAULT NULL COMMENT '删除人ID',
+  `delete_time`    datetime      DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_batch_paper` (`batch_id`, `paper_id`),
+  KEY `idx_paper_id` (`paper_id`),
+  KEY `idx_student_id` (`student_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='答辩记录表（论文全生命周期P3）';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Table structure for table `file_info`
 --
 
@@ -581,6 +792,40 @@ CREATE TABLE `file_info` (
   UNIQUE KEY `idx_md5` (`md5`) USING BTREE,
   KEY `idx_file_info_md5` (`md5`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='文件信息表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `guidance_record`
+--
+
+DROP TABLE IF EXISTS `guidance_record`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `guidance_record` (
+  `id`               bigint       NOT NULL COMMENT '主键ID（雪花）',
+  `paper_id`         bigint       NOT NULL COMMENT '论文ID（关联paper_info.id）',
+  `student_id`       bigint       NOT NULL COMMENT '学生ID（关联sys_user.id）',
+  `teacher_id`       bigint       NOT NULL COMMENT '指导教师ID（关联sys_user.id）',
+  `round`            int          NOT NULL COMMENT '指导轮次（同论文内自增，(paper_id,round)唯一）',
+  `guidance_type`    varchar(16)  NOT NULL DEFAULT 'online' COMMENT '指导方式：online-线上 / offline-线下',
+  `guidance_time`    datetime     NOT NULL COMMENT '指导时间',
+  `content`          text         COMMENT '指导内容（纯文本，入库前已做XSS清洗）',
+  `student_feedback` text         COMMENT '学生反馈（确认时填写，可空）',
+  `attachment_id`    bigint       DEFAULT NULL COMMENT '附件ID（关联file_info.id，可空）',
+  `confirm_status`   tinyint      NOT NULL DEFAULT '0' COMMENT '确认状态：0-待学生确认 / 1-已确认 / 2-有异议',
+  `confirm_time`     datetime     DEFAULT NULL COMMENT '学生确认时间',
+  `create_by`        bigint       DEFAULT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time`      datetime     DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by`        bigint       DEFAULT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time`      datetime     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted`       tinyint      DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by`        bigint       DEFAULT NULL COMMENT '删除人ID',
+  `delete_time`      datetime     DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_paper_round` (`paper_id`, `round`),
+  KEY `idx_teacher_id` (`teacher_id`),
+  KEY `idx_student_id` (`student_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='指导记录表（论文全生命周期P1）';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -830,6 +1075,36 @@ CREATE TABLE `paper_attachment_rel` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `paper_check_signoff`
+--
+
+DROP TABLE IF EXISTS `paper_check_signoff`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `paper_check_signoff` (
+  `id`             bigint        NOT NULL COMMENT '主键ID（雪花）',
+  `paper_id`       bigint        NOT NULL COMMENT '论文ID（关联paper_info.id）',
+  `task_id`        bigint        NOT NULL COMMENT '查重任务ID（关联check_task.id，签核对象）',
+  `report_id`      bigint        DEFAULT NULL COMMENT '查重报告ID（关联check_report.id，可空）',
+  `advisor_id`     bigint        NOT NULL COMMENT '签核导师ID（关联sys_user.id，必须是论文teacher_id本人）',
+  `qualified`      tinyint       NOT NULL COMMENT '签核结论：1-合格放行 / 0-不合格退回修改',
+  `guidance_score` decimal(5,2)  DEFAULT NULL COMMENT '指导评分（0-100，成绩加权合成的指导分数据源）',
+  `comment`        varchar(500)  DEFAULT NULL COMMENT '签核意见',
+  `sign_time`      datetime      NOT NULL COMMENT '签核时间',
+  `create_by`      bigint        DEFAULT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time`    datetime      DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by`      bigint        DEFAULT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time`    datetime      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted`     tinyint       DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by`      bigint        DEFAULT NULL COMMENT '删除人ID',
+  `delete_time`    datetime      DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_paper_task` (`paper_id`, `task_id`),
+  KEY `idx_pcs_advisor` (`advisor_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='查重报告导师签核表（论文全生命周期P5）';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Table structure for table `paper_info`
 --
 
@@ -859,7 +1134,9 @@ CREATE TABLE `paper_info` (
   `page_count` int DEFAULT NULL COMMENT '论文页数',
   `word_count` int DEFAULT NULL COMMENT '论文字数',
   `paper_status` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT 'pending' COMMENT '论文状态（pending-待分配，assigned-已分配导师，checking-待查重，auditing-待审核，completed-审核通过，rejected-审核不通过，withdrawn-已取消）。默认值必须是字典内的值，不能是 0：论文提交后就是待分配，漏赋值的 INSERT 落进字典外的值，会同时从待分配列表和所有状态统计里消失',
+  `workflow_step` int NOT NULL DEFAULT '0' COMMENT '当前多级初审步骤：0-未进入工作流 / 1..N-第N步审批中（review_workflow.steps 顺序）',
   `similarity_rate` decimal(5,2) DEFAULT NULL COMMENT '相似度',
+  `degree_type` varchar(20) DEFAULT 'undergraduate' COMMENT '学位类型（P5 检测策略集匹配维度：undergraduate-本科 / master-硕士 / doctor-博士，对应字典 degree_type；存量默认本科）',
   `check_result` text COMMENT '查重结果',
   `submit_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '论文提交时间',
   `check_time` datetime DEFAULT NULL COMMENT '查重时间',
@@ -890,7 +1167,8 @@ CREATE TABLE `paper_info` (
   KEY `idx_paper_info_status` (`paper_status`,`is_deleted`),
   KEY `idx_paper_info_delete_by` (`delete_by`),
   KEY `idx_paper_info_lib_id` (`lib_id`),
-  KEY `idx_paper_info_subject_id` (`subject_id`)
+  KEY `idx_paper_info_subject_id` (`subject_id`),
+  KEY `idx_pi_degree` (`degree_type`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='论文信息表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -1013,6 +1291,40 @@ CREATE TABLE `re_submit_record` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `review_assignment`
+--
+
+DROP TABLE IF EXISTS `review_assignment`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `review_assignment` (
+  `id`             bigint        NOT NULL COMMENT '主键ID（雪花）',
+  `paper_id`       bigint        NOT NULL COMMENT '论文ID（关联paper_info.id）',
+  `submit_version` int           NOT NULL DEFAULT '1' COMMENT '评阅针对的论文版本号（paper_submit.submit_version，版本演进后历史评阅不失效）',
+  `reviewer_id`    bigint        NOT NULL COMMENT '评阅教师ID（关联sys_user.id）',
+  `review_type`    varchar(16)   NOT NULL DEFAULT 'peer' COMMENT '评阅类型：advisor-导师评阅 / peer-交叉评阅 / blind-盲审（查询层脱敏）',
+  `method`         varchar(16)   NOT NULL DEFAULT 'online' COMMENT '评阅方式：online-线上 / offline-线下（结果回填）',
+  `status`         tinyint       NOT NULL DEFAULT '0' COMMENT '状态：0-待评阅 / 1-评阅中 / 2-已提交 / 3-已超时转派',
+  `score`          decimal(5,2)  DEFAULT NULL COMMENT '评分（0-100，线下任务可提交时回填）',
+  `comment`        text          COMMENT '评阅意见（线下任务可为空，以扫描件为准）',
+  `attachment_id`  bigint        DEFAULT NULL COMMENT '线下评阅表扫描件（关联file_info.id，可空）',
+  `deadline`       datetime      DEFAULT NULL COMMENT '评阅截止时间（超时扫描挂定时任务）',
+  `assign_type`    varchar(16)   NOT NULL DEFAULT 'manual' COMMENT '分配方式：auto-自动 / manual-手动',
+  `create_by`      bigint        DEFAULT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time`    datetime      DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by`      bigint        DEFAULT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time`    datetime      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted`     tinyint       DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by`      bigint        DEFAULT NULL COMMENT '删除人ID',
+  `delete_time`    datetime      DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_paper_version_reviewer` (`paper_id`, `submit_version`, `reviewer_id`),
+  KEY `idx_reviewer_status` (`reviewer_id`, `status`),
+  KEY `idx_paper_id` (`paper_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='评阅任务表（论文全生命周期P2）';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Table structure for table `review_draft`
 --
 
@@ -1116,6 +1428,34 @@ CREATE TABLE `review_workflow` (
   `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='审核工作流表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `review_workflow_progress`
+--
+
+DROP TABLE IF EXISTS `review_workflow_progress`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `review_workflow_progress` (
+  `id`          bigint    NOT NULL COMMENT '主键ID（雪花）',
+  `paper_id`    bigint    NOT NULL COMMENT '论文ID（关联paper_info.id）',
+  `step_index`  int       NOT NULL COMMENT '步骤序号（1-based，对应 review_workflow.steps 数组下标+1）',
+  `approver_id` bigint    NOT NULL COMMENT '审批人ID（关联sys_user.id）',
+  `vote_result` tinyint   NOT NULL COMMENT '投票结果：1-通过 / 2-驳回',
+  `opinion`     text      COMMENT '审批意见（可空）',
+  `vote_time`   datetime  NOT NULL COMMENT '投票时间',
+  `create_by`   bigint    DEFAULT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time` datetime  DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by`   bigint    DEFAULT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time` datetime  DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted`  tinyint   DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by`   bigint    DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime  DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_paper_step_approver` (`paper_id`, `step_index`, `approver_id`),
+  KEY `idx_paper_step` (`paper_id`, `step_index`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='多级初审投票表（论文全生命周期P2）';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1695,6 +2035,9 @@ CREATE TABLE `system_param` (
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   `backup_retention_days` int DEFAULT '30' COMMENT '备份文件保留天数',
   `backup_enabled` int DEFAULT '1' COMMENT '是否启用自动备份(0-禁用,1-启用)',
+  `guidance_weight` decimal(5,2) DEFAULT '20.00' COMMENT '成绩加权合成 · 指导分权重（百分比，默认20；三项合计≠100 抛 40915）',
+  `review_weight` decimal(5,2) DEFAULT '30.00' COMMENT '成绩加权合成 · 评阅分权重（百分比，默认30）',
+  `defense_weight` decimal(5,2) DEFAULT '50.00' COMMENT '成绩加权合成 · 答辩分权重（百分比，默认50）',
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='系统参数表（存储全局基础配置）';
 /*!40101 SET character_set_client = @saved_cs_client */;

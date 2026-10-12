@@ -3,14 +3,15 @@
 --
 -- ⚠️ 本文件不是「什么库都能整份跑」。按库的状态分三种用法：
 --
---   · 空库 —— 按顺序跑 init.sql → 本文件，段 1~8 全跑，得到一套可用数据。
+--   · 空库 —— 按顺序跑 init.sql → 本文件，段 1~11 全跑，得到一套可用数据。
 --
---   · 就是要换成这份清单的库 —— 段 1~8 全跑。段 1~3 把 college / major 整表
+--   · 就是要换成这份清单的库 —— 段 1~11 全跑。段 1~3 把 college / major 整表
 --     替换成下面这份 20 / 114 清单、段 3 顺带把全库引用从旧 id 改绑到新 id；
 --     段 3B 同样整表替换 subject / major_subject。
 --
---   · 其余已有数据的库 —— **只跑段 4~7**。这四段（操作类型字典 / 知识库分类 /
---     消息模板 / 查重规则）按各自的唯一键做 ON DUPLICATE KEY UPDATE，
+--   · 其余已有数据的库 —— **只跑段 4~7、5B、9~11**。这些段（操作类型字典 /
+--     知识库分类与文章 / 消息模板 / 查重规则 / 审核意见模板 / 全生命周期字典 /
+--     内置角色与超管账号）按各自的唯一键 upsert 或 INSERT IGNORE，
 --     重复执行不会插出重复行。不要跑段 0~3B：
 --       · 段 0 先 DROP 掉 bak_college/bak_major 再重建 —— 跑第二遍就把上一次
 --         留下的备份毁了，那是唯一的旧数据副本；
@@ -27,9 +28,13 @@
 --  3B    subject / major_subject  学科领域 + 专业↔学科映射（取代 sys_dict_data 的字符串树）
 --   4    sys_operation_type    操作类型字典（日志中心「模块使用率」靠它分类）
 --   5    knowledge_category    知识库分类（knowledge_article.category_id 指向它）
+--  5B    knowledge_article     帮助中心 15 篇文章（INSERT IGNORE，不回写界面改动）
 --   6    message_template      消息模板（缺哪个 code，对应的站内信就发不出去）
 --   7    check_rule            查重规则（缺 is_default=1 那条，学生端规则卡片直接 404）
---   8    自检
+--   8    自检（段 1~7）
+--   9    review_template       审核意见模板（10 条公开模板，覆盖全部 5 个分类）
+--   10   全生命周期字典        paper_status 70xx / 评阅 71xx / 答辩 72xx / 学位 73xx / 导师评价标签 74xx
+--   11   sys_role + sys_user   4 个内置角色 + 超级管理员账号
 --
 --   3B 放在 3 之后，是要先让 college/major 的固定 id 就位 —— 专业映射写的就是这些 id。
 --
@@ -924,6 +929,49 @@ ON DUPLICATE KEY UPDATE `name` = VALUES(`name`), `icon` = VALUES(`icon`), `sort`
 
 
 -- ============================================================================
+-- 段 5B：帮助中心文章 knowledge_article（15 篇）
+--
+-- 段 5 只建了 6 个分类，本段播正文 —— 缺它的话，帮助中心只有空分类。
+-- 文章靠 category_id 指向段 5 的分类 id，所以段 5 必须先跑（本文件顺序已保证）。
+--
+-- 用 INSERT IGNORE 而不是 ON DUPLICATE KEY UPDATE，三个理由：
+--   1) 空库跑就是全插，本段的目标场景；
+--   2) 重复跑是无操作，不会报错；
+--   3) 永远不会覆盖管理端在界面上改过的文章 —— 种子数据不该反向回写用户内容。
+--
+-- id 是写死的雪花 id。正文是 **Markdown**（全 15 篇都没有 HTML 标签，前端按
+-- Markdown 渲染）；summary 是正文开头截的一段，列表页用。status='PUBLISHED'
+-- 才在前台可见。author_id=0 / author_name='系统管理员'：0 在 sys_user 里没有
+-- 对应行，该列无外键，只用于展示作者名，别去补用户。
+-- （原 补知识库.sql 内容归并进本段，2026-10-12）
+-- ============================================================================
+
+INSERT  IGNORE INTO `knowledge_article` (`id`, `title`, `content`, `summary`, `category_id`, `tags`, `view_count`, `status`, `sort`, `author_id`, `author_name`, `create_time`, `update_time`, `is_deleted`) VALUES (707990677043687424,'系统概述与快速入门','## 系统概述\n\n论文查重管理系统是一站式毕业论文管理平台，支持论文提交、查重检测、导师审核全流程。\n\n### 主要功能\n- **论文提交**：上传 DOC/DOCX/PDF 格式论文\n- **查重检测**：基于 SimHash 算法的本地查重引擎\n- **导师互动**：与指导老师实时沟通\n- **审核流程**：教师在线审核并给出修改意见\n\n### 快速上手\n1. 注册账号并完善个人信息\n2. 确认导师分配\n3. 提交论文文件\n4. 等待查重结果\n5. 根据查重报告修改论文\n','## 系统概述\n\n论文查重管理系统是一站式毕业论文管理平台，支持论文提交、查重检测、导师审核全流程。\n\n### 主要功能\n- **论文提交**：上传 DOC/DOCX/PDF 格式论文\n- **查重检测**：基于 SimHash 算法的本地查重引擎\n- **导师互动**：与指导老师实时沟通\n- **审核流程**：教师在线审核并给出修改意见\n\n### 快速上手\n1. 注册账号并完善个人信息\n2. 确',707990676951412736,'',1,'PUBLISHED',0,0,'系统管理员','2026-05-09 00:22:11','2026-05-26 19:35:54',0);
+INSERT  IGNORE INTO `knowledge_article` (`id`, `title`, `content`, `summary`, `category_id`, `tags`, `view_count`, `status`, `sort`, `author_id`, `author_name`, `create_time`, `update_time`, `is_deleted`) VALUES (707990677064658944,'如何注册账号','## 注册流程\n\n1. 访问系统首页，点击\"注册\"按钮\n2. 填写账号信息：学号、姓名、身份证号\n3. 选择学院、专业、年级\n4. 设置密码\n5. 提交注册，等待审核\n\n> 注：学号和身份证号将用于身份验证，请如实填写。\n','## 注册流程\n\n1. 访问系统首页，点击\"注册\"按钮\n2. 填写账号信息：学号、姓名、身份证号\n3. 选择学院、专业、年级\n4. 设置密码\n5. 提交注册，等待审核\n\n> 注：学号和身份证号将用于身份验证，请如实填写。\n',707990676951412736,'',2,'PUBLISHED',0,0,'系统管理员','2026-05-09 00:22:11','2026-05-10 13:16:50',0);
+INSERT  IGNORE INTO `knowledge_article` (`id`, `title`, `content`, `summary`, `category_id`, `tags`, `view_count`, `status`, `sort`, `author_id`, `author_name`, `create_time`, `update_time`, `is_deleted`) VALUES (707990677068853248,'个人信息设置指南','## 完善个人信息\n\n登录后，点击右上角头像 → \"账号设置\"：\n\n- **基本信息**：姓名、学号、学院、专业、班级\n- **联系方式**：邮箱（用于接收查重通知）、手机号\n- **头像**：支持上传自定义头像\n- **密码修改**：定期更换密码保障账户安全\n\n信息填写完整后，系统将根据您的专业自动匹配合适的导师。\n','## 完善个人信息\n\n登录后，点击右上角头像 → \"账号设置\"：\n\n- **基本信息**：姓名、学号、学院、专业、班级\n- **联系方式**：邮箱（用于接收查重通知）、手机号\n- **头像**：支持上传自定义头像\n- **密码修改**：定期更换密码保障账户安全\n\n信息填写完整后，系统将根据您的专业自动匹配合适的导师。\n',707990676951412736,'',2,'PUBLISHED',0,0,'系统管理员','2026-05-09 00:22:11','2026-06-21 19:33:03',0);
+INSERT  IGNORE INTO `knowledge_article` (`id`, `title`, `content`, `summary`, `category_id`, `tags`, `view_count`, `status`, `sort`, `author_id`, `author_name`, `create_time`, `update_time`, `is_deleted`) VALUES (707990677077241856,'论文提交流程详解','## 论文提交步骤\n\n### 第一步：准备文件\n支持格式：`.doc` / `.docx` / `.pdf`，单个文件不超过 200MB\n\n### 第二步：上传论文\n进入\"论文提交\"页面，拖拽或点击上传论文文件\n\n### 第三步：填写论文信息\n- 论文标题（必填）\n- 摘要（必填）\n- 关键词（选填）\n- 指导教师（已自动匹配）\n\n### 第四步：确认提交\n检查信息无误后点击\"提交\"，系统将自动开始查重流程。\n','## 论文提交步骤\n\n### 第一步：准备文件\n支持格式：`.doc` / `.docx` / `.pdf`，单个文件不超过 200MB\n\n### 第二步：上传论文\n进入\"论文提交\"页面，拖拽或点击上传论文文件\n\n### 第三步：填写论文信息\n- 论文标题（必填）\n- 摘要（必填）\n- 关键词（选填）\n- 指导教师（已自动匹配）\n\n### 第四步：确认提交\n检查信息无误后点击\"提交\"，系统将自动开',707990676968189952,'',0,'PUBLISHED',0,0,'系统管理员','2026-05-09 00:22:11','2026-05-09 00:22:11',0);
+INSERT  IGNORE INTO `knowledge_article` (`id`, `title`, `content`, `summary`, `category_id`, `tags`, `view_count`, `status`, `sort`, `author_id`, `author_name`, `create_time`, `update_time`, `is_deleted`) VALUES (707990677081436160,'文件格式与大小要求','## 文件规范\n\n| 项目 | 要求 |\n|------|------|\n| 支持格式 | .doc, .docx, .pdf |\n| 最大体积 | 200MB |\n| 页数限制 | 无限制 |\n| 加密文件 | 不支持 |\n\n### 注意事项\n- PDF 文件需为可编辑文本型（扫描版需 OCR 处理）\n- 文件中有图片、公式不影响查重\n- 文件名建议使用\"学号_姓名_论文标题\"格式\n','## 文件规范\n\n| 项目 | 要求 |\n|------|------|\n| 支持格式 | .doc, .docx, .pdf |\n| 最大体积 | 200MB |\n| 页数限制 | 无限制 |\n| 加密文件 | 不支持 |\n\n### 注意事项\n- PDF 文件需为可编辑文本型（扫描版需 OCR 处理）\n- 文件中有图片、公式不影响查重\n- 文件名建议使用\"学号_姓名_论文标题\"格式\n',707990676968189952,'',1,'PUBLISHED',0,0,'系统管理员','2026-05-09 00:22:11','2026-05-09 22:14:28',0);
+INSERT  IGNORE INTO `knowledge_article` (`id`, `title`, `content`, `summary`, `category_id`, `tags`, `view_count`, `status`, `sort`, `author_id`, `author_name`, `create_time`, `update_time`, `is_deleted`) VALUES (707990677085630464,'查重原理与算法说明','## 查重原理\n\n系统采用 **SimHash 局部敏感哈希算法** 进行文本相似度检测。\n\n### 检测流程\n1. **文本提取**：使用 Apache Tika 提取论文正文\n2. **中文分词**：IK Analyzer 分词器进行中文分词\n3. **SimHash 计算**：生成 64 位指纹\n4. **海明距离比较**：与对比库中论文逐一比较\n5. **相似度计算**：海明距离 ≤ 3 判定为相似\n\n### 相似度阈值\n- 默认阈值：20%\n- 超过阈值将触发相似度预警\n- 教师可根据需要调整阈值\n','## 查重原理\n\n系统采用 **SimHash 局部敏感哈希算法** 进行文本相似度检测。\n\n### 检测流程\n1. **文本提取**：使用 Apache Tika 提取论文正文\n2. **中文分词**：IK Analyzer 分词器进行中文分词\n3. **SimHash 计算**：生成 64 位指纹\n4. **海明距离比较**：与对比库中论文逐一比较\n5. **相似度计算**：海明距离 ≤ 3 ',707990676972384256,'',0,'PUBLISHED',0,0,'系统管理员','2026-05-09 00:22:11','2026-05-09 00:22:11',0);
+INSERT  IGNORE INTO `knowledge_article` (`id`, `title`, `content`, `summary`, `category_id`, `tags`, `view_count`, `status`, `sort`, `author_id`, `author_name`, `create_time`, `update_time`, `is_deleted`) VALUES (707990677098213376,'查重报告解读','## 如何读懂查重报告\n\n### 报告内容\n- **总相似度**：论文整体重复率\n- **章节相似度**：各章节分别统计\n- **相似来源**：匹配到的参考文献及相似段落\n- **相似度分布图**：可视化展示重复部分\n\n### 相似度等级\n| 等级 | 范围 | 说明 |\n|------|------|------|\n| 绿色 | 0-20% | 正常范围，可以提交审核 |\n| 黄色 | 20-40% | 偏高，建议修改后重查 |\n| 红色 | 40%+ | 严重，需要大幅修改 |\n','## 如何读懂查重报告\n\n### 报告内容\n- **总相似度**：论文整体重复率\n- **章节相似度**：各章节分别统计\n- **相似来源**：匹配到的参考文献及相似段落\n- **相似度分布图**：可视化展示重复部分\n\n### 相似度等级\n| 等级 | 范围 | 说明 |\n|------|------|------|\n| 绿色 | 0-20% | 正常范围，可以提交审核 |\n| 黄色 | 20-4',707990676972384256,'',0,'PUBLISHED',0,0,'系统管理员','2026-05-09 00:22:11','2026-05-09 00:22:11',0);
+INSERT  IGNORE INTO `knowledge_article` (`id`, `title`, `content`, `summary`, `category_id`, `tags`, `view_count`, `status`, `sort`, `author_id`, `author_name`, `create_time`, `update_time`, `is_deleted`) VALUES (707990677102407680,'论文审核流程说明','## 审核流程\n\n```mermaid\ngraph LR\n    A[提交论文] --> B[自动查重]\n    B --> C[导师审核]\n    C --> D{审核结果}\n    D -->|通过| E[完成]\n    D -->|需修改| F[退回修改]\n    F --> A\n```\n\n### 各环节说明\n1. **自动查重**：系统自动完成，约 1-5 分钟\n2. **导师审核**：导师阅读论文和查重报告，给出审核意见\n3. **审核结果**：\n   - 通过：论文合格\n   - 需修改：根据导师意见修改后重新提交\n   - 退回：严重问题需重新撰写\n','## 审核流程\n\n```mermaid\ngraph LR\n    A[提交论文] --> B[自动查重]\n    B --> C[导师审核]\n    C --> D{审核结果}\n    D -->|通过| E[完成]\n    D -->|需修改| F[退回修改]\n    F --> A\n```\n\n### 各环节说明\n1. **自动查重**：系统自动完成，约 1-5 分钟\n2. **导师审核**：导',707990676976578560,'',0,'PUBLISHED',0,0,'系统管理员','2026-05-09 00:22:11','2026-05-09 22:11:47',0);
+INSERT  IGNORE INTO `knowledge_article` (`id`, `title`, `content`, `summary`, `category_id`, `tags`, `view_count`, `status`, `sort`, `author_id`, `author_name`, `create_time`, `update_time`, `is_deleted`) VALUES (707990677106601984,'审核状态说明','## 审核状态一览\n\n| 状态 | 图标 | 说明 |\n|------|------|------|\n| 待提交 | ⏳ | 尚未提交论文 |\n| 待分配 | 📋 | 等待分配导师 |\n| 已分配 | 👤 | 导师已分配 |\n| 查重中 | 🔍 | 正在查重检测 |\n| 待审核 | 📝 | 查重完成，等待导师审核 |\n| 审核中 | 👀 | 导师正在审核 |\n| 需修改 | ✏️ | 退回修改 |\n| 已通过 | ✅ | 审核通过 |\n| 已拒绝 | ❌ | 审核不通过 |\n','## 审核状态一览\n\n| 状态 | 图标 | 说明 |\n|------|------|------|\n| 待提交 | ⏳ | 尚未提交论文 |\n| 待分配 | 📋 | 等待分配导师 |\n| 已分配 | 👤 | 导师已分配 |\n| 查重中 | 🔍 | 正在查重检测 |\n| 待审核 | 📝 | 查重完成，等待导师审核 |\n| 审核中 | 👀 | 导师正在审核 |\n| 需修改 | ✏️ | 退回修改 |',707990676976578560,'',0,'PUBLISHED',0,0,'系统管理员','2026-05-09 00:22:11','2026-05-09 00:22:11',0);
+INSERT  IGNORE INTO `knowledge_article` (`id`, `title`, `content`, `summary`, `category_id`, `tags`, `view_count`, `status`, `sort`, `author_id`, `author_name`, `create_time`, `update_time`, `is_deleted`) VALUES (707990677161127936,'查重失败怎么办？','## 查重失败的常见原因\n\n1. **文件格式不支持** — 请确认上传的是 .doc / .docx / .pdf 格式\n2. **文件损坏** — 尝试重新保存文件后上传\n3. **文件为扫描版** — PDF 需包含可编辑文本层\n4. **文件过大** — 超过 200MB 限制，请压缩图片后重试\n5. **系统繁忙** — 稍后重新提交查重任务\n\n如果多次失败，请联系管理员或导师协助处理。\n','## 查重失败的常见原因\n\n1. **文件格式不支持** — 请确认上传的是 .doc / .docx / .pdf 格式\n2. **文件损坏** — 尝试重新保存文件后上传\n3. **文件为扫描版** — PDF 需包含可编辑文本层\n4. **文件过大** — 超过 200MB 限制，请压缩图片后重试\n5. **系统繁忙** — 稍后重新提交查重任务\n\n如果多次失败，请联系管理员或导师协助处理。',707990676984967168,'',0,'PUBLISHED',0,0,'系统管理员','2026-05-09 00:22:11','2026-05-09 00:22:11',0);
+INSERT  IGNORE INTO `knowledge_article` (`id`, `title`, `content`, `summary`, `category_id`, `tags`, `view_count`, `status`, `sort`, `author_id`, `author_name`, `create_time`, `update_time`, `is_deleted`) VALUES (707990677165322240,'查重结果不准确怎么办？','## 查重结果异常处理\n\n### 相似度偏高\n1. 检查论文中引用的参考文献是否标注正确\n2. 查看相似来源详情，确认是否为合理引用\n3. 修改高亮段落后重新查重\n\n### 相似度偏低\n1. 确实独立完成 → 恭喜！\n2. 怀疑检测不准确 → 联系管理员开启第三方查重\n\n> 系统支持多次查重，每次查重间隔受系统配置限制。\n','## 查重结果异常处理\n\n### 相似度偏高\n1. 检查论文中引用的参考文献是否标注正确\n2. 查看相似来源详情，确认是否为合理引用\n3. 修改高亮段落后重新查重\n\n### 相似度偏低\n1. 确实独立完成 → 恭喜！\n2. 怀疑检测不准确 → 联系管理员开启第三方查重\n\n> 系统支持多次查重，每次查重间隔受系统配置限制。\n',707990676984967168,'',2,'PUBLISHED',0,0,'系统管理员','2026-05-09 00:22:11','2026-05-24 22:04:37',0);
+INSERT  IGNORE INTO `knowledge_article` (`id`, `title`, `content`, `summary`, `category_id`, `tags`, `view_count`, `status`, `sort`, `author_id`, `author_name`, `create_time`, `update_time`, `is_deleted`) VALUES (707990677173710848,'什么时候可以重新提交查重？','## 重新查重机制\n\n### 查重间隔\n- 系统默认配置：每次查重间隔 **5 分钟**\n- 每日查重次数上限：**5 次**（管理员可调整）\n\n### 重新提交场景\n- 修改论文后需重新查重\n- 导师要求修改后重查\n- 撤回后重新提交\n\n### 操作方式\n在\"我的论文\"页面，点击\"重新查重\"按钮即可。\n','## 重新查重机制\n\n### 查重间隔\n- 系统默认配置：每次查重间隔 **5 分钟**\n- 每日查重次数上限：**5 次**（管理员可调整）\n\n### 重新提交场景\n- 修改论文后需重新查重\n- 导师要求修改后重查\n- 撤回后重新提交\n\n### 操作方式\n在\"我的论文\"页面，点击\"重新查重\"按钮即可。\n',707990676984967168,'',0,'PUBLISHED',0,0,'系统管理员','2026-05-09 00:22:11','2026-05-09 00:22:11',0);
+INSERT  IGNORE INTO `knowledge_article` (`id`, `title`, `content`, `summary`, `category_id`, `tags`, `view_count`, `status`, `sort`, `author_id`, `author_name`, `create_time`, `update_time`, `is_deleted`) VALUES (707990677177905152,'如何联系导师？','## 联系导师的方式\n\n### 在线聊天\n进入\"导师互动\"页面，可以与导师实时文字沟通、发送文件。\n\n### 站内消息\n通过消息中心发送私信，消息会推送到导师的通知栏。\n\n### 审核反馈\n导师审核论文后会给出书面意见，可在论文详情页查看。\n\n> 建议优先使用系统内置的沟通工具，便于保留沟通记录。\n','## 联系导师的方式\n\n### 在线聊天\n进入\"导师互动\"页面，可以与导师实时文字沟通、发送文件。\n\n### 站内消息\n通过消息中心发送私信，消息会推送到导师的通知栏。\n\n### 审核反馈\n导师审核论文后会给出书面意见，可在论文详情页查看。\n\n> 建议优先使用系统内置的沟通工具，便于保留沟通记录。\n',707990676984967168,'',0,'PUBLISHED',0,0,'系统管理员','2026-05-09 00:22:11','2026-05-09 00:22:11',0);
+INSERT  IGNORE INTO `knowledge_article` (`id`, `title`, `content`, `summary`, `category_id`, `tags`, `view_count`, `status`, `sort`, `author_id`, `author_name`, `create_time`, `update_time`, `is_deleted`) VALUES (707990677186293760,'忘记密码如何找回？','## 密码重置流程\n\n1. 在登录页点击\"忘记密码\"\n2. 输入注册时使用的邮箱地址\n3. 系统发送验证码到邮箱\n4. 输入验证码后设置新密码\n5. 使用新密码登录\n\n> 如未绑定邮箱，请联系管理员重置密码。\n','## 密码重置流程\n\n1. 在登录页点击\"忘记密码\"\n2. 输入注册时使用的邮箱地址\n3. 系统发送验证码到邮箱\n4. 输入验证码后设置新密码\n5. 使用新密码登录\n\n> 如未绑定邮箱，请联系管理员重置密码。\n',707990676984967168,'',0,'PUBLISHED',0,0,'系统管理员','2026-05-09 00:22:11','2026-05-09 00:22:11',0);
+INSERT  IGNORE INTO `knowledge_article` (`id`, `title`, `content`, `summary`, `category_id`, `tags`, `view_count`, `status`, `sort`, `author_id`, `author_name`, `create_time`, `update_time`, `is_deleted`) VALUES (707990677190488064,'系统更新日志','## 系统功能更新\n\n### v1.0 功能\n- 论文提交与格式校验\n- SimHash 本地查重引擎\n- 教师在线审核工作流\n- 导师-学生即时通讯\n- 学术诚信教育资源\n- 知识库帮助中心\n\n### 即将上线\n- 第三方查重引擎接入\n- 深度学习相似度检测\n- 移动端适配优化\n','## 系统功能更新\n\n### v1.0 功能\n- 论文提交与格式校验\n- SimHash 本地查重引擎\n- 教师在线审核工作流\n- 导师-学生即时通讯\n- 学术诚信教育资源\n- 知识库帮助中心\n\n### 即将上线\n- 第三方查重引擎接入\n- 深度学习相似度检测\n- 移动端适配优化\n',707990676997550080,'',0,'PUBLISHED',0,0,'系统管理员','2026-05-09 00:22:11','2026-05-09 00:22:11',0);
+
+-- ---------- 段 5B 自检 ----------
+-- expected: articles=15 orphan_articles=0 published=15
+SELECT (SELECT COUNT(*) FROM `knowledge_article`  WHERE `is_deleted` = 0) AS articles,
+       (SELECT COUNT(*) FROM `knowledge_article` a LEFT JOIN `knowledge_category` c
+          ON a.`category_id` = c.`id` WHERE c.`id` IS NULL) AS orphan_articles,
+       (SELECT COUNT(*) FROM `knowledge_article`
+         WHERE `status` = 'PUBLISHED' AND `is_deleted` = 0) AS published;
+
+
+-- ============================================================================
 -- 段 6：消息模板 message_template
 --
 -- MessageServiceImpl.sendMessageByTemplate 查的是
@@ -934,12 +982,8 @@ ON DUPLICATE KEY UPDATE `name` = VALUES(`name`), `icon` = VALUES(`icon`), `sort`
 -- 写成 ${key} 并不是「原样输出」那么无害 —— ${paperTitle} 里正好包含子串
 -- {paperTitle}，会被替换掉、留下一个孤零零的 $，通知正文一直是
 -- 「您的论文《$论文标题》…」。管理端预览走同一个渲染工具，从预览里看不出来。
---
--- ⚠️ 已知遗留：下面这份清单里 11 行（id 6/7/8/9/10/11/12/16/17/18/19）仍然写着
---    ${key}，本文件尚未逐个改掉。空库跑完 init.sql → 本文件之后，再跑一次
---    补消息模板.sql 即可修正这 11 行（那份文件是同一份清单、已改成 {key}，
---    并按 uk_template_code 幂等覆盖）。改完用 补消息模板.sql 的自检核对：
---    期望 total=19 / active=19 / with_legacy_dollar=0。
+-- （11 行历史 ${key} 已于 2026-10-12 全部修正为 {key}，原 补消息模板.sql
+--   内容归并进本段）
 --
 -- 变量名必须与调用方 params.put(...) 的键完全一致，否则会原样留下
 -- "{paperTitle}" 这种字面量。
@@ -952,17 +996,17 @@ INSERT INTO `message_template` (`id`, `template_code`, `template_name`, `templat
 (3,'TEACHER_REJECT_NOTICE','教师拒绝通知','reject','论文指导任务已拒绝','尊敬的{teacherName}老师：\n\n您已拒绝接收论文《{paperTitle}》的指导任务。\n\n拒绝原因：{rejectReason}',1,'2025-11-22 15:31:00','2025-11-22 15:31:00'),
 (4,'STUDENT_CONFIRM_RESULT','学生确认结果通知','confirm','论文指导老师确认结果','同学：\n\n您的论文《{paperTitle}》的指导老师{teacherName}已{confirmed}接收指导任务。\n\n{rejectReason}',1,'2025-11-22 15:31:00','2025-11-22 15:31:00'),
 (5,'TIMEOUT_REJECT_NOTICE','超时拒绝通知','reject','论文指导任务超时自动拒绝','亲爱的{studentName}同学：\n\n您的论文《{paperTitle}》的指导老师{teacherName}在指定时间内未确认接收指导任务，系统已自动拒绝并释放该分配。\n\n超时时间：{timeoutTime}\n\n系统将为您重新分配其他指导老师，请耐心等待。',1,'2025-11-22 16:42:02','2025-11-22 16:42:02'),
-(6,'SYSTEM_NOTICE','系统通知','system','${title}','{content}\n时间：{sendTime}',1,'2025-11-22 18:27:37','2025-11-22 21:49:04'),
-(7,'PAPER_SYSTEM_NOTICE','论文系统通知','system','${title}','{content}\n论文：${paperTitle}\n时间：{sendTime}',1,'2025-11-22 18:27:37','2025-11-22 21:49:16'),
-(8,'STUDENT_ASSIGNMENT_RESULT','学生分配结果通知','assignment','指导老师分配成功','亲爱的{studentName}同学：\n您的论文《${paperTitle}》已成功分配指导老师${teacherName}。\n分配时间：{assignmentTime}',1,'2025-11-22 18:27:37','2025-11-22 21:49:24'),
-(9,'PAPER_SUBMIT_SUCCESS','论文提交成功','system','论文提交成功','亲爱的{userName}同学：\n您的论文《${paperTitle}》已成功提交，系统将自动分配指导老师并进行查重检测。\n提交时间：{sendTime}',1,'2025-11-22 18:27:37','2025-11-22 21:49:33'),
-(10,'PAPER_SUBMIT_FAILED','论文提交失败','system','论文提交失败','亲爱的{userName}同学：\n您的论文《${paperTitle}》提交失败。\n失败原因：${content}\n请稍后重试或联系管理员。',1,'2025-11-22 18:27:37','2025-11-22 21:49:40'),
-(11,'ADVISOR_ASSIGN_SUCCESS','指导老师分配成功','assignment','指导老师分配成功','亲爱的{userName}同学：\n您的论文《${paperTitle}》已成功分配指导老师，系统将开始进行查重检测。\n分配时间：{sendTime}',1,'2025-11-22 18:27:37','2025-11-22 21:49:50'),
-(12,'ADVISOR_ASSIGN_FAILED','指导老师分配失败','assignment','指导老师分配失败','亲爱的{userName}同学：\n您的论文《${paperTitle}》指导老师分配失败。\n失败原因：${content}\n请稍后重试或联系管理员。',1,'2025-11-22 18:27:37','2025-11-22 21:49:58'),
-(16,'CHECK_SUCCESS','查重成功通知','system','查重检测完成','亲爱的{userName}同学：\n您的论文《${paperTitle}》查重检测已完成。\n相似度：${content}%\n检测结果：符合要求，论文已进入审核阶段。',1,'2025-11-22 18:27:37','2025-11-22 21:50:06'),
-(17,'CHECK_FAILED','查重失败通知','system','查重检测失败','亲爱的{userName}同学：\n您的论文《${paperTitle}》查重检测失败。\n失败原因：${content}\n请根据要求修改后重新提交。',1,'2025-11-22 18:27:37','2025-11-22 21:50:11'),
-(18,'AUDIT_SUCCESS','审核成功通知','system','论文审核通过','恭喜{userName}同学！\n您的论文《${paperTitle}》已通过审核。\n审核意见：${content}\n审核人：{teacherName}',1,'2025-11-22 18:27:37','2025-11-22 21:50:23'),
-(19,'AUDIT_FAILED','审核失败通知','system','论文审核未通过','亲爱的{userName}同学：\n您的论文《${paperTitle}》未通过审核。\n审核意见：${content}\n审核人：${teacherName}\n请根据意见修改后重新提交。',1,'2025-11-22 18:27:37','2025-11-22 21:50:31')
+(6,'SYSTEM_NOTICE','系统通知','system','{title}','{content}\n时间：{sendTime}',1,'2025-11-22 18:27:37','2025-11-22 21:49:04'),
+(7,'PAPER_SYSTEM_NOTICE','论文系统通知','system','{title}','{content}\n论文：{paperTitle}\n时间：{sendTime}',1,'2025-11-22 18:27:37','2025-11-22 21:49:16'),
+(8,'STUDENT_ASSIGNMENT_RESULT','学生分配结果通知','assignment','指导老师分配成功','亲爱的{studentName}同学：\n您的论文《{paperTitle}》已成功分配指导老师{teacherName}。\n分配时间：{assignmentTime}',1,'2025-11-22 18:27:37','2025-11-22 21:49:24'),
+(9,'PAPER_SUBMIT_SUCCESS','论文提交成功','system','论文提交成功','亲爱的{userName}同学：\n您的论文《{paperTitle}》已成功提交，系统将自动分配指导老师并进行查重检测。\n提交时间：{sendTime}',1,'2025-11-22 18:27:37','2025-11-22 21:49:33'),
+(10,'PAPER_SUBMIT_FAILED','论文提交失败','system','论文提交失败','亲爱的{userName}同学：\n您的论文《{paperTitle}》提交失败。\n失败原因：{content}\n请稍后重试或联系管理员。',1,'2025-11-22 18:27:37','2025-11-22 21:49:40'),
+(11,'ADVISOR_ASSIGN_SUCCESS','指导老师分配成功','assignment','指导老师分配成功','亲爱的{userName}同学：\n您的论文《{paperTitle}》已成功分配指导老师，系统将开始进行查重检测。\n分配时间：{sendTime}',1,'2025-11-22 18:27:37','2025-11-22 21:49:50'),
+(12,'ADVISOR_ASSIGN_FAILED','指导老师分配失败','assignment','指导老师分配失败','亲爱的{userName}同学：\n您的论文《{paperTitle}》指导老师分配失败。\n失败原因：{content}\n请稍后重试或联系管理员。',1,'2025-11-22 18:27:37','2025-11-22 21:49:58'),
+(16,'CHECK_SUCCESS','查重成功通知','system','查重检测完成','亲爱的{userName}同学：\n您的论文《{paperTitle}》查重检测已完成。\n相似度：{content}%\n检测结果：符合要求，论文已进入审核阶段。',1,'2025-11-22 18:27:37','2025-11-22 21:50:06'),
+(17,'CHECK_FAILED','查重失败通知','system','查重检测失败','亲爱的{userName}同学：\n您的论文《{paperTitle}》查重检测失败。\n失败原因：{content}\n请根据要求修改后重新提交。',1,'2025-11-22 18:27:37','2025-11-22 21:50:11'),
+(18,'AUDIT_SUCCESS','审核成功通知','system','论文审核通过','恭喜{userName}同学！\n您的论文《{paperTitle}》已通过审核。\n审核意见：{content}\n审核人：{teacherName}',1,'2025-11-22 18:27:37','2025-11-22 21:50:23'),
+(19,'AUDIT_FAILED','审核失败通知','system','论文审核未通过','亲爱的{userName}同学：\n您的论文《{paperTitle}》未通过审核。\n审核意见：{content}\n审核人：{teacherName}\n请根据意见修改后重新提交。',1,'2025-11-22 18:27:37','2025-11-22 21:50:31')
 ON DUPLICATE KEY UPDATE `template_name` = VALUES(`template_name`), `template_type` = VALUES(`template_type`), `title_template` = VALUES(`title_template`), `content_template` = VALUES(`content_template`), `is_active` = VALUES(`is_active`);
 
 -- ---------------------------------------------------------------------------
@@ -1145,3 +1189,258 @@ SELECT (SELECT COUNT(*) FROM major_subject WHERE is_deleted = 0)                
           LEFT JOIN major   m ON ms.major_id   = m.id
           LEFT JOIN subject s ON ms.subject_id = s.id
          WHERE ms.is_deleted = 0 AND (m.id IS NULL OR s.id IS NULL))                   AS dangling_should_be_0;
+
+
+-- ============================================================================
+-- 段 9：审核意见模板 review_template（10 条公开模板）
+--
+-- 教师端「审核意见模板」页（ReviewTemplates.vue）上线后库里一行没有，
+-- 页面五个分类全是 Empty。这里播 10 条常用模板，覆盖全部 5 个分类。
+--
+-- 字段口径（与 ReviewTemplate 实体 / ReviewTemplateServiceImpl 一致）：
+--   category   取值域由前端定义：approve-通过 / modify-修改 / reject-拒绝 /
+--              suggest-建议 / format-格式，后端不做白名单校验。
+--   scenarios  MySQL json 列，Java 侧映射成 String，格式是 JSON 数组文本，
+--              元素只能取「初审 / 复审 / 终审」（前端 checkbox 的三个选项）。
+--   is_public  = 1：公开模板所有教师可见可用（list() 的过滤条件是
+--              create_by = 当前用户 OR is_public = 1）。种子播的必须是公开，
+--              否则除了 create_by 指向的那个人，谁也看不到。
+--   create_by  用系统兜底管理员 ID（同 MyMetaObjectHandler 匿名填充值）。
+--   usage_count / last_used 初始 0 / NULL，被「使用」后由 use() 自增维护。
+--
+-- 幂等：id 写死 + ON DUPLICATE KEY UPDATE，可重复执行；不会动 usage_count
+--       和 last_used（那是运行期数据，重播种子不该把使用统计清零）。
+-- （原 补审核意见模板.sql 内容归并进本段，2026-10-12）
+-- ============================================================================
+
+INSERT INTO `review_template` (`id`, `title`, `category`, `content`, `scenarios`, `is_public`, `usage_count`, `last_used`, `create_by`, `create_time`, `update_by`, `update_time`, `is_deleted`) VALUES
+-- ---------- approve 通过类 ----------
+(1668700000000000001, '整体通过', 'approve', '论文选题合理，结构完整，论述清晰，查重率符合学校要求。同意通过审核，可进入下一环节。', '["初审","复审","终审"]', 1, 0, NULL, 1546278765432123458, NOW(), 1546278765432123458, NOW(), 0),
+(1668700000000000002, '通过-附修改建议', 'approve', '论文整体质量良好，同意通过审核。建议在答辩前注意以下几点：\n1. 进一步校对图表编号与正文的对应关系；\n2. 参考文献格式按学校模板统一；\n3. 摘要部分可再精炼，突出创新点。', '["复审","终审"]', 1, 0, NULL, 1546278765432123458, NOW(), 1546278765432123458, NOW(), 0),
+-- ---------- modify 修改类 ----------
+(1668700000000000003, '查重率偏高需降重', 'modify', '论文查重率超出合格阈值，请重点修改以下内容：\n1. 标红段落用自己的语言重新表述，避免整句引用；\n2. 必要的引用请规范标注出处；\n3. 文献综述部分建议归纳转述，不要简单堆砌原文。\n修改后请重新提交查重。', '["初审","复审"]', 1, 0, NULL, 1546278765432123458, NOW(), 1546278765432123458, NOW(), 0),
+(1668700000000000004, '结构需调整', 'modify', '论文框架基本合理，但部分章节安排需要调整：\n1. 相关工作与本文方法的边界不清晰，建议分开阐述；\n2. 实验部分应补充对照实验的设置说明；\n3. 结论部分需回应引言中提出的研究问题。\n请按上述意见修改后再次提交。', '["初审","复审"]', 1, 0, NULL, 1546278765432123458, NOW(), 1546278765432123458, NOW(), 0),
+(1668700000000000005, '数据分析不充分', 'modify', '论文实验数据收集完整，但分析深度不足：\n1. 建议对实验结果进行统计分析，给出显著性检验；\n2. 图表需要有解读文字，不能仅罗列数据；\n3. 异常数据应说明原因或剔除依据。\n请补充完善后重新提交。', '["复审"]', 1, 0, NULL, 1546278765432123458, NOW(), 1546278765432123458, NOW(), 0),
+-- ---------- reject 拒绝类 ----------
+(1668700000000000006, '查重严重超标-拒绝', 'reject', '论文查重率严重超出学校规定的合格标准，存在大段与他人文献雷同的内容，本次审核不予通过。请认真重写相关章节，杜绝抄袭行为，修改达到要求后再行提交。', '["初审","复审","终审"]', 1, 0, NULL, 1546278765432123458, NOW(), 1546278765432123458, NOW(), 0),
+(1668700000000000007, '选题不符-拒绝', 'reject', '论文选题与本专业培养目标不符，或研究内容严重偏离开题报告确定的方向，本次审核不予通过。请与指导教师沟通重新确定选题后再提交。', '["初审"]', 1, 0, NULL, 1546278765432123458, NOW(), 1546278765432123458, NOW(), 0),
+-- ---------- suggest 建议类 ----------
+(1668700000000000008, '文献综述建议', 'suggest', '文献综述部分建议：\n1. 按研究脉络组织，而不是逐篇罗列；\n2. 补充近三年的高水平文献，体现研究前沿；\n3. 结尾应指出现有研究的不足，引出本文的切入点。', '["初审","复审"]', 1, 0, NULL, 1546278765432123458, NOW(), 1546278765432123458, NOW(), 0),
+(1668700000000000009, '摘要写作建议', 'suggest', '摘要建议按「目的—方法—结果—结论」四要素组织：\n1. 首句点明研究背景与目的；\n2. 简要说明采用的方法；\n3. 给出量化的主要结果；\n4. 结论部分突出创新点，避免与引言重复。', '["初审","复审","终审"]', 1, 0, NULL, 1546278765432123458, NOW(), 1546278765432123458, NOW(), 0),
+-- ---------- format 格式类 ----------
+(1668700000000000010, '格式规范检查', 'format', '请按学校论文模板检查以下格式问题：\n1. 图表标题位置（图下表上）及编号是否连续；\n2. 参考文献著录格式是否符合 GB/T 7714；\n3. 页眉页脚、页码格式是否统一；\n4. 公式编号是否右对齐并连续编号。', '["初审","复审","终审"]', 1, 0, NULL, 1546278765432123458, NOW(), 1546278765432123458, NOW(), 0)
+ON DUPLICATE KEY UPDATE
+  `title` = VALUES(`title`),
+  `category` = VALUES(`category`),
+  `content` = VALUES(`content`),
+  `scenarios` = VALUES(`scenarios`),
+  `is_public` = VALUES(`is_public`),
+  `update_time` = NOW();
+
+-- ---------- 段 9 自检：期望 seed_public=10（templates>=10，教师自建会让它更大，属正常） ----------
+SELECT COUNT(*) AS templates,
+       (SELECT COUNT(*) FROM `review_template` WHERE id BETWEEN 1668700000000000001 AND 1668700000000000010 AND is_public = 1 AND is_deleted = 0) AS seed_public,
+       COUNT(DISTINCT category) AS categories
+FROM `review_template`
+WHERE `is_deleted` = 0;
+
+
+-- ============================================================================
+-- 段 10：论文全生命周期字典（70xx~74xx）
+--
+-- 历史上种子数据从未给 paper_status 播种，前端状态标签一直靠硬编码兜底；
+-- P1~P6 各期又陆续引入评阅 / 答辩 / 学位类型 / 导师评价标签字典。
+-- 这里一次性播齐，ID 固定：70xx 论文状态、71xx 评阅任务、72xx 答辩、
+-- 73xx 学位类型、74xx 导师评价标签。全部 INSERT IGNORE，可重复执行。
+-- 配套表结构在 init.sql（空库）与 存量修复.sql 段 1.16（老库）。
+-- （原 补论文全生命周期P1/P2/P3/P5/P6.sql 的字典段归并进本段，2026-10-12）
+-- ============================================================================
+
+-- ---------- 10.1 paper_status（P1）：7 个存量状态 + 6 个阶段门状态 ----------
+INSERT IGNORE INTO `sys_dict_type`
+  (`id`, `dict_name`, `dict_type`, `status`, `create_by`, `create_time`, `remark`)
+VALUES
+  (7000, '论文状态', 'paper_status', '0', '1546278765432123458', NOW(),
+   '论文全生命周期状态（P1 扩展：新增评阅/答辩/归档阶段门）');
+
+INSERT IGNORE INTO `sys_dict_data`
+  (`id`, `dict_sort`, `dict_label`, `dict_value`, `dict_type`, `is_default`, `status`, `create_by`, `create_time`, `remark`)
+VALUES
+  (7001, 1,  '待分配',    'pending',        'paper_status', 'N', '0', '1546278765432123458', NOW(), '存量状态'),
+  (7002, 2,  '已分配',    'assigned',       'paper_status', 'N', '0', '1546278765432123458', NOW(), '存量状态'),
+  (7003, 3,  '待查重',    'checking',       'paper_status', 'N', '0', '1546278765432123458', NOW(), '存量状态'),
+  (7004, 4,  '待审核',    'auditing',       'paper_status', 'N', '0', '1546278765432123458', NOW(), '存量状态（语义收窄为导师初审）'),
+  (7005, 5,  '审核通过',  'completed',      'paper_status', 'N', '0', '1546278765432123458', NOW(), '存量状态（语义收窄为初审通过）'),
+  (7006, 6,  '审核不通过','rejected',       'paper_status', 'N', '0', '1546278765432123458', NOW(), '存量状态'),
+  (7007, 7,  '已取消',    'withdrawn',      'paper_status', 'N', '0', '1546278765432123458', NOW(), '存量状态'),
+  (7008, 8,  '评阅中',    'reviewing',      'paper_status', 'N', '0', '1546278765432123458', NOW(), 'P1 新增阶段门（P2 评阅任务启用）'),
+  (7009, 9,  '中期答辩',  'mid_defense',    'paper_status', 'N', '0', '1546278765432123458', NOW(), 'P1 新增阶段门（P3 答辩管理启用）'),
+  (7010, 10, '终期答辩',  'final_defense',  'paper_status', 'N', '0', '1546278765432123458', NOW(), 'P1 新增阶段门（P3 答辩管理启用）'),
+  (7011, 11, '答辩通过',  'defense_passed', 'paper_status', 'N', '0', '1546278765432123458', NOW(), 'P1 新增阶段门（P3 答辩管理启用）'),
+  (7012, 12, '定稿',      'finalized',      'paper_status', 'N', '0', '1546278765432123458', NOW(), 'P1 新增阶段门（P4 归档启用）'),
+  (7013, 13, '已归档',    'archived',       'paper_status', 'N', '0', '1546278765432123458', NOW(), 'P1 新增阶段门（P4 归档启用）');
+
+-- ---------- 10.2 评阅任务字典（P2）：状态 / 类型 / 方式 ----------
+INSERT IGNORE INTO `sys_dict_type`
+  (`id`, `dict_name`, `dict_type`, `status`, `create_by`, `create_time`, `remark`)
+VALUES
+  (7100, '评阅任务状态', 'review_assign_status', '0', '1546278765432123458', NOW(), '多人评阅任务状态（论文全生命周期P2）'),
+  (7110, '评阅任务类型', 'review_assign_type',   '0', '1546278765432123458', NOW(), '导师评阅/交叉评阅/盲审（论文全生命周期P2）'),
+  (7120, '评阅任务方式', 'review_assign_method', '0', '1546278765432123458', NOW(), '线上评阅/线下评阅结果回填（论文全生命周期P2）');
+
+INSERT IGNORE INTO `sys_dict_data`
+  (`id`, `dict_sort`, `dict_label`, `dict_value`, `dict_type`, `is_default`, `status`, `create_by`, `create_time`, `remark`)
+VALUES
+  (7101, 1, '待评阅',     '0', 'review_assign_status', 'N', '0', '1546278765432123458', NOW(), '任务已下发'),
+  (7102, 2, '评阅中',     '1', 'review_assign_status', 'N', '0', '1546278765432123458', NOW(), '预留（P2 未开放开始动作）'),
+  (7103, 3, '已提交',     '2', 'review_assign_status', 'N', '0', '1546278765432123458', NOW(), '评阅结果已提交'),
+  (7104, 4, '已超时转派', '3', 'review_assign_status', 'N', '0', '1546278765432123458', NOW(), '超时扫描标记，原任务失效'),
+  (7111, 1, '导师评阅',   'advisor', 'review_assign_type', 'N', '0', '1546278765432123458', NOW(), ''),
+  (7112, 2, '交叉评阅',   'peer',    'review_assign_type', 'N', '0', '1546278765432123458', NOW(), '默认类型'),
+  (7113, 3, '盲审',       'blind',   'review_assign_type', 'N', '0', '1546278765432123458', NOW(), '查询层对学生/导师信息脱敏'),
+  (7121, 1, '线上评阅',   'online',  'review_assign_method', 'N', '0', '1546278765432123458', NOW(), '系统内直接打分'),
+  (7122, 2, '线下评阅',   'offline', 'review_assign_method', 'N', '0', '1546278765432123458', NOW(), '结果回填 + 扫描件佐证');
+
+-- ---------- 10.3 答辩字典（P3）：批次状态 / 批次类型 / 方式 / 组角色 / 结论 / 等级 ----------
+INSERT IGNORE INTO `sys_dict_type`
+  (`id`, `dict_name`, `dict_type`, `status`, `create_by`, `create_time`, `remark`)
+VALUES
+  (7200, '答辩批次状态', 'defense_batch_status', '0', '1546278765432123458', NOW(), '答辩批次状态（论文全生命周期P3）'),
+  (7210, '答辩批次类型', 'defense_batch_type',   '0', '1546278765432123458', NOW(), '中期/终期共用（论文全生命周期P3）'),
+  (7220, '答辩方式',     'defense_mode',         '0', '1546278765432123458', NOW(), '线上/线下（论文全生命周期P3）'),
+  (7230, '答辩组角色',   'defense_group_role',   '0', '1546278765432123458', NOW(), '组长/成员（论文全生命周期P3）'),
+  (7240, '答辩结论',     'defense_result',       '0', '1546278765432123458', NOW(), '通过/不通过/缓辩（论文全生命周期P3）'),
+  (7250, '答辩等级',     'defense_grade',        '0', '1546278765432123458', NOW(), '优/良/中/及格/不及格（论文全生命周期P3）');
+
+INSERT IGNORE INTO `sys_dict_data`
+  (`id`, `dict_sort`, `dict_label`, `dict_value`, `dict_type`, `is_default`, `status`, `create_by`, `create_time`, `remark`)
+VALUES
+  (7201, 1, '筹备中', '0', 'defense_batch_status', 'Y', '0', '1546278765432123458', NOW(), '批次新建，未开始答辩'),
+  (7202, 2, '进行中', '1', 'defense_batch_status', 'N', '0', '1546278765432123458', NOW(), '答辩进行中'),
+  (7203, 3, '已结束', '2', 'defense_batch_status', 'N', '0', '1546278765432123458', NOW(), '批次已结束（组长已汇总提交结论）'),
+  (7211, 1, '中期答辩', 'mid_term', 'defense_batch_type', 'N', '0', '1546278765432123458', NOW(), '中期检查答辩'),
+  (7212, 2, '终期答辩', 'final',    'defense_batch_type', 'Y', '0', '1546278765432123458', NOW(), '终期/毕业答辩（成绩回写 final_score）'),
+  (7221, 1, '线上答辩', 'online',  'defense_mode', 'N', '0', '1546278765432123458', NOW(), '线上会议，location 填会议链接'),
+  (7222, 2, '线下答辩', 'offline', 'defense_mode', 'Y', '0', '1546278765432123458', NOW(), '线下教室，location 填教室地址'),
+  (7231, 1, '组长', 'leader', 'defense_group_role', 'N', '0', '1546278765432123458', NOW(), '主持并汇总结论'),
+  (7232, 2, '成员', 'member', 'defense_group_role', 'Y', '0', '1546278765432123458', NOW(), '答辩组成员'),
+  (7241, 1, '通过',     'pass',     'defense_result', 'Y', '0', '1546278765432123458', NOW(), '答辩通过'),
+  (7242, 2, '不通过',   'fail',     'defense_result', 'N', '0', '1546278765432123458', NOW(), '答辩不通过（退回修改）'),
+  (7243, 3, '缓辩',     'postpone', 'defense_result', 'N', '0', '1546278765432123458', NOW(), '缓辩（择期重排批次）'),
+  (7251, 1, '优',     '优',     'defense_grade', 'N', '0', '1546278765432123458', NOW(), ''),
+  (7252, 2, '良',     '良',     'defense_grade', 'N', '0', '1546278765432123458', NOW(), ''),
+  (7253, 3, '中',     '中',     'defense_grade', 'N', '0', '1546278765432123458', NOW(), ''),
+  (7254, 4, '及格',   '及格',   'defense_grade', 'N', '0', '1546278765432123458', NOW(), ''),
+  (7255, 5, '不及格', '不及格', 'defense_grade', 'N', '0', '1546278765432123458', NOW(), '');
+
+-- ---------- 10.4 学位类型字典（P5，检测策略集匹配维度） ----------
+INSERT IGNORE INTO `sys_dict_type`
+  (`id`, `dict_name`, `dict_type`, `status`, `create_by`, `create_time`, `remark`)
+VALUES
+  (7300, '学位类型', 'degree_type', '0', '1546278765432123458', NOW(), '论文学位类型（论文全生命周期P5，检测策略集匹配维度）');
+
+INSERT IGNORE INTO `sys_dict_data`
+  (`id`, `dict_sort`, `dict_label`, `dict_value`, `dict_type`, `is_default`, `status`, `create_by`, `create_time`, `remark`)
+VALUES
+  (7301, 1, '本科', 'undergraduate', 'degree_type', 'Y', '0', '1546278765432123458', NOW(), '本科学位论文'),
+  (7302, 2, '硕士', 'master',        'degree_type', 'N', '0', '1546278765432123458', NOW(), '硕士学位论文'),
+  (7303, 3, '博士', 'doctor',        'degree_type', 'N', '0', '1546278765432123458', NOW(), '博士学位论文');
+
+-- ---------- 10.5 导师评价标签字典（P6a） ----------
+-- 学生提交时 tags 从本字典点选（可多选），后端按 dict_value 白名单校验。
+-- 负向标签与正向标签同列，由前端按 remark 展示分组。
+INSERT IGNORE INTO `sys_dict_type`
+  (`id`, `dict_name`, `dict_type`, `status`, `create_by`, `create_time`, `remark`)
+VALUES
+  (7400, '导师评价标签', 'advisor_eval_tag', '0', '1546278765432123458', NOW(), '学生对指导教师评价的预设标签（论文全生命周期P6a）');
+
+INSERT IGNORE INTO `sys_dict_data`
+  (`id`, `dict_sort`, `dict_label`, `dict_value`, `dict_type`, `is_default`, `status`, `create_by`, `create_time`, `remark`)
+VALUES
+  (7401, 1, '回复及时',   'reply_timely',       'advisor_eval_tag', 'N', '0', '1546278765432123458', NOW(), '正向'),
+  (7402, 2, '反馈细致',   'feedback_detailed',  'advisor_eval_tag', 'N', '0', '1546278765432123458', NOW(), '正向'),
+  (7403, 3, '要求严格',   'strict_demanding',   'advisor_eval_tag', 'N', '0', '1546278765432123458', NOW(), '正向'),
+  (7404, 4, '因材施教',   'tailored_guidance',  'advisor_eval_tag', 'N', '0', '1546278765432123458', NOW(), '正向'),
+  (7405, 5, '资源丰富',   'resource_support',   'advisor_eval_tag', 'N', '0', '1546278765432123458', NOW(), '正向'),
+  (7406, 6, '指导偏少',   'guidance_lacking',   'advisor_eval_tag', 'N', '0', '1546278765432123458', NOW(), '负向'),
+  (7407, 7, '反馈较慢',   'feedback_slow',      'advisor_eval_tag', 'N', '0', '1546278765432123458', NOW(), '负向');
+
+-- ---------- 段 10 自检：期望 13 / 9 / 17 / 3 / 7 ----------
+--     （sys_dict_data 表无 is_deleted 列，勿加此过滤）
+SELECT (SELECT COUNT(*) FROM sys_dict_data WHERE dict_type = 'paper_status')        AS paper_status_13,
+       (SELECT COUNT(*) FROM sys_dict_data WHERE dict_type IN ('review_assign_status', 'review_assign_type', 'review_assign_method')) AS review_assign_9,
+       (SELECT COUNT(*) FROM sys_dict_data WHERE dict_type IN ('defense_batch_status', 'defense_batch_type', 'defense_mode',
+                     'defense_group_role', 'defense_result', 'defense_grade'))      AS defense_17,
+       (SELECT COUNT(*) FROM sys_dict_data WHERE dict_type = 'degree_type')         AS degree_type_3,
+       (SELECT COUNT(*) FROM sys_dict_data WHERE dict_type = 'advisor_eval_tag')    AS advisor_eval_tag_7;
+
+
+-- ============================================================================
+-- 段 11：内置角色 sys_role（4 个）+ 超级管理员 sys_user（1 个）
+--
+-- init.sql 是纯 DDL（0 条 INSERT），段 1~7 也不管账号表，缺了本段，
+-- 空库跑完系统里没有任何账号能登录、也没有任何角色可关联。
+--
+-- ⚠️ sys_user.email 上有唯一键 idx_sys_user_email：若库里已存在
+--    admin@system.local 却挂在别的 id 上，INSERT 会报 1062，
+--    先把那一行删掉或改掉邮箱再跑。
+-- （原 补初始账号.sql 内容归并进本段，2026-10-12）
+-- ============================================================================
+
+-- 超级管理员ID。段 1 的 @op（各处 create_by/update_by）用的就是这个值。
+SET @op := 2060661729410551809;
+
+-- ---------- 角色 ----------
+-- 只播代码真正认的 4 个：UserDetailsServiceImpl 把 role_code 直接当 GrantedAuthority，
+-- 且给 SUPER_ADMIN 额外补一个 ADMIN（少了它 SUPER_ADMIN 能登录却进不了任何后台页面）。
+-- 本机库里另有 SYSTEM_ADMIN / EDU_ADMIN / LAB_ASSISTANT，后端一次都没引用过，不播。
+-- 幂等只靠主键 + sys_role.role_code 唯一索引 uk_role_code（存量修复.sql 段 1.13 建）；
+-- 库里若已存在同 code 不同 id 的行，会先撞 uk_role_code 报 1062，请先按段 1.13 处理。
+INSERT INTO `sys_role`
+  (id, role_name, role_code, permissions, description,
+   create_by, create_time, update_by, update_time, is_deleted, delete_by, delete_time)
+VALUES
+  (1001, '学生', 'STUDENT',
+   '["paper:view", "paper:download", "report:submit", "report:view", "course:select", "course:view", "profile:view", "profile:edit"]',
+   '普通学生角色，具有查看论文、提交报告、选课等基础权限',
+   @op, NOW(), @op, NOW(), 0, NULL, NULL),
+  (2001, '教师', 'TEACHER',
+   '["paper:upload", "paper:view", "paper:edit", "paper:delete", "report:review", "report:view", "report:grade", "course:create", "course:edit", "course:view", "student:view", "student:manage", "profile:view", "profile:edit"]',
+   '教师角色，具有上传论文、批改报告、管理课程等权限',
+   @op, NOW(), @op, NOW(), 0, NULL, NULL),
+  (4001, '管理员', 'ADMIN',
+   '["user:manage", "role:manage", "permission:manage", "system:config", "system:monitor", "log:view", "data:backup", "profile:view", "profile:edit"]',
+   '系统管理员，具有用户管理、系统配置、日志查看等权限',
+   @op, NOW(), @op, NOW(), 0, NULL, NULL),
+  (2060661728760434689, '超级管理员', 'SUPER_ADMIN',
+   '[]',
+   '系统管理员，可管理用户、配置系统、查看日志',
+   @op, NOW(), @op, NOW(), 0, NULL, NULL)
+ON DUPLICATE KEY UPDATE
+  role_name = VALUES(role_name), role_code = VALUES(role_code),
+  permissions = VALUES(permissions), description = VALUES(description),
+  is_deleted = 0, update_by = @op, update_time = NOW();
+
+-- ---------- 超级管理员 ----------
+-- 密码是 BCrypt（明文 SuperAdmin@2026，只用于这一次救场，登录后立刻改掉）。
+-- create_by/update_by 填自身：init.sql 该列注释写明"自注册用户填自身ID"。
+INSERT INTO `sys_user`
+  (id, username, password, real_name, role_id, user_type, email, email_verified, status,
+   create_by, create_time, update_by, update_time, is_deleted, delete_by, delete_time)
+VALUES
+  (2060661729410551809, 'superadmin',
+   '$2a$10$w9s9WvfO0Q14bW0l1T8fJ.Ktyf9eiB5c0LiMD/ggDLizFfnFCKtBO',
+   '超级管理员', 2060661728760434689, 'SUPER_ADMIN', 'admin@system.local', 1, 1,
+   2060661729410551809, NOW(), 2060661729410551809, NOW(), 0, NULL, NULL)
+ON DUPLICATE KEY UPDATE
+  password = VALUES(password), real_name = VALUES(real_name), role_id = VALUES(role_id),
+  user_type = VALUES(user_type), email_verified = VALUES(email_verified),
+  status = 1, is_deleted = 0, update_by = @op, update_time = NOW();
+
+-- ---------- 段 11 自检：期望 roles=4 users>=1，且超管挂在 SUPER_ADMIN 上 ----------
+SELECT (SELECT COUNT(*) FROM `sys_role` WHERE is_deleted = 0) AS roles,
+       (SELECT COUNT(*) FROM `sys_user` WHERE is_deleted = 0) AS users;
+
+SELECT u.id, u.username, u.user_type, r.role_code, u.status
+  FROM `sys_user` u JOIN `sys_role` r ON u.role_id = r.id
+ WHERE u.is_deleted = 0;

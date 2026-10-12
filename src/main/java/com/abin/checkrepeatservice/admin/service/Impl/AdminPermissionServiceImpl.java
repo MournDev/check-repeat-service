@@ -226,7 +226,7 @@ public class AdminPermissionServiceImpl implements AdminPermissionService {
         if (guardMsg != null) {
             return Result.error(ResultCode.PERMISSION_NO_ACCESS, guardMsg);
         }
-        // 超管角色与接口彻底隔离：引导入口只有 补初始账号.sql
+        // 超管角色与接口彻底隔离：引导入口只有 种子数据.sql 段 11
         if (UserBusinessInfoUtils.ROLE_SUPER_ADMIN.equals(role.getRoleCode())) {
             return Result.error(ResultCode.PERMISSION_NO_ACCESS, "超级管理员角色不允许通过接口指派");
         }

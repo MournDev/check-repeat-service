@@ -9,7 +9,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
- * 评阅任务实体类（对应数据库表：review_assignment，见 db/补论文全生命周期P2.sql）。
+ * 评阅任务实体类（对应数据库表：review_assignment，见 db/init.sql 与 db/种子数据.sql 段 10）。
  *
  * 业务规则（论文全生命周期 P2）：
  *  - 初审通过后由管理员对同一论文分配 1~N 名评阅教师（(paper_id, submit_version, reviewer_id) 唯一）；

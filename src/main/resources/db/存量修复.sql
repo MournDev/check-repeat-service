@@ -38,6 +38,9 @@
 --     Table 'system_metric_minute' doesn't exist —— 跑 1.14 段（建表，
 --     CREATE TABLE IF NOT EXISTS，可重复执行）。采样写入失败只打 warn 不崩，
 --     但缺表时趋势图永远没有数据。必须是「先跑 1.14，再部署后端」。
+--   · 论文全生命周期各期接口 500（指导记录 / 评阅 / 答辩 / 句级明细 / 报告验真 /
+--     签核 / 检测策略 / 学院额度 / 导师评价）—— 跑 1.16 段（P1~P6 全部建表 +
+--     存量表扩列 + 字典种子，幂等可重复执行）。必须是「先跑 1.16，再部署后端」。
 --
 -- 执行方式：**先跑「0. 自检」**看清哪些已经到位，然后按 1 → 4 顺序执行，
 --           最后跑「5. 执行后自检」。
@@ -57,9 +60,10 @@
 --    判断成败只看「5. 执行后自检」的数值，不看有没有 ERROR 行。
 --    1.6、1.7 用的 CREATE TABLE IF NOT EXISTS 与 2~4 段本身就可重复执行。
 --
--- 前置假设：目标库里 init.sql 那 62 张表都已存在。若某张表整个不存在，先看第 1 段
---           是否已为它准备好建表语句（teacher_audit → 1.6，metric_event_daily → 1.7）；
---           其余缺表该做的是用 init.sql 重建，而不是跑本文件。
+-- 前置假设：目标库里 init.sql 那 76 张表都已存在。若某张表整个不存在，先看第 1 段
+--           是否已为它准备好建表语句（teacher_audit → 1.6，metric_event_daily → 1.7，
+--           论文全生命周期 P1~P6 的 11 张表 → 1.16）；其余缺表该做的是用 init.sql
+--           重建，而不是跑本文件。
 -- ============================================================================
 
 SET NAMES utf8mb4;
@@ -160,6 +164,24 @@ SELECT COUNT(*) AS sys_user_pref_cols_present FROM information_schema.COLUMNS
    AND COLUMN_NAME IN ('notify_system_error','notify_security_warning',
                        'notify_system_announcement','notify_email',
                        'log_retention_days','backup_frequency');
+
+-- 0.11 段 1.16 论文全生命周期 P1~P6 的前置现状
+--   没跑过 1.16 的库上期望 lifecycle_tables=0 / lifecycle_new_cols=0；
+--   跑过的库期望 11 / 10（P2 的 workflow_step 1 列 + P5 的 9 列）。
+SELECT COUNT(*) AS lifecycle_tables FROM information_schema.TABLES
+ WHERE TABLE_SCHEMA = DATABASE()
+   AND TABLE_NAME IN ('guidance_record','review_assignment','review_workflow_progress',
+                      'defense_batch','defense_group_member','defense_record',
+                      'check_sentence_hit','paper_check_signoff','check_policy',
+                      'check_college_quota','advisor_evaluation');
+
+SELECT COUNT(*) AS lifecycle_new_cols FROM information_schema.COLUMNS
+ WHERE TABLE_SCHEMA = DATABASE()
+   AND ((TABLE_NAME = 'paper_info'   AND COLUMN_NAME IN ('workflow_step','degree_type'))
+     OR (TABLE_NAME = 'check_task'   AND COLUMN_NAME IN ('max_per_source','citation_rate'))
+     OR (TABLE_NAME = 'check_result' AND COLUMN_NAME IN ('max_per_source','citation_rate'))
+     OR (TABLE_NAME = 'check_report' AND COLUMN_NAME = 'content_hash')
+     OR (TABLE_NAME = 'system_param' AND COLUMN_NAME IN ('guidance_weight','review_weight','defense_weight')));
 
 
 -- ============================================================================
@@ -886,7 +908,7 @@ CREATE TABLE IF NOT EXISTS `student_group_member` (
 --
 -- 背景：role_code 是整条鉴权链的锚 —— UserDetailsServiceImpl 的超管 ADMIN 注入、
 --   SecurityConfig 的 hasAuthority、UserBusinessInfoUtils.isAdmin() 全按它匹配。
---   init.sql 的列注释写「唯一」但从未建索引，而 补初始账号.sql 只按主键幂等
+--   init.sql 的列注释写「唯一」但从未建索引，而 种子数据.sql 段 11 只按主键幂等
 --   （其注释明确警告过「同 code 不同 id 会插出重复角色」）。重复编码一旦出现，
 --   所有按 code 反查角色的代码路径行为都不可预测。
 --
@@ -912,7 +934,7 @@ HAVING cnt > 1 OR (cnt = 1 AND live_cnt = 0)
 -- 1.13.1 去重：同一 role_code 保留一行，其余行软删，并把引用它们的用户
 --   （含挂在已删重复行上的悬空用户）改挂到保留行。
 --   保留行 = 未删行里 id 最小的一个（init.sql 的 1001/2001/4001 与
---   补初始账号.sql 的 SUPER_ADMIN 都是最小 id 先建）；全删时才退而取最小 id。
+--   种子数据.sql 段 11 的 SUPER_ADMIN 都是最小 id 先建）；全删时才退而取最小 id。
 CREATE TEMPORARY TABLE tmp_role_keep AS
 SELECT role_code,
        COALESCE(MIN(CASE WHEN is_deleted = 0 THEN id END), MIN(id)) AS keep_id
@@ -995,6 +1017,517 @@ ALTER TABLE `sys_user`
   ADD COLUMN `notify_email`               tinyint     NOT NULL DEFAULT '1'     COMMENT '通知开关-邮件通知：0-关，1-开',
   ADD COLUMN `log_retention_days`         int         NOT NULL DEFAULT '90'    COMMENT '个人偏好-操作日志保留天数（30~365）',
   ADD COLUMN `backup_frequency`           varchar(20) NOT NULL DEFAULT 'daily' COMMENT '个人偏好-数据备份频率：daily/weekly/monthly';
+
+-- ============================================================================
+-- 段 1.16：论文全生命周期 P1~P6（阶段门 / 评阅 / 答辩 / 引擎底座 / 导师评价）
+--
+-- 背景：P1~P6 各期曾各有一份「补论文全生命周期P*.sql」，2026-10 归并进本段，
+--   原散文件已删。空库由 init.sql 一次建好，无需本段；本段是给
+--   「结构落后于 P1~P6 代码」的存量库补差量用的，全段幂等、可重复执行。
+--
+-- ⚠️ 部署顺序（硬约束）：**先跑完本段，再部署新 jar**。新版实体
+--   （GuidanceRecord / ReviewAssignment / ReviewWorkflowProgress /
+--   DefenseBatch / DefenseGroupMember / DefenseRecord / CheckSentenceHit /
+--   PaperCheckSignoff / CheckPolicy / CheckCollegeQuota / AdvisorEvaluation，
+--   及 CheckTask / CheckResult / CheckReport / PaperInfo / SystemParam 新列）
+--   全部引用本段的表与列，漏跑即对应接口全站 500（同 1.11 教训）。
+--
+-- 子段：1.16.1 建表（11 张，CREATE TABLE IF NOT EXISTS）
+--       1.16.2 存量表扩列（幂等 ALTER，information_schema + 预处理语句范式）
+--       1.16.3 字典种子（70xx 论文状态 / 71xx 评阅 / 72xx 答辩 / 73xx 学位 /
+--              74xx 导师评价标签；与 种子数据.sql 段 10 同一份清单，
+--              INSERT IGNORE 两边重跑互不干扰）
+-- 设计要点见 docs/论文全生命周期落地方案.md（P1~P6 分期）。
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 1.16.1 建表（11 张，按 P1→P6 顺序）
+-- ----------------------------------------------------------------------------
+
+-- 指导记录表（P1：教师发起 → 学生确认，多轮次）
+CREATE TABLE IF NOT EXISTS `guidance_record` (
+  `id`               bigint       NOT NULL COMMENT '主键ID（雪花）',
+  `paper_id`         bigint       NOT NULL COMMENT '论文ID（关联paper_info.id）',
+  `student_id`       bigint       NOT NULL COMMENT '学生ID（关联sys_user.id）',
+  `teacher_id`       bigint       NOT NULL COMMENT '指导教师ID（关联sys_user.id）',
+  `round`            int          NOT NULL COMMENT '指导轮次（同论文内自增，(paper_id,round)唯一）',
+  `guidance_type`    varchar(16)  NOT NULL DEFAULT 'online' COMMENT '指导方式：online-线上 / offline-线下',
+  `guidance_time`    datetime     NOT NULL COMMENT '指导时间',
+  `content`          text         COMMENT '指导内容（纯文本，入库前已做XSS清洗）',
+  `student_feedback` text         COMMENT '学生反馈（确认时填写，可空）',
+  `attachment_id`    bigint       DEFAULT NULL COMMENT '附件ID（关联file_info.id，可空）',
+  `confirm_status`   tinyint      NOT NULL DEFAULT '0' COMMENT '确认状态：0-待学生确认 / 1-已确认 / 2-有异议',
+  `confirm_time`     datetime     DEFAULT NULL COMMENT '学生确认时间',
+  `create_by`        bigint       DEFAULT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time`      datetime     DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by`        bigint       DEFAULT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time`      datetime     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted`       tinyint      DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by`        bigint       DEFAULT NULL COMMENT '删除人ID',
+  `delete_time`      datetime     DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_paper_round` (`paper_id`, `round`),
+  KEY `idx_teacher_id` (`teacher_id`),
+  KEY `idx_student_id` (`student_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='指导记录表（论文全生命周期P1）';
+
+-- 评阅任务表（P2：1~N 名教师评阅，线上直接评 / 线下回填）
+CREATE TABLE IF NOT EXISTS `review_assignment` (
+  `id`             bigint        NOT NULL COMMENT '主键ID（雪花）',
+  `paper_id`       bigint        NOT NULL COMMENT '论文ID（关联paper_info.id）',
+  `submit_version` int           NOT NULL DEFAULT '1' COMMENT '评阅针对的论文版本号（paper_submit.submit_version，版本演进后历史评阅不失效）',
+  `reviewer_id`    bigint        NOT NULL COMMENT '评阅教师ID（关联sys_user.id）',
+  `review_type`    varchar(16)   NOT NULL DEFAULT 'peer' COMMENT '评阅类型：advisor-导师评阅 / peer-交叉评阅 / blind-盲审（查询层脱敏）',
+  `method`         varchar(16)   NOT NULL DEFAULT 'online' COMMENT '评阅方式：online-线上 / offline-线下（结果回填）',
+  `status`         tinyint       NOT NULL DEFAULT '0' COMMENT '状态：0-待评阅 / 1-评阅中 / 2-已提交 / 3-已超时转派',
+  `score`          decimal(5,2)  DEFAULT NULL COMMENT '评分（0-100，线下任务可提交时回填）',
+  `comment`        text          COMMENT '评阅意见（线下任务可为空，以扫描件为准）',
+  `attachment_id`  bigint        DEFAULT NULL COMMENT '线下评阅表扫描件（关联file_info.id，可空）',
+  `deadline`       datetime      DEFAULT NULL COMMENT '评阅截止时间（超时扫描挂定时任务）',
+  `assign_type`    varchar(16)   NOT NULL DEFAULT 'manual' COMMENT '分配方式：auto-自动 / manual-手动',
+  `create_by`      bigint        DEFAULT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time`    datetime      DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by`      bigint        DEFAULT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time`    datetime      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted`     tinyint       DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by`      bigint        DEFAULT NULL COMMENT '删除人ID',
+  `delete_time`    datetime      DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_paper_version_reviewer` (`paper_id`, `submit_version`, `reviewer_id`),
+  KEY `idx_reviewer_status` (`reviewer_id`, `status`),
+  KEY `idx_paper_id` (`paper_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='评阅任务表（论文全生命周期P2）';
+
+-- 多级初审投票表（P2：ReviewWorkflow 配置壳的真实驱动留痕；all/any 语义由 Service 裁决）
+CREATE TABLE IF NOT EXISTS `review_workflow_progress` (
+  `id`          bigint    NOT NULL COMMENT '主键ID（雪花）',
+  `paper_id`    bigint    NOT NULL COMMENT '论文ID（关联paper_info.id）',
+  `step_index`  int       NOT NULL COMMENT '步骤序号（1-based，对应 review_workflow.steps 数组下标+1）',
+  `approver_id` bigint    NOT NULL COMMENT '审批人ID（关联sys_user.id）',
+  `vote_result` tinyint   NOT NULL COMMENT '投票结果：1-通过 / 2-驳回',
+  `opinion`     text      COMMENT '审批意见（可空）',
+  `vote_time`   datetime  NOT NULL COMMENT '投票时间',
+  `create_by`   bigint    DEFAULT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time` datetime  DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by`   bigint    DEFAULT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time` datetime  DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted`  tinyint   DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by`   bigint    DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime  DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_paper_step_approver` (`paper_id`, `step_index`, `approver_id`),
+  KEY `idx_paper_step` (`paper_id`, `step_index`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='多级初审投票表（论文全生命周期P2）';
+
+-- 答辩批次表（P3：中期/终期共用，batch_type 区分；mode 区分线上/线下）
+CREATE TABLE IF NOT EXISTS `defense_batch` (
+  `id`            bigint        NOT NULL COMMENT '主键ID（雪花）',
+  `batch_no`      varchar(32)   NOT NULL COMMENT '批次编号（人工或系统生成，唯一）',
+  `batch_type`    varchar(16)   NOT NULL DEFAULT 'final' COMMENT '批次类型：mid_term-中期答辩 / final-终期答辩',
+  `college_id`    bigint        DEFAULT NULL COMMENT '学院ID（关联college.id，可空表示全校批次）',
+  `defense_date`  datetime      NOT NULL COMMENT '答辩时间',
+  `location`      varchar(128)  DEFAULT NULL COMMENT '地点：线下填教室、线上填会议链接',
+  `mode`          varchar(16)   NOT NULL DEFAULT 'offline' COMMENT '答辩方式：online-线上 / offline-线下',
+  `leader_id`     bigint        DEFAULT NULL COMMENT '答辩组长ID（关联sys_user.id，组长主持并汇总结论）',
+  `secretary_id`  bigint        DEFAULT NULL COMMENT '答辩秘书ID（关联sys_user.id，负责记录与线下回填）',
+  `status`        tinyint       NOT NULL DEFAULT '0' COMMENT '批次状态：0-筹备中 / 1-进行中 / 2-已结束',
+  `remark`        varchar(255)  DEFAULT NULL COMMENT '备注（可空）',
+  `create_by`     bigint        DEFAULT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time`   datetime      DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by`     bigint        DEFAULT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time`   datetime      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted`    tinyint       DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by`     bigint        DEFAULT NULL COMMENT '删除人ID',
+  `delete_time`   datetime      DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_batch_no` (`batch_no`),
+  KEY `idx_batch_type_date` (`batch_type`, `defense_date`),
+  KEY `idx_college_status` (`college_id`, `status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='答辩批次表（论文全生命周期P3，中期/终期共用）';
+
+-- 答辩组成员表（P3：1 名组长 leader + N 名成员 member；秘书在 defense_batch.secretary_id）
+CREATE TABLE IF NOT EXISTS `defense_group_member` (
+  `id`          bigint       NOT NULL COMMENT '主键ID（雪花）',
+  `batch_id`    bigint       NOT NULL COMMENT '批次ID（关联defense_batch.id）',
+  `teacher_id`  bigint       NOT NULL COMMENT '教师ID（关联sys_user.id）',
+  `group_role`  varchar(16)  NOT NULL DEFAULT 'member' COMMENT '组角色：leader-组长 / member-成员',
+  `create_by`   bigint       DEFAULT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time` datetime     DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by`   bigint       DEFAULT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time` datetime     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted`  tinyint      DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by`   bigint       DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime     DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_batch_teacher` (`batch_id`, `teacher_id`),
+  KEY `idx_teacher_id` (`teacher_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='答辩组成员表（论文全生命周期P3）';
+
+-- 答辩记录表（P3：每篇论文在每个批次一条，(batch_id, paper_id) 唯一；
+--   终期 pass 时由 Service 回写 paper_info.final_score 并推进 defense_passed）
+CREATE TABLE IF NOT EXISTS `defense_record` (
+  `id`             bigint        NOT NULL COMMENT '主键ID（雪花）',
+  `batch_id`       bigint        NOT NULL COMMENT '批次ID（关联defense_batch.id）',
+  `paper_id`       bigint        NOT NULL COMMENT '论文ID（关联paper_info.id）',
+  `student_id`     bigint        NOT NULL COMMENT '学生ID（关联sys_user.id）',
+  `defense_order`  int           DEFAULT NULL COMMENT '答辩顺序号（同批次内人工编排，可空）',
+  `score`          decimal(5,2)  DEFAULT NULL COMMENT '综合得分（0-100，组长汇总后写入）',
+  `grade`          varchar(8)    DEFAULT NULL COMMENT '等级：优/良/中/及格/不及格',
+  `result`         varchar(16)   DEFAULT NULL COMMENT '结论：pass-通过 / fail-不通过 / postpone-缓辩',
+  `comment`        text          COMMENT '答辩记录（纯文本，入库前已做XSS清洗）',
+  `attachment_id`   bigint        DEFAULT NULL COMMENT '线下答辩表扫描件（关联file_info.id，可空）',
+  `submit_by`      bigint        DEFAULT NULL COMMENT '结论提交人ID（通常为组长，关联sys_user.id）',
+  `submit_time`    datetime      DEFAULT NULL COMMENT '结论提交时间',
+  `create_by`      bigint        DEFAULT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time`    datetime      DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by`      bigint        DEFAULT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time`    datetime      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted`     tinyint       DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by`      bigint        DEFAULT NULL COMMENT '删除人ID',
+  `delete_time`    datetime      DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_batch_paper` (`batch_id`, `paper_id`),
+  KEY `idx_paper_id` (`paper_id`),
+  KEY `idx_student_id` (`student_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='答辩记录表（论文全生命周期P3）';
+
+-- 句级标红明细表（P5：命中句（句相似度 ≥ check.sentence.threshold，默认 50%）逐条落库；
+--   学生端检测明细页与来源聚合列表的数据源）
+CREATE TABLE IF NOT EXISTS `check_sentence_hit` (
+  `id`              bigint        NOT NULL COMMENT '主键ID（雪花）',
+  `task_id`         bigint        NOT NULL COMMENT '查重任务ID（关联check_task.id）',
+  `sentence_index`  int           NOT NULL COMMENT '句子序号（正文剔除参考文献区块后，从0开始）',
+  `sentence_text`   varchar(1000) NOT NULL COMMENT '句子文本（超1000字符截断）',
+  `start_offset`    int           DEFAULT NULL COMMENT '句子在正文中的起始偏移',
+  `similarity`      decimal(5,2)  NOT NULL COMMENT '句相似度（如82.35表示82.35%）',
+  `is_citation`     tinyint       NOT NULL DEFAULT '0' COMMENT '是否引用句：1-句尾带[n]引注且文档存在参考文献区块（引用命中不计入总相似比）/ 0-普通命中',
+  `hit_paper_id`    bigint        DEFAULT NULL COMMENT '命中来源论文ID（关联paper_info.id）',
+  `hit_paper_title` varchar(200)  DEFAULT NULL COMMENT '命中来源论文标题（冗余，明细页直接展示）',
+  `create_by`       bigint        DEFAULT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time`     datetime      DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by`       bigint        DEFAULT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time`     datetime      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted`      tinyint       DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by`       bigint        DEFAULT NULL COMMENT '删除人ID',
+  `delete_time`     datetime      DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_csh_task` (`task_id`),
+  KEY `idx_csh_hit_paper` (`hit_paper_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='句级标红明细表（论文全生命周期P5）';
+
+-- 查重报告导师签核表（P5：评阅分配前必须存在 qualified=1 记录；
+--   唯一键 (paper_id, task_id)：论文重新提交再检产生新任务后可再次签核）
+CREATE TABLE IF NOT EXISTS `paper_check_signoff` (
+  `id`             bigint        NOT NULL COMMENT '主键ID（雪花）',
+  `paper_id`       bigint        NOT NULL COMMENT '论文ID（关联paper_info.id）',
+  `task_id`        bigint        NOT NULL COMMENT '查重任务ID（关联check_task.id，签核对象）',
+  `report_id`      bigint        DEFAULT NULL COMMENT '查重报告ID（关联check_report.id，可空）',
+  `advisor_id`     bigint        NOT NULL COMMENT '签核导师ID（关联sys_user.id，必须是论文teacher_id本人）',
+  `qualified`      tinyint       NOT NULL COMMENT '签核结论：1-合格放行 / 0-不合格退回修改',
+  `guidance_score` decimal(5,2)  DEFAULT NULL COMMENT '指导评分（0-100，成绩加权合成的指导分数据源）',
+  `comment`        varchar(500)  DEFAULT NULL COMMENT '签核意见',
+  `sign_time`      datetime      NOT NULL COMMENT '签核时间',
+  `create_by`      bigint        DEFAULT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time`    datetime      DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by`      bigint        DEFAULT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time`    datetime      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted`     tinyint       DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by`      bigint        DEFAULT NULL COMMENT '删除人ID',
+  `delete_time`    datetime      DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_paper_task` (`paper_id`, `task_id`),
+  KEY `idx_pcs_advisor` (`advisor_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='查重报告导师签核表（论文全生命周期P5）';
+
+-- 学位检测策略集（P5：超管端 CRUD，CheckPolicyResolver 按 degree_type 命中，
+--   未命中回落 SimilarityThresholdResolver 既有链路）
+CREATE TABLE IF NOT EXISTS `check_policy` (
+  `id`             bigint        NOT NULL COMMENT '主键ID（雪花）',
+  `degree_type`    varchar(20)   NOT NULL COMMENT '学位类型：undergraduate-本科 / master-硕士 / doctor-博士（唯一）',
+  `threshold`      decimal(5,2)  NOT NULL COMMENT '合格阈值（总相似比百分比，如20.00表示20%）',
+  `max_per_source` decimal(5,2)  DEFAULT NULL COMMENT '单篇最大相似比上限（百分比，可空=不启用该项校验）',
+  `max_check_count` int          DEFAULT NULL COMMENT '每篇论文最多查重次数（可空=沿用全局 admin.check-rule.default-max-count）',
+  `check_interval` int           DEFAULT NULL COMMENT '两次查重间隔秒数（可空=沿用全局 admin.check-rule.default-interval）',
+  `enabled`        tinyint       NOT NULL DEFAULT '1' COMMENT '是否启用：1-启用 / 0-停用',
+  `create_by`      bigint        DEFAULT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time`    datetime      DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by`      bigint        DEFAULT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time`    datetime      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted`     tinyint       DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by`      bigint        DEFAULT NULL COMMENT '删除人ID',
+  `delete_time`    datetime      DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_degree_type` (`degree_type`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='学位检测策略集（论文全生命周期P5，超管维护）';
+
+-- 学院月度查重额度表（P5：查重任务创建时原子扣减；
+--   唯一键 (college_id, quota_month)，跨月自然重置无需清零任务）
+CREATE TABLE IF NOT EXISTS `check_college_quota` (
+  `id`          bigint   NOT NULL COMMENT '主键ID（雪花）',
+  `college_id`  bigint   NOT NULL COMMENT '学院ID（关联college.id）',
+  `quota_month` char(7)  NOT NULL COMMENT '额度月份（yyyy-MM，如2026-10）',
+  `total_quota` int      NOT NULL COMMENT '当月总额度（次）',
+  `used_quota`  int      NOT NULL DEFAULT '0' COMMENT '当月已用额度（次）',
+  `create_by`   bigint   DEFAULT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by`   bigint   DEFAULT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted`  tinyint  DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  `delete_by`   bigint   DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_college_month` (`college_id`, `quota_month`),
+  KEY `idx_ccq_month` (`quota_month`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='学院月度查重额度表（论文全生命周期P5）';
+
+-- 导师评价表（P6：uk_paper_id 每篇论文一次、提交后不可改；
+--   教师端 API 只做聚合查询、永不返回单条明细，样本数 <3 时返回掩码）
+CREATE TABLE IF NOT EXISTS `advisor_evaluation` (
+  `id`                 bigint       NOT NULL COMMENT '主键ID（雪花）',
+  `paper_id`           bigint       NOT NULL COMMENT '论文ID（关联paper_info.id）',
+  `student_id`         bigint       NOT NULL COMMENT '评价学生ID（关联sys_user.id；仅管理端实名可见，教师端永不返回）',
+  `teacher_id`         bigint       NOT NULL COMMENT '被评价导师ID（关联sys_user.id，提交时取 paper_info.teacher_id 快照）',
+  `score_timeliness`   tinyint      NOT NULL COMMENT '指导及时性（1-5星）',
+  `score_quality`      tinyint      NOT NULL COMMENT '反馈质量（1-5星）',
+  `score_attitude`     tinyint      NOT NULL COMMENT '责任心态度（1-5星）',
+  `score_professional` tinyint      NOT NULL COMMENT '专业能力（1-5星）',
+  `score_overall`      tinyint      NOT NULL COMMENT '总体满意度（1-5星；导师评价分=avg/5×100）',
+  `tags`               varchar(500) DEFAULT NULL COMMENT '预设标签（JSON数组，元素为字典 advisor_eval_tag 的 dict_value）',
+  `comment`            varchar(500) DEFAULT NULL COMMENT '文字评语（选填，jsoup 纯文本清洗后落库）',
+  `create_by`          bigint       DEFAULT NULL COMMENT '创建人ID（关联sys_user.id）',
+  `create_time`        datetime     DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by`          bigint       DEFAULT NULL COMMENT '更新人ID（关联sys_user.id）',
+  `update_time`        datetime     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted`         tinyint      DEFAULT '0' COMMENT '软删除：0-未删除，1-已删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_paper_id` (`paper_id`),
+  KEY `idx_teacher` (`teacher_id`, `is_deleted`),
+  KEY `idx_student` (`student_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='导师评价表（论文全生命周期P6a：学生对指导教师评价，教师端仅见聚合）';
+
+-- ----------------------------------------------------------------------------
+-- 1.16.2 存量表扩列（幂等 ALTER：MySQL 不支持 ADD COLUMN IF NOT EXISTS，
+--   用 information_schema + 预处理语句；拼接统一用相邻字符串常量，
+--   不依赖 sql_mode 的 PIPES_AS_CONCAT）
+-- ----------------------------------------------------------------------------
+
+-- paper_info 加当前多级初审步骤列（P2）
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.columns
+   WHERE table_schema = DATABASE()
+     AND table_name = 'paper_info'
+     AND column_name = 'workflow_step'
+);
+SET @ddl = IF(@col_exists = 0,
+  'ALTER TABLE `paper_info` ADD COLUMN `workflow_step` int NOT NULL DEFAULT 0 COMMENT ''当前多级初审步骤：0-未进入工作流 / 1..N-第N步审批中（review_workflow.steps 顺序）'' AFTER `paper_status`',
+  'SELECT ''paper_info.workflow_step 已存在，跳过'' AS msg');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- check_task 加单篇最大相似比 + 引用率（P5）
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.columns
+   WHERE table_schema = DATABASE()
+     AND table_name = 'check_task'
+     AND column_name = 'max_per_source'
+);
+SET @ddl = IF(@col_exists = 0,
+  'ALTER TABLE `check_task` '
+  'ADD COLUMN `max_per_source` decimal(5,2) DEFAULT NULL COMMENT ''单篇最大相似比（P5 新口径：所有来源中单篇贡献的最大重复占比，如 12.34 表示 12.34%）。存量行为旧口径，不迁移'' AFTER `check_rate`, '
+  'ADD COLUMN `citation_rate` decimal(5,2) DEFAULT NULL COMMENT ''引用率（P5：引用命中句字数 / 正文字数，如 3.21 表示 3.21%）'' AFTER `max_per_source`',
+  'SELECT ''check_task.max_per_source/citation_rate 已存在，跳过'' AS msg');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- check_result 加单篇最大相似比 + 引用率（P5）
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.columns
+   WHERE table_schema = DATABASE()
+     AND table_name = 'check_result'
+     AND column_name = 'max_per_source'
+);
+SET @ddl = IF(@col_exists = 0,
+  'ALTER TABLE `check_result` '
+  'ADD COLUMN `max_per_source` decimal(5,2) DEFAULT NULL COMMENT ''单篇最大相似比（P5 新口径，与 check_task 同义）'' AFTER `repeat_rate`, '
+  'ADD COLUMN `citation_rate` decimal(5,2) DEFAULT NULL COMMENT ''引用率（P5 新口径，与 check_task 同义）'' AFTER `max_per_source`',
+  'SELECT ''check_result.max_per_source/citation_rate 已存在，跳过'' AS msg');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- check_report 加内容哈希（P5 报告验真）
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.columns
+   WHERE table_schema = DATABASE()
+     AND table_name = 'check_report'
+     AND column_name = 'content_hash'
+);
+SET @ddl = IF(@col_exists = 0,
+  'ALTER TABLE `check_report` '
+  'ADD COLUMN `content_hash` varchar(64) DEFAULT NULL COMMENT ''报告内容哈希（P5：SHA-256(关键要素JSON+盐) 小写 hex，公开验真接口重算比对；历史报告为 NULL 视为不可验真）'' AFTER `total_similarity`',
+  'SELECT ''check_report.content_hash 已存在，跳过'' AS msg');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- paper_info 加学位类型（P5，存量行随 DEFAULT 回填为本科）+ 查询索引
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.columns
+   WHERE table_schema = DATABASE()
+     AND table_name = 'paper_info'
+     AND column_name = 'degree_type'
+);
+SET @ddl = IF(@col_exists = 0,
+  'ALTER TABLE `paper_info` '
+  'ADD COLUMN `degree_type` varchar(20) DEFAULT ''undergraduate'' COMMENT ''学位类型（P5 检测策略集匹配维度：undergraduate-本科 / master-硕士 / doctor-博士，对应字典 degree_type；存量默认本科）'' AFTER `similarity_rate`',
+  'SELECT ''paper_info.degree_type 已存在，跳过'' AS msg');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @idx_exists = (
+  SELECT COUNT(*) FROM information_schema.statistics
+   WHERE table_schema = DATABASE()
+     AND table_name = 'paper_info'
+     AND index_name = 'idx_pi_degree'
+);
+SET @ddl = IF(@idx_exists = 0,
+  'ALTER TABLE `paper_info` ADD INDEX `idx_pi_degree` (`degree_type`)',
+  'SELECT ''paper_info.idx_pi_degree 已存在，跳过'' AS msg');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- system_param 加成绩加权三项权重（P5：指导/评阅/答辩，默认 20/30/50）
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.columns
+   WHERE table_schema = DATABASE()
+     AND table_name = 'system_param'
+     AND column_name = 'guidance_weight'
+);
+SET @ddl = IF(@col_exists = 0,
+  'ALTER TABLE `system_param` '
+  'ADD COLUMN `guidance_weight` decimal(5,2) DEFAULT 20.00 COMMENT ''成绩加权合成 · 指导分权重（百分比，默认20；三项合计≠100 抛 40915）'', '
+  'ADD COLUMN `review_weight` decimal(5,2) DEFAULT 30.00 COMMENT ''成绩加权合成 · 评阅分权重（百分比，默认30）'', '
+  'ADD COLUMN `defense_weight` decimal(5,2) DEFAULT 50.00 COMMENT ''成绩加权合成 · 答辩分权重（百分比，默认50）''',
+  'SELECT ''system_param 成绩加权三列已存在，跳过'' AS msg');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- ----------------------------------------------------------------------------
+-- 1.16.3 字典种子（ID 段约定：70xx 论文状态 / 71xx 评阅 / 72xx 答辩 /
+--   73xx 学位类型 / 74xx 导师评价标签；与 种子数据.sql 段 10 同一份清单）
+-- ----------------------------------------------------------------------------
+
+-- paper_status：7 个存量状态 + 6 个 P1 新增阶段门状态
+INSERT IGNORE INTO `sys_dict_type`
+  (`id`, `dict_name`, `dict_type`, `status`, `create_by`, `create_time`, `remark`)
+VALUES
+  (7000, '论文状态', 'paper_status', '0', '1546278765432123458', NOW(),
+   '论文全生命周期状态（P1 扩展：新增评阅/答辩/归档阶段门）');
+
+INSERT IGNORE INTO `sys_dict_data`
+  (`id`, `dict_sort`, `dict_label`, `dict_value`, `dict_type`, `is_default`, `status`, `create_by`, `create_time`, `remark`)
+VALUES
+  (7001, 1,  '待分配',    'pending',        'paper_status', 'N', '0', '1546278765432123458', NOW(), '存量状态'),
+  (7002, 2,  '已分配',    'assigned',       'paper_status', 'N', '0', '1546278765432123458', NOW(), '存量状态'),
+  (7003, 3,  '待查重',    'checking',       'paper_status', 'N', '0', '1546278765432123458', NOW(), '存量状态'),
+  (7004, 4,  '待审核',    'auditing',       'paper_status', 'N', '0', '1546278765432123458', NOW(), '存量状态（语义收窄为导师初审）'),
+  (7005, 5,  '审核通过',  'completed',      'paper_status', 'N', '0', '1546278765432123458', NOW(), '存量状态（语义收窄为初审通过）'),
+  (7006, 6,  '审核不通过','rejected',       'paper_status', 'N', '0', '1546278765432123458', NOW(), '存量状态'),
+  (7007, 7,  '已取消',    'withdrawn',      'paper_status', 'N', '0', '1546278765432123458', NOW(), '存量状态'),
+  (7008, 8,  '评阅中',    'reviewing',      'paper_status', 'N', '0', '1546278765432123458', NOW(), 'P1 新增阶段门（P2 评阅任务启用）'),
+  (7009, 9,  '中期答辩',  'mid_defense',    'paper_status', 'N', '0', '1546278765432123458', NOW(), 'P1 新增阶段门（P3 答辩管理启用）'),
+  (7010, 10, '终期答辩',  'final_defense',  'paper_status', 'N', '0', '1546278765432123458', NOW(), 'P1 新增阶段门（P3 答辩管理启用）'),
+  (7011, 11, '答辩通过',  'defense_passed', 'paper_status', 'N', '0', '1546278765432123458', NOW(), 'P1 新增阶段门（P3 答辩管理启用）'),
+  (7012, 12, '定稿',      'finalized',      'paper_status', 'N', '0', '1546278765432123458', NOW(), 'P1 新增阶段门（P4 归档启用）'),
+  (7013, 13, '已归档',    'archived',       'paper_status', 'N', '0', '1546278765432123458', NOW(), 'P1 新增阶段门（P4 归档启用）');
+
+-- 评阅任务字典（P2：状态 / 类型 / 方式）
+INSERT IGNORE INTO `sys_dict_type`
+  (`id`, `dict_name`, `dict_type`, `status`, `create_by`, `create_time`, `remark`)
+VALUES
+  (7100, '评阅任务状态', 'review_assign_status', '0', '1546278765432123458', NOW(), '多人评阅任务状态（论文全生命周期P2）'),
+  (7110, '评阅任务类型', 'review_assign_type',   '0', '1546278765432123458', NOW(), '导师评阅/交叉评阅/盲审（论文全生命周期P2）'),
+  (7120, '评阅任务方式', 'review_assign_method', '0', '1546278765432123458', NOW(), '线上评阅/线下评阅结果回填（论文全生命周期P2）');
+
+INSERT IGNORE INTO `sys_dict_data`
+  (`id`, `dict_sort`, `dict_label`, `dict_value`, `dict_type`, `is_default`, `status`, `create_by`, `create_time`, `remark`)
+VALUES
+  (7101, 1, '待评阅',     '0', 'review_assign_status', 'N', '0', '1546278765432123458', NOW(), '任务已下发'),
+  (7102, 2, '评阅中',     '1', 'review_assign_status', 'N', '0', '1546278765432123458', NOW(), '预留（P2 未开放开始动作）'),
+  (7103, 3, '已提交',     '2', 'review_assign_status', 'N', '0', '1546278765432123458', NOW(), '评阅结果已提交'),
+  (7104, 4, '已超时转派', '3', 'review_assign_status', 'N', '0', '1546278765432123458', NOW(), '超时扫描标记，原任务失效'),
+  (7111, 1, '导师评阅',   'advisor', 'review_assign_type', 'N', '0', '1546278765432123458', NOW(), ''),
+  (7112, 2, '交叉评阅',   'peer',    'review_assign_type', 'N', '0', '1546278765432123458', NOW(), '默认类型'),
+  (7113, 3, '盲审',       'blind',   'review_assign_type', 'N', '0', '1546278765432123458', NOW(), '查询层对学生/导师信息脱敏'),
+  (7121, 1, '线上评阅',   'online',  'review_assign_method', 'N', '0', '1546278765432123458', NOW(), '系统内直接打分'),
+  (7122, 2, '线下评阅',   'offline', 'review_assign_method', 'N', '0', '1546278765432123458', NOW(), '结果回填 + 扫描件佐证');
+
+-- 答辩相关字典（P3：批次状态 / 批次类型 / 答辩方式 / 组角色 / 结论 / 等级）
+INSERT IGNORE INTO `sys_dict_type`
+  (`id`, `dict_name`, `dict_type`, `status`, `create_by`, `create_time`, `remark`)
+VALUES
+  (7200, '答辩批次状态', 'defense_batch_status', '0', '1546278765432123458', NOW(), '答辩批次状态（论文全生命周期P3）'),
+  (7210, '答辩批次类型', 'defense_batch_type',   '0', '1546278765432123458', NOW(), '中期/终期共用（论文全生命周期P3）'),
+  (7220, '答辩方式',     'defense_mode',         '0', '1546278765432123458', NOW(), '线上/线下（论文全生命周期P3）'),
+  (7230, '答辩组角色',   'defense_group_role',   '0', '1546278765432123458', NOW(), '组长/成员（论文全生命周期P3）'),
+  (7240, '答辩结论',     'defense_result',       '0', '1546278765432123458', NOW(), '通过/不通过/缓辩（论文全生命周期P3）'),
+  (7250, '答辩等级',     'defense_grade',        '0', '1546278765432123458', NOW(), '优/良/中/及格/不及格（论文全生命周期P3）');
+
+INSERT IGNORE INTO `sys_dict_data`
+  (`id`, `dict_sort`, `dict_label`, `dict_value`, `dict_type`, `is_default`, `status`, `create_by`, `create_time`, `remark`)
+VALUES
+  (7201, 1, '筹备中', '0', 'defense_batch_status', 'Y', '0', '1546278765432123458', NOW(), '批次新建，未开始答辩'),
+  (7202, 2, '进行中', '1', 'defense_batch_status', 'N', '0', '1546278765432123458', NOW(), '答辩进行中'),
+  (7203, 3, '已结束', '2', 'defense_batch_status', 'N', '0', '1546278765432123458', NOW(), '批次已结束（组长已汇总提交结论）'),
+  (7211, 1, '中期答辩', 'mid_term', 'defense_batch_type', 'N', '0', '1546278765432123458', NOW(), '中期检查答辩'),
+  (7212, 2, '终期答辩', 'final',    'defense_batch_type', 'Y', '0', '1546278765432123458', NOW(), '终期/毕业答辩（成绩回写 final_score）'),
+  (7221, 1, '线上答辩', 'online',  'defense_mode', 'N', '0', '1546278765432123458', NOW(), '线上会议，location 填会议链接'),
+  (7222, 2, '线下答辩', 'offline', 'defense_mode', 'Y', '0', '1546278765432123458', NOW(), '线下教室，location 填教室地址'),
+  (7231, 1, '组长', 'leader', 'defense_group_role', 'N', '0', '1546278765432123458', NOW(), '主持并汇总结论'),
+  (7232, 2, '成员', 'member', 'defense_group_role', 'Y', '0', '1546278765432123458', NOW(), '答辩组成员'),
+  (7241, 1, '通过',     'pass',     'defense_result', 'Y', '0', '1546278765432123458', NOW(), '答辩通过'),
+  (7242, 2, '不通过',   'fail',     'defense_result', 'N', '0', '1546278765432123458', NOW(), '答辩不通过（退回修改）'),
+  (7243, 3, '缓辩',     'postpone', 'defense_result', 'N', '0', '1546278765432123458', NOW(), '缓辩（择期重排批次）'),
+  (7251, 1, '优',     '优',     'defense_grade', 'N', '0', '1546278765432123458', NOW(), ''),
+  (7252, 2, '良',     '良',     'defense_grade', 'N', '0', '1546278765432123458', NOW(), ''),
+  (7253, 3, '中',     '中',     'defense_grade', 'N', '0', '1546278765432123458', NOW(), ''),
+  (7254, 4, '及格',   '及格',   'defense_grade', 'N', '0', '1546278765432123458', NOW(), ''),
+  (7255, 5, '不及格', '不及格', 'defense_grade', 'N', '0', '1546278765432123458', NOW(), '');
+
+-- 学位类型字典（P5）
+INSERT IGNORE INTO `sys_dict_type`
+  (`id`, `dict_name`, `dict_type`, `status`, `create_by`, `create_time`, `remark`)
+VALUES
+  (7300, '学位类型', 'degree_type', '0', '1546278765432123458', NOW(), '论文学位类型（论文全生命周期P5，检测策略集匹配维度）');
+
+INSERT IGNORE INTO `sys_dict_data`
+  (`id`, `dict_sort`, `dict_label`, `dict_value`, `dict_type`, `is_default`, `status`, `create_by`, `create_time`, `remark`)
+VALUES
+  (7301, 1, '本科', 'undergraduate', 'degree_type', 'Y', '0', '1546278765432123458', NOW(), '本科学位论文'),
+  (7302, 2, '硕士', 'master',        'degree_type', 'N', '0', '1546278765432123458', NOW(), '硕士学位论文'),
+  (7303, 3, '博士', 'doctor',        'degree_type', 'N', '0', '1546278765432123458', NOW(), '博士学位论文');
+
+-- 导师评价标签字典（P6：负向标签与正向标签同列，由前端按 remark 展示分组）
+INSERT IGNORE INTO `sys_dict_type`
+  (`id`, `dict_name`, `dict_type`, `status`, `create_by`, `create_time`, `remark`)
+VALUES
+  (7400, '导师评价标签', 'advisor_eval_tag', '0', '1546278765432123458', NOW(), '学生对指导教师评价的预设标签（论文全生命周期P6a）');
+
+INSERT IGNORE INTO `sys_dict_data`
+  (`id`, `dict_sort`, `dict_label`, `dict_value`, `dict_type`, `is_default`, `status`, `create_by`, `create_time`, `remark`)
+VALUES
+  (7401, 1, '回复及时',   'reply_timely',       'advisor_eval_tag', 'N', '0', '1546278765432123458', NOW(), '正向'),
+  (7402, 2, '反馈细致',   'feedback_detailed',  'advisor_eval_tag', 'N', '0', '1546278765432123458', NOW(), '正向'),
+  (7403, 3, '要求严格',   'strict_demanding',   'advisor_eval_tag', 'N', '0', '1546278765432123458', NOW(), '正向'),
+  (7404, 4, '因材施教',   'tailored_guidance',  'advisor_eval_tag', 'N', '0', '1546278765432123458', NOW(), '正向'),
+  (7405, 5, '资源丰富',   'resource_support',   'advisor_eval_tag', 'N', '0', '1546278765432123458', NOW(), '正向'),
+  (7406, 6, '指导偏少',   'guidance_lacking',   'advisor_eval_tag', 'N', '0', '1546278765432123458', NOW(), '负向'),
+  (7407, 7, '反馈较慢',   'feedback_slow',      'advisor_eval_tag', 'N', '0', '1546278765432123458', NOW(), '负向');
 
 -- ============================================================================
 -- 段 2：similarity_threshold 系列表的 is_deleted 历史 NULL 归零
@@ -1375,6 +1908,34 @@ SELECT COUNT(*) AS sys_user_pref_cols_present FROM information_schema.COLUMNS
    AND COLUMN_NAME IN ('notify_system_error','notify_security_warning',
                        'notify_system_announcement','notify_email',
                        'log_retention_days','backup_frequency');
+
+-- 5.12 段 1.16 论文全生命周期 P1~P6 执行后（和 0.11 对照）
+--   期望：lifecycle_tables=11 / lifecycle_new_cols=10 / 字典 13/9/17/3/7
+SELECT COUNT(*) AS lifecycle_tables FROM information_schema.TABLES
+ WHERE TABLE_SCHEMA = DATABASE()
+   AND TABLE_NAME IN ('guidance_record','review_assignment','review_workflow_progress',
+                      'defense_batch','defense_group_member','defense_record',
+                      'check_sentence_hit','paper_check_signoff','check_policy',
+                      'check_college_quota','advisor_evaluation');
+
+SELECT COUNT(*) AS lifecycle_new_cols FROM information_schema.COLUMNS
+ WHERE TABLE_SCHEMA = DATABASE()
+   AND ((TABLE_NAME = 'paper_info'   AND COLUMN_NAME IN ('workflow_step','degree_type'))
+     OR (TABLE_NAME = 'check_task'   AND COLUMN_NAME IN ('max_per_source','citation_rate'))
+     OR (TABLE_NAME = 'check_result' AND COLUMN_NAME IN ('max_per_source','citation_rate'))
+     OR (TABLE_NAME = 'check_report' AND COLUMN_NAME = 'content_hash')
+     OR (TABLE_NAME = 'system_param' AND COLUMN_NAME IN ('guidance_weight','review_weight','defense_weight')));
+
+-- 字典条数（sys_dict_data 表无 is_deleted 列，勿加此过滤）：
+--   paper_status_dict=13 / review_dict=9 / defense_dict=17 / degree_dict=3 / eval_tag_dict=7
+SELECT (SELECT COUNT(*) FROM sys_dict_data WHERE dict_type = 'paper_status')              AS paper_status_dict,
+       (SELECT COUNT(*) FROM sys_dict_data WHERE dict_type IN ('review_assign_status',
+              'review_assign_type','review_assign_method'))                               AS review_dict,
+       (SELECT COUNT(*) FROM sys_dict_data WHERE dict_type IN ('defense_batch_status',
+              'defense_batch_type','defense_mode','defense_group_role',
+              'defense_result','defense_grade'))                                          AS defense_dict,
+       (SELECT COUNT(*) FROM sys_dict_data WHERE dict_type = 'degree_type')               AS degree_dict,
+       (SELECT COUNT(*) FROM sys_dict_data WHERE dict_type = 'advisor_eval_tag')          AS eval_tag_dict;
 
 
 -- ============================================================================

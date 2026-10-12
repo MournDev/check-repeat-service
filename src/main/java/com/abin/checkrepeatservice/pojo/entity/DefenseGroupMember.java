@@ -6,7 +6,7 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 
 /**
- * 答辩组成员实体类（对应数据库表：defense_group_member，见 db/补论文全生命周期P3.sql）。
+ * 答辩组成员实体类（对应数据库表：defense_group_member，见 db/init.sql 与 db/种子数据.sql 段 10）。
  *
  * 业务规则（论文全生命周期 P3）：
  *  - 每批次可配 1 名组长（leader）+ N 名成员（member）；

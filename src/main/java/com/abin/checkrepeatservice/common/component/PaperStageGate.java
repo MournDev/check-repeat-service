@@ -31,7 +31,7 @@ public class PaperStageGate {
     /**
      * 合法流转表：from → 允许的 to 集合。
      * 维护约定：改这里之前先对照 docs/论文全生命周期落地方案.md 的状态机设计，
-     * 并同步 DictConstants.PaperStatus 与 db/补论文全生命周期P1.sql 的字典行。
+     * 并同步 DictConstants.PaperStatus 与 db/种子数据.sql 段 10 的字典行。
      */
     private static final Map<String, Set<String>> ALLOWED_TRANSITIONS = Map.ofEntries(
             // 分配链（存量流程）

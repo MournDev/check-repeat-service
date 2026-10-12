@@ -9,7 +9,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
- * 答辩记录实体类（对应数据库表：defense_record，见 db/补论文全生命周期P3.sql）。
+ * 答辩记录实体类（对应数据库表：defense_record，见 db/init.sql 与 db/种子数据.sql 段 10）。
  *
  * 业务规则（论文全生命周期 P3）：
  *  - 按论文归档：每篇论文在每个批次有一条记录（(batch_id, paper_id) 唯一）；

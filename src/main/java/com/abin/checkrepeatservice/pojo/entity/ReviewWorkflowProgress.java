@@ -8,7 +8,7 @@ import lombok.EqualsAndHashCode;
 import java.time.LocalDateTime;
 
 /**
- * 多级初审投票实体类（对应数据库表：review_workflow_progress，见 db/补论文全生命周期P2.sql）。
+ * 多级初审投票实体类（对应数据库表：review_workflow_progress，见 db/init.sql 与 db/种子数据.sql 段 10）。
  *
  * 业务规则（论文全生命周期 P2，ReviewWorkflow 配置壳接线）：
  *  - 步骤定义仍在 review_workflow.steps（JSON），本表只记录「谁在哪一步投了什么票」；
