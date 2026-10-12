@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.abin.checkrepeatservice.mapper.AdvisorEvaluationMapper">
+
+    <!--
+      导师评价跨表/聚合查询（论文全生命周期 P6a）。
+      MySQL 开启 only_full_group_by：SELECT 只允许分组列 + 聚合列，全部查询已按此约束书写。
+    -->
+
+    <!-- 教师端汇总：五维均分 + 份数（单行聚合，无明细） -->
+    <select id="selectTeacherSummary" resultType="java.util.LinkedHashMap">
+        SELECT
+            COUNT(*) AS evalCount,
+            ROUND(AVG(score_timeliness), 2)   AS avgTimeliness,
+            ROUND(AVG(score_quality), 2)      AS avgQuality,
+            ROUND(AVG(score_attitude), 2)     AS avgAttitude,
+            ROUND(AVG(score_professional), 2) AS avgProfessional,
+            ROUND(AVG(score_overall), 2)      AS avgOverall
+        FROM advisor_evaluation
+        WHERE is_deleted = 0
+          AND teacher_id = #{teacherId}
+    </select>
+
+    <!-- 某导师全部评价的标签 JSON 串（Java 侧解析做频次统计） -->
+    <select id="selectTeacherTags" resultType="java.lang.String">
+        SELECT tags
+        FROM advisor_evaluation
+        WHERE is_deleted = 0
+          AND teacher_id = #{teacherId}
+          AND tags IS NOT NULL
+    </select>
+
+    <!-- 管理端实名分页：联 paper_info（标题/学院）、sys_user×2（学生/导师姓名）、college（学院名）。
+         无聚合无 GROUP BY，仅行级联查；排序与列表口径一致：create_time desc + id desc 兜底 -->
+    <select id="selectEvalPage" resultType="com.abin.checkrepeatservice.admin.dto.AdvisorEvalPageItemVO">
+        SELECT
+            ae.id                AS id,
+            ae.paper_id          AS paperId,
+            p.paper_title        AS paperTitle,
+            ae.student_id        AS studentId,
+            su.real_name         AS studentName,
+            ae.teacher_id        AS teacherId,
+            tu.real_name         AS teacherName,
+            p.college_id         AS collegeId,
+            c.college_name       AS collegeName,
+            ae.score_timeliness  AS scoreTimeliness,
+            ae.score_quality     AS scoreQuality,
+            ae.score_attitude    AS scoreAttitude,
+            ae.score_professional AS scoreProfessional,
+            ae.score_overall     AS scoreOverall,
+            ae.tags              AS tagsJson,
+            ae.comment           AS comment,
+            ae.create_time       AS createTime
+        FROM advisor_evaluation ae
+        LEFT JOIN paper_info p ON ae.paper_id = p.id
+        LEFT JOIN sys_user su ON ae.student_id = su.id
+        LEFT JOIN sys_user tu ON ae.teacher_id = tu.id
+        LEFT JOIN college c ON p.college_id = c.id
+        WHERE ae.is_deleted = 0
+        <if test="req.teacherId != null">
+            AND ae.teacher_id = #{req.teacherId}
+        </if>
+        <if test="req.collegeId != null">
+            AND p.college_id = #{req.collegeId}
+        </if>
+        <if test="req.minOverall != null">
+            AND ae.score_overall &gt;= #{req.minOverall}
+        </if>
+        <if test="req.maxOverall != null">
+            AND ae.score_overall &lt;= #{req.maxOverall}
+        </if>
+        ORDER BY ae.create_time DESC, ae.id DESC
+    </select>
+
+    <!-- 导师排行：按导师聚合（only_full_group_by：SELECT 仅分组列 + 聚合列，
+         导师姓名由 Java 侧按 teacherId 批量回填） -->
+    <select id="selectTeacherRank" resultType="com.abin.checkrepeatservice.admin.dto.AdvisorEvalStatsVO$TeacherRankItem">
+        SELECT
+            teacher_id              AS teacherId,
+            COUNT(*)                AS evalCount,
+            ROUND(AVG(score_overall), 2) AS avgOverall
+        FROM advisor_evaluation
+        WHERE is_deleted = 0
+        GROUP BY teacher_id
+    </select>
+
+    <!-- 学院对比：paper_info 无 college_name 冗余列，沿用 LEFT JOIN college 既有模式；
+         college_id 为 NULL 的行由 Java 侧归"未分配" -->
+    <select id="selectCollegeEvalCompare" resultType="com.abin.checkrepeatservice.admin.dto.AdvisorEvalStatsVO$CollegeCompareItem">
+        SELECT
+            p.college_id            AS collegeId,
+            c.college_name          AS collegeName,
+            COUNT(*)                AS evalCount,
+            ROUND(AVG(ae.score_overall), 2) AS avgOverall
+        FROM advisor_evaluation ae
+        JOIN paper_info p ON ae.paper_id = p.id
+        LEFT JOIN college c ON p.college_id = c.id
+        WHERE ae.is_deleted = 0
+        GROUP BY p.college_id, c.college_name
+    </select>
+
+</mapper>
