@@ -1,12 +1,16 @@
 package com.abin.checkrepeatservice.admin.controller;
 
+import com.abin.checkrepeatservice.admin.vo.CheckCollegeQuotaVO;
 import com.abin.checkrepeatservice.admin.vo.CheckRuleOperateReq;
 import com.abin.checkrepeatservice.admin.vo.CompareLibOperateReq;
+import com.abin.checkrepeatservice.admin.dto.CheckQuotaSaveReq;
 import com.abin.checkrepeatservice.admin.dto.RuleLibRelationDTO;
 import com.abin.checkrepeatservice.admin.vo.SystemParamReq;
 import com.abin.checkrepeatservice.admin.service.AdminRuleConfigService;
+import com.abin.checkrepeatservice.admin.service.CollegeQuotaService;
 import com.abin.checkrepeatservice.admin.service.SystemConfigService;
 import com.abin.checkrepeatservice.common.Result;
+import com.abin.checkrepeatservice.common.annotation.OperationLog;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.pojo.entity.CheckRule;
 import com.abin.checkrepeatservice.pojo.entity.CompareLib;
@@ -36,7 +40,10 @@ public class AdminRuleConfigController {
 
     @Resource
     private AdminRuleConfigService adminRuleConfigService;
-    
+
+    @Resource
+    private CollegeQuotaService collegeQuotaService;
+	
     @Autowired
     private SystemConfigService systemConfigService;
     
@@ -395,6 +402,27 @@ public class AdminRuleConfigController {
             log.error("邮件测试发送失败: {}", e.getMessage(), e);
             return Result.error(ResultCode.SYSTEM_ERROR, "邮件测试发送失败: " + e.getMessage());
         }
+    }
+
+    // ========================== 学院月度查重额度（P5） ==========================
+    /**
+     * 管理员查询学院月度查重额度列表（quotaMonth 可选；pageSize=-1 返回全量不分页）
+     */
+    @GetMapping("/check-quota/list")
+    public Result<Page<CheckCollegeQuotaVO>> getCheckQuotaList(
+            @RequestParam(value = "quotaMonth", required = false) String quotaMonth,
+            @RequestParam(value = "currentPage", required = false, defaultValue = "1") Integer currentPage,
+            @RequestParam(value = "pageSize", required = false, defaultValue = "10") Integer pageSize) {
+        return collegeQuotaService.listQuotas(quotaMonth, currentPage, pageSize);
+    }
+
+    /**
+     * 管理员保存学院月度查重额度（按 college_id + quota_month upsert，quotaMonth 默认当前月）
+     */
+    @PostMapping("/check-quota/save")
+    @OperationLog(type = "admin_check_quota_save", description = "管理员保存学院月度查重额度")
+    public Result<Void> saveCheckQuota(@Valid @RequestBody CheckQuotaSaveReq req) {
+        return collegeQuotaService.saveQuota(req);
     }
 
     /**

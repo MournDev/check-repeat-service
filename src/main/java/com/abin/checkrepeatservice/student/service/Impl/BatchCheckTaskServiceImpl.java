@@ -1,5 +1,7 @@
 package com.abin.checkrepeatservice.student.service.Impl;
 
+import com.abin.checkrepeatservice.admin.service.CollegeQuotaService;
+import com.abin.checkrepeatservice.common.Exception.BusinessException;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.pojo.entity.CheckTask;
@@ -42,6 +44,10 @@ public class BatchCheckTaskServiceImpl {
 
     @Resource
     private CheckTaskService checkTaskService;
+
+    // P5 学院月度查重额度：批量入口逐篇新建任务前校验并扣减
+    @Resource
+    private CollegeQuotaService collegeQuotaService;
 
     /**
      * 批量创建查重任务
@@ -115,6 +121,19 @@ public class BatchCheckTaskServiceImpl {
         }
 
         PaperInfo paperInfo = validationResult.getPaper();
+
+        // P5 学院月度额度：新建任务落库前校验并扣减学院当月额度。
+        // 重试路径复用已存在任务，不经过本批量新建入口，不会重复扣减。
+        try {
+            collegeQuotaService.checkAndConsume(paperInfo.getCollegeId());
+        } catch (BusinessException e) {
+            // 额度不足（40916）按单篇失败返回，不中断批量中其他论文
+            return BatchCheckResultDTO.TaskResult.builder()
+                .paperId(paperId)
+                .success(false)
+                .message(e.getMessage())
+                .build();
+        }
 
         // 2. 创建任务
         try {

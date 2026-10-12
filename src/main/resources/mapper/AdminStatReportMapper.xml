@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.abin.checkrepeatservice.admin.mapper.AdminStatReportMapper">
+
+    <!--
+      管理端全校统计报表（论文全生命周期 P5）。
+      MySQL 开启 only_full_group_by：SELECT 只允许分组列 + 聚合列，全部查询已按此约束书写。
+    -->
+
+    <!-- 查重结果分布：派生子表先按 CASE 打桶（0-10 为左闭右开，90-100 含 100），
+         外层仅 SELECT 桶名 + COUNT(*)，缺失桶由 Java 侧补 0 -->
+    <select id="selectSimilarityDistribution" resultType="com.abin.checkrepeatservice.admin.dto.SimilarityDistributionVO">
+        SELECT
+            t.bucket AS bucket,
+            COUNT(*) AS count
+        FROM (
+            SELECT CASE
+                WHEN cr.repeat_rate &lt; 10 THEN '0-10'
+                WHEN cr.repeat_rate &lt; 20 THEN '10-20'
+                WHEN cr.repeat_rate &lt; 30 THEN '20-30'
+                WHEN cr.repeat_rate &lt; 40 THEN '30-40'
+                WHEN cr.repeat_rate &lt; 50 THEN '40-50'
+                WHEN cr.repeat_rate &lt; 60 THEN '50-60'
+                WHEN cr.repeat_rate &lt; 70 THEN '60-70'
+                WHEN cr.repeat_rate &lt; 80 THEN '70-80'
+                WHEN cr.repeat_rate &lt; 90 THEN '80-90'
+                ELSE '90-100'
+            END AS bucket
+            FROM check_result cr
+            WHERE cr.is_deleted = 0
+              AND cr.repeat_rate IS NOT NULL
+        ) t
+        GROUP BY t.bucket
+    </select>
+
+    <!-- 按学院统计：paper_info 自身无 college_name 冗余列，沿用 selectCollegePaperStats 的
+         LEFT JOIN college 既有模式；college_id 为 NULL 的行由 Java 侧归"未分配" -->
+    <select id="selectCollegeCompare" resultType="com.abin.checkrepeatservice.admin.dto.CollegeCompareVO">
+        SELECT
+            pi.college_id   AS collegeId,
+            c.college_name  AS collegeName,
+            ROUND(AVG(pi.similarity_rate), 2) AS avgRate,
+            COUNT(*)        AS total
+        FROM paper_info pi
+        LEFT JOIN college c ON pi.college_id = c.id
+        WHERE pi.is_deleted = 0
+          AND pi.similarity_rate IS NOT NULL
+        GROUP BY pi.college_id, c.college_name
+    </select>
+
+    <!-- 月度趋势：SELECT 的 DATE_FORMAT 表达式与 GROUP BY 表达式完全一致（only_full_group_by 允许），
+         全量月份升序返回，最近 12 个月由 Java 侧截取并补缺失月 -->
+    <select id="selectMonthlyTrend" resultType="com.abin.checkrepeatservice.admin.dto.MonthlyTrendVO">
+        SELECT
+            DATE_FORMAT(cr.check_time, '%Y-%m') AS ym,
+            COUNT(*) AS count,
+            IFNULL(ROUND(AVG(cr.repeat_rate), 2), 0) AS avgRate
+        FROM check_result cr
+        WHERE cr.is_deleted = 0
+          AND cr.check_time IS NOT NULL
+        GROUP BY DATE_FORMAT(cr.check_time, '%Y-%m')
+        ORDER BY ym
+    </select>
+
+</mapper>
