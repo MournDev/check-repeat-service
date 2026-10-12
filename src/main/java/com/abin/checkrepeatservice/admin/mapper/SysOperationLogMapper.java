@@ -79,4 +79,22 @@ public interface SysOperationLogMapper extends BaseMapper<SysOperationLog> {
      * @return 清理条数
      */
     int cleanExpiredLogs(@Param("days") Integer days);
+
+    /**
+     * 审计日志汇总（P5 超管端）：按操作类型分组计数
+     * @param startTime 开始时间（含，可空=不限）
+     * @param endTime   结束时间（不含，可空=不限）
+     * @return [{key, count}]，key 为 operation_type
+     */
+    List<Map<String, Object>> summarizeByOperationType(@Param("startTime") LocalDateTime startTime,
+                                                       @Param("endTime") LocalDateTime endTime);
+
+    /**
+     * 审计日志汇总（P5 超管端）：按用户类型分组计数
+     * @param startTime 开始时间（含，可空=不限）
+     * @param endTime   结束时间（不含，可空=不限）
+     * @return [{key, count}]，key 为 user_type
+     */
+    List<Map<String, Object>> summarizeByUserType(@Param("startTime") LocalDateTime startTime,
+                                                  @Param("endTime") LocalDateTime endTime);
 }

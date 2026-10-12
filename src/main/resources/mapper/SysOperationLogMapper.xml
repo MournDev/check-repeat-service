@@ -158,4 +158,44 @@
         OR operation_time &lt; DATE_SUB(NOW(), INTERVAL #{days} DAY)
     </delete>
 
+    <!--
+      审计日志汇总（P5 超管端）：按操作类型分组计数。
+      列别名单数 key/count 供前端 [{key, count}] 直接取值（沿用本文件顶部的驼峰别名约定）；
+      key 是 MySQL 保留字，必须反引号。GROUP BY 原列 + 聚合列，兼容 only_full_group_by。
+      时间过滤走 create_time：上界为开区间（endTime=次日0点），BETWEEN 的闭区间语义
+      会把结束日 00:00:00 之后的数据漏掉，故用 >= / <。
+    -->
+    <select id="summarizeByOperationType" parameterType="map" resultType="map">
+        SELECT
+            COALESCE(operation_type, '未知') AS `key`,
+            COUNT(*) AS `count`
+        FROM sys_operation_log
+        WHERE is_deleted = 0
+        <if test="startTime != null">
+            AND create_time &gt;= #{startTime}
+        </if>
+        <if test="endTime != null">
+            AND create_time &lt; #{endTime}
+        </if>
+        GROUP BY operation_type
+        ORDER BY `count` DESC
+    </select>
+
+    <!-- 审计日志汇总（P5 超管端）：按用户类型分组计数，口径同上 -->
+    <select id="summarizeByUserType" parameterType="map" resultType="map">
+        SELECT
+            COALESCE(user_type, '未知') AS `key`,
+            COUNT(*) AS `count`
+        FROM sys_operation_log
+        WHERE is_deleted = 0
+        <if test="startTime != null">
+            AND create_time &gt;= #{startTime}
+        </if>
+        <if test="endTime != null">
+            AND create_time &lt; #{endTime}
+        </if>
+        GROUP BY user_type
+        ORDER BY `count` DESC
+    </select>
+
 </mapper>

@@ -99,4 +99,20 @@ public interface SysOperationLogService {
                                               Integer status, String userType,
                                               LocalDateTime startTime,
                                               LocalDateTime endTime, String keyword);
+
+    /**
+     * 审计日志汇总（P5 超管端）：按操作类型分组计数
+     * @param startTime 开始时间（含，可空=不限）
+     * @param endTime   结束时间（不含，可空=不限）
+     * @return [{key, count}]
+     */
+    List<Map<String, Object>> summarizeByOperationType(LocalDateTime startTime, LocalDateTime endTime);
+
+    /**
+     * 审计日志汇总（P5 超管端）：按用户类型分组计数
+     * @param startTime 开始时间（含，可空=不限）
+     * @param endTime   结束时间（不含，可空=不限）
+     * @return [{key, count}]
+     */
+    List<Map<String, Object>> summarizeByUserType(LocalDateTime startTime, LocalDateTime endTime);
 }

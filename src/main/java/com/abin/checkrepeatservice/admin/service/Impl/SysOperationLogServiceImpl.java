@@ -188,4 +188,24 @@ public class SysOperationLogServiceImpl extends ServiceImpl<SysOperationLogMappe
             throw new RuntimeException("导出操作日志失败", e);
         }
     }
+
+    @Override
+    public List<Map<String, Object>> summarizeByOperationType(LocalDateTime startTime, LocalDateTime endTime) {
+        try {
+            return sysOperationLogMapper.summarizeByOperationType(startTime, endTime);
+        } catch (Exception e) {
+            log.error("按操作类型汇总审计日志失败: {}", e.getMessage(), e);
+            throw new RuntimeException("按操作类型汇总审计日志失败", e);
+        }
+    }
+
+    @Override
+    public List<Map<String, Object>> summarizeByUserType(LocalDateTime startTime, LocalDateTime endTime) {
+        try {
+            return sysOperationLogMapper.summarizeByUserType(startTime, endTime);
+        } catch (Exception e) {
+            log.error("按用户类型汇总审计日志失败: {}", e.getMessage(), e);
+            throw new RuntimeException("按用户类型汇总审计日志失败", e);
+        }
+    }
 }

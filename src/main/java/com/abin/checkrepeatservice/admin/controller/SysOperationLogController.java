@@ -13,8 +13,11 @@ import org.springframework.web.bind.annotation.*;
 
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.format.annotation.DateTimeFormat;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -206,6 +209,39 @@ public class SysOperationLogController {
         } catch (Exception e) {
             log.error("清理过期操作日志失败: {}", e.getMessage(), e);
             return Result.error(ResultCode.SYSTEM_ERROR, "清理失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 审计日志汇总（P5，仅超管）：按操作类型、用户类型两个维度分组计数。
+     * 类级权限是 ADMIN，方法级叠加 SUPER_ADMIN 收敛到超管；时间范围可空=全量。
+     */
+    @GetMapping("/summary")
+    @PreAuthorize("hasAuthority('SUPER_ADMIN')")
+    public Result<Map<String, Object>> getOperationLogSummary(
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate beginDate,
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+
+        log.info("接收审计日志汇总请求: beginDate={}, endDate={}", beginDate, endDate);
+
+        try {
+            if (beginDate != null && endDate != null && beginDate.isAfter(endDate)) {
+                return Result.error(ResultCode.PARAM_VALUE_INVALID, "beginDate 不能晚于 endDate");
+            }
+            // 结束日按"整日包含"换算为开区间上界（endDate 次日 0 点），与 XML 的 >= / < 口径一致
+            LocalDateTime start = beginDate == null ? null : beginDate.atStartOfDay();
+            LocalDateTime end = endDate == null ? null : endDate.plusDays(1).atStartOfDay();
+
+            Map<String, Object> data = new HashMap<>();
+            data.put("operationTypes", sysOperationLogService.summarizeByOperationType(start, end));
+            data.put("userTypes", sysOperationLogService.summarizeByUserType(start, end));
+            return Result.success("获取成功", data);
+
+        } catch (Exception e) {
+            log.error("获取审计日志汇总失败: {}", e.getMessage(), e);
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取失败: " + e.getMessage());
         }
     }
 
