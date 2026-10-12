@@ -11,6 +11,7 @@
 -- 本脚本幂等（CREATE TABLE IF NOT EXISTS + INSERT IGNORE +
 -- information_schema 检查式 ALTER），可重复执行。
 -- 依赖：补论文全生命周期P1.sql / P2.sql / P3.sql 已执行。
+-- 前置：MySQL 8.0+（建表使用 utf8mb4_0900_ai_ci 排序规则）。
 --
 -- 内容：
 --   1. 存量表扩列（幂等 ALTER）：
@@ -39,8 +40,16 @@
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
+-- 0. 权限预检（可选，若已由 DBA 提前授权可跳过）
+--    注意：不要 GRANT information_schema，它随业务库权限自动可见。
+-- ----------------------------------------------------------------------------
+-- GRANT ALL PRIVILEGES ON `check-repeat-system`.* TO 'root'@'%';
+-- FLUSH PRIVILEGES;
+
+-- ----------------------------------------------------------------------------
 -- 1. 存量表扩列（MySQL 不支持 ADD COLUMN IF NOT EXISTS，
 --    用 information_schema + 预处理语句做幂等，范式同 P2）
+--    拼接统一用相邻字符串常量，不依赖 sql_mode 的 PIPES_AS_CONCAT。
 -- ----------------------------------------------------------------------------
 
 -- 1.1 check_task 加单篇最大相似比 + 引用率
@@ -50,11 +59,13 @@ SET @col_exists = (
      AND table_name = 'check_task'
      AND column_name = 'max_per_source'
 );
+
 SET @ddl = IF(@col_exists = 0,
-  'ALTER TABLE `check_task` ' ||
-  'ADD COLUMN `max_per_source` decimal(5,2) DEFAULT NULL COMMENT ''单篇最大相似比（P5 新口径：所有来源中单篇贡献的最大重复占比，如 12.34 表示 12.34%）。存量行为旧口径，不迁移'' AFTER `check_rate`, ' ||
+  'ALTER TABLE `check_task` '
+  'ADD COLUMN `max_per_source` decimal(5,2) DEFAULT NULL COMMENT ''单篇最大相似比（P5 新口径：所有来源中单篇贡献的最大重复占比，如 12.34 表示 12.34%）。存量行为旧口径，不迁移'' AFTER `check_rate`, '
   'ADD COLUMN `citation_rate` decimal(5,2) DEFAULT NULL COMMENT ''引用率（P5：引用命中句字数 / 正文字数，如 3.21 表示 3.21%）'' AFTER `max_per_source`',
   'SELECT ''check_task.max_per_source/citation_rate 已存在，跳过'' AS msg');
+
 PREPARE stmt FROM @ddl;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
@@ -66,11 +77,13 @@ SET @col_exists = (
      AND table_name = 'check_result'
      AND column_name = 'max_per_source'
 );
+
 SET @ddl = IF(@col_exists = 0,
-  'ALTER TABLE `check_result` ' ||
-  'ADD COLUMN `max_per_source` decimal(5,2) DEFAULT NULL COMMENT ''单篇最大相似比（P5 新口径，与 check_task 同义）'' AFTER `repeat_rate`, ' ||
+  'ALTER TABLE `check_result` '
+  'ADD COLUMN `max_per_source` decimal(5,2) DEFAULT NULL COMMENT ''单篇最大相似比（P5 新口径，与 check_task 同义）'' AFTER `repeat_rate`, '
   'ADD COLUMN `citation_rate` decimal(5,2) DEFAULT NULL COMMENT ''引用率（P5 新口径，与 check_task 同义）'' AFTER `max_per_source`',
   'SELECT ''check_result.max_per_source/citation_rate 已存在，跳过'' AS msg');
+
 PREPARE stmt FROM @ddl;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
@@ -82,10 +95,12 @@ SET @col_exists = (
      AND table_name = 'check_report'
      AND column_name = 'content_hash'
 );
+
 SET @ddl = IF(@col_exists = 0,
-  'ALTER TABLE `check_report` ' ||
+  'ALTER TABLE `check_report` '
   'ADD COLUMN `content_hash` varchar(64) DEFAULT NULL COMMENT ''报告内容哈希（P5：SHA-256(关键要素JSON+盐) 小写 hex，公开验真接口重算比对；历史报告为 NULL 视为不可验真）'' AFTER `total_similarity`',
   'SELECT ''check_report.content_hash 已存在，跳过'' AS msg');
+
 PREPARE stmt FROM @ddl;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
@@ -97,10 +112,12 @@ SET @col_exists = (
      AND table_name = 'paper_info'
      AND column_name = 'degree_type'
 );
+
 SET @ddl = IF(@col_exists = 0,
-  'ALTER TABLE `paper_info` ' ||
+  'ALTER TABLE `paper_info` '
   'ADD COLUMN `degree_type` varchar(20) DEFAULT ''undergraduate'' COMMENT ''学位类型（P5 检测策略集匹配维度：undergraduate-本科 / master-硕士 / doctor-博士，对应字典 degree_type；存量默认本科）'' AFTER `similarity_rate`',
   'SELECT ''paper_info.degree_type 已存在，跳过'' AS msg');
+
 PREPARE stmt FROM @ddl;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
@@ -111,9 +128,11 @@ SET @idx_exists = (
      AND table_name = 'paper_info'
      AND index_name = 'idx_pi_degree'
 );
+
 SET @ddl = IF(@idx_exists = 0,
   'ALTER TABLE `paper_info` ADD INDEX `idx_pi_degree` (`degree_type`)',
   'SELECT ''paper_info.idx_pi_degree 已存在，跳过'' AS msg');
+
 PREPARE stmt FROM @ddl;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
@@ -125,12 +144,14 @@ SET @col_exists = (
      AND table_name = 'system_param'
      AND column_name = 'guidance_weight'
 );
+
 SET @ddl = IF(@col_exists = 0,
-  'ALTER TABLE `system_param` ' ||
-  'ADD COLUMN `guidance_weight` decimal(5,2) DEFAULT 20.00 COMMENT ''成绩加权合成 · 指导分权重（百分比，默认20；三项合计≠100 抛 40915）'', ' ||
-  'ADD COLUMN `review_weight` decimal(5,2) DEFAULT 30.00 COMMENT ''成绩加权合成 · 评阅分权重（百分比，默认30）'', ' ||
+  'ALTER TABLE `system_param` '
+  'ADD COLUMN `guidance_weight` decimal(5,2) DEFAULT 20.00 COMMENT ''成绩加权合成 · 指导分权重（百分比，默认20；三项合计≠100 抛 40915）'', '
+  'ADD COLUMN `review_weight` decimal(5,2) DEFAULT 30.00 COMMENT ''成绩加权合成 · 评阅分权重（百分比，默认30）'', '
   'ADD COLUMN `defense_weight` decimal(5,2) DEFAULT 50.00 COMMENT ''成绩加权合成 · 答辩分权重（百分比，默认50）''',
   'SELECT ''system_param 成绩加权三列已存在，跳过'' AS msg');
+
 PREPARE stmt FROM @ddl;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
@@ -252,7 +273,7 @@ VALUES
   (7303, 3, '博士', 'doctor',        'degree_type', 'N', '0', '1546278765432123458', NOW(), '博士学位论文');
 
 -- ----------------------------------------------------------------------------
--- 4. 执行后自检：各条应返回非 0
+-- 4. 执行后自检：各条应返回期望值
 -- ----------------------------------------------------------------------------
 -- 4.1 新表已建：各期望 1
 SELECT COUNT(*) AS check_check_sentence_hit FROM information_schema.tables
@@ -264,8 +285,8 @@ SELECT COUNT(*) AS check_check_policy FROM information_schema.tables
 SELECT COUNT(*) AS check_check_college_quota FROM information_schema.tables
  WHERE table_schema = DATABASE() AND table_name = 'check_college_quota';
 
--- 4.2 存量表新列已加：各期望 6（check_task/check_result 各2列、
---     check_report 1列、paper_info 1列、system_param 3列）
+-- 4.2 存量表新列已加：期望 9
+--     （check_task 2 + check_result 2 + check_report 1 + paper_info 1 + system_param 3）
 SELECT COUNT(*) AS check_new_columns FROM information_schema.columns
  WHERE table_schema = DATABASE()
    AND ((table_name = 'check_task'   AND column_name IN ('max_per_source', 'citation_rate'))
@@ -274,7 +295,7 @@ SELECT COUNT(*) AS check_new_columns FROM information_schema.columns
      OR (table_name = 'paper_info'   AND column_name = 'degree_type')
      OR (table_name = 'system_param' AND column_name IN ('guidance_weight', 'review_weight', 'defense_weight')));
 
--- 4.3 学位类型字典条数：期望 4（字典类型1 + 字典数据3）
+-- 4.3 学位类型字典数据条数：期望 ≥3（本脚本插入 3 条；历史人工数据可能使条数更多）
 --     sys_dict_data 表无 is_deleted 列，勿加此过滤
 SELECT COUNT(*) AS check_degree_dict FROM sys_dict_data
  WHERE dict_type = 'degree_type';
