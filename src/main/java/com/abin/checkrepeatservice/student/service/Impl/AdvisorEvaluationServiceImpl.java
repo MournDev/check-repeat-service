@@ -24,6 +24,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.jsoup.Jsoup;
 import org.jsoup.safety.Safelist;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -117,7 +118,9 @@ public class AdvisorEvaluationServiceImpl implements AdvisorEvaluationService {
             }
         }
 
-        // 6. 落库：teacher_id 取提交时刻快照，后续改派导师不影响统计归属
+        // 6. 落库：teacher_id 取提交时刻快照，后续改派导师不影响统计归属。
+        // 步骤3先查后插存在竞态窗口（并发双击同时通过 selectCount 检查），由 uk_paper_id
+        // 唯一索引兜底；撞索引抛 DuplicateKeyException 转业务语义 40918，避免兜底成 500。
         AdvisorEvaluation evaluation = new AdvisorEvaluation();
         evaluation.setPaperId(req.getPaperId());
         evaluation.setStudentId(currentUserId);
@@ -132,7 +135,12 @@ public class AdvisorEvaluationServiceImpl implements AdvisorEvaluationService {
         evaluation.setComment(StringUtils.hasText(req.getComment())
                 ? Jsoup.clean(req.getComment(), Safelist.none()) : null);
         UserBusinessInfoUtils.setAuditField(evaluation, true);
-        advisorEvaluationMapper.insert(evaluation);
+        try {
+            advisorEvaluationMapper.insert(evaluation);
+        } catch (DuplicateKeyException e) {
+            log.warn("导师评价并发重复提交被唯一索引拦截：paperId={}，studentId={}", req.getPaperId(), currentUserId);
+            throw new BusinessException(ResultCode.BUSINESS_EVAL_ALREADY_SUBMITTED);
+        }
 
         log.info("导师评价提交成功：evalId={}，paperId={}，studentId={}，teacherId={}，overall={}",
                 evaluation.getId(), req.getPaperId(), currentUserId, paper.getTeacherId(), req.getScoreOverall());
