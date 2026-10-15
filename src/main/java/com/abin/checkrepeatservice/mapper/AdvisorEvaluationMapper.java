@@ -9,6 +9,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
@@ -33,18 +34,29 @@ public interface AdvisorEvaluationMapper extends BaseMapper<AdvisorEvaluation> {
     List<String> selectTeacherTags(@Param("teacherId") Long teacherId);
 
     /**
-     * 管理端实名分页（联 paper_info/sys_user×2/college 出展示字段）
+     * 管理端实名分页（联 paper_info/sys_user×2/college 出展示字段；beginDate/endDate 按评价提交时间过滤）
      */
     Page<AdvisorEvalPageItemVO> selectEvalPage(Page<AdvisorEvalPageItemVO> page,
                                                @Param("req") AdvisorEvalPageReq req);
 
     /**
-     * 导师排行：按导师聚合评价份数与总体均分（导师姓名 Java 侧批量回填）
+     * 导师排行：按导师聚合评价份数与总体均分（导师姓名 Java 侧批量回填；
+     * beginDate/endDate 按评价提交时间过滤，可空=全量）
      */
-    List<AdvisorEvalStatsVO.TeacherRankItem> selectTeacherRank();
+    List<AdvisorEvalStatsVO.TeacherRankItem> selectTeacherRank(@Param("beginDate") LocalDate beginDate,
+                                                               @Param("endDate") LocalDate endDate);
 
     /**
-     * 学院对比：按论文学院聚合评价份数与总体均分（college_id 为 NULL 归"未分配"）
+     * 学院对比：按论文学院聚合评价份数与总体均分（college_id 为 NULL 归"未分配"；
+     * beginDate/endDate 按评价提交时间过滤，可空=全量）
      */
-    List<AdvisorEvalStatsVO.CollegeCompareItem> selectCollegeEvalCompare();
+    List<AdvisorEvalStatsVO.CollegeCompareItem> selectCollegeEvalCompare(@Param("beginDate") LocalDate beginDate,
+                                                                         @Param("endDate") LocalDate endDate);
+
+    /**
+     * 分段统计专用（P6b 学年归口）：某时间段内通过终期答辩的论文数
+     * （paper_status_log 的 defense_passed 日志去重计数，供完成率分母）
+     */
+    long selectDefensePassedPaperCount(@Param("beginDate") LocalDate beginDate,
+                                       @Param("endDate") LocalDate endDate);
 }

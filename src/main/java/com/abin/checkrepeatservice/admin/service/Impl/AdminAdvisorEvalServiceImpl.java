@@ -26,6 +26,7 @@ import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Comparator;
@@ -40,6 +41,8 @@ import java.util.stream.Collectors;
  *
  * 关键口径：
  *  - 完成率 = 已评份数 / 可评论文数（paper_status ∈ defense_passed/finalized 且已分配导师）；
+ *    传时间段时（P6b 学年/届别归口）：分子按评价提交时间过滤，分母改按该时段内
+ *    defense_passed 状态日志的论文数（新口径，归口本届；存量无日志论文不参与分段统计）；
  *  - 导师评价分 = 总体均分 × 20（百分制一位小数），排行按此降序；
  *  - 低分预警：evalCount ≥ 3 且 avgOverall &lt; 3.0（与教师端掩码阈值同源，小样本不预警防误伤）；
  *  - 学院对比：college_id 为 NULL 归"未分配"，college 记录缺失归"未知学院"（与统计报表同口径）。
@@ -78,16 +81,26 @@ public class AdminAdvisorEvalServiceImpl implements AdminAdvisorEvalService {
     }
 
     @Override
-    public Result<AdvisorEvalStatsVO> stats() {
+    public Result<AdvisorEvalStatsVO> stats(LocalDate beginDate, LocalDate endDate) {
         AdvisorEvalStatsVO vo = new AdvisorEvalStatsVO();
 
-        // 1. 完成率：可评论文数 = 终期答辩通过/已定稿且已分配导师
-        long eligiblePapers = paperInfoMapper.selectCount(new LambdaQueryWrapper<PaperInfo>()
-                .in(PaperInfo::getPaperStatus,
-                        DictConstants.PaperStatus.DEFENSE_PASSED, DictConstants.PaperStatus.FINALIZED)
-                .isNotNull(PaperInfo::getTeacherId));
+        // 1. 完成率：已评份数 / 可评论文数
+        //    无时间段：分子全量评价，分母=当前状态 defense_passed/finalized 且已分配导师（P6a 原口径）；
+        //    有时间段：分子按评价提交时间过滤，分母=该时段内 defense_passed 状态日志的论文数
+        //    （按"何时通过终期答辩"归口届别；存量无日志论文不参与分段统计，避免跨届混算失真）
+        long totalEvaluations = advisorEvaluationMapper.selectCount(applyCreateTimeRange(new LambdaQueryWrapper<>(),
+                beginDate, endDate));
+        long eligiblePapers;
+        boolean hasRange = beginDate != null || endDate != null;
+        if (hasRange) {
+            eligiblePapers = advisorEvaluationMapper.selectDefensePassedPaperCount(beginDate, endDate);
+        } else {
+            eligiblePapers = paperInfoMapper.selectCount(new LambdaQueryWrapper<PaperInfo>()
+                    .in(PaperInfo::getPaperStatus,
+                            DictConstants.PaperStatus.DEFENSE_PASSED, DictConstants.PaperStatus.FINALIZED)
+                    .isNotNull(PaperInfo::getTeacherId));
+        }
         // @TableLogic 自动附加 is_deleted=0；uk_paper_id 保证一份评价对应一篇论文
-        long totalEvaluations = advisorEvaluationMapper.selectCount(new LambdaQueryWrapper<>());
         vo.setEligiblePapers(eligiblePapers);
         vo.setTotalEvaluations(totalEvaluations);
         vo.setCompletionRate(eligiblePapers == 0 ? BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP)
@@ -95,7 +108,7 @@ public class AdminAdvisorEvalServiceImpl implements AdminAdvisorEvalService {
                         .setScale(2, RoundingMode.HALF_UP));
 
         // 2. 导师排行：XML 聚合出 teacherId/evalCount/avgOverall，姓名与评价分 Java 侧回填
-        List<AdvisorEvalStatsVO.TeacherRankItem> rank = advisorEvaluationMapper.selectTeacherRank();
+        List<AdvisorEvalStatsVO.TeacherRankItem> rank = advisorEvaluationMapper.selectTeacherRank(beginDate, endDate);
         fillTeacherNames(rank);
         rank.forEach(item -> {
             if (item.getAvgOverall() != null) {
@@ -115,7 +128,8 @@ public class AdminAdvisorEvalServiceImpl implements AdminAdvisorEvalService {
                 .toList());
 
         // 4. 学院对比：NULL 学院归"未分配"，记录缺失归"未知学院"，按均分降序
-        List<AdvisorEvalStatsVO.CollegeCompareItem> collegeCompare = advisorEvaluationMapper.selectCollegeEvalCompare();
+        List<AdvisorEvalStatsVO.CollegeCompareItem> collegeCompare =
+                advisorEvaluationMapper.selectCollegeEvalCompare(beginDate, endDate);
         collegeCompare.forEach(item -> {
             if (item.getCollegeId() == null) {
                 item.setCollegeName("未分配");
@@ -130,14 +144,28 @@ public class AdminAdvisorEvalServiceImpl implements AdminAdvisorEvalService {
         return Result.success(vo);
     }
 
+    /**
+     * 评价提交时间范围过滤（闭开区间：[beginDate 00:00, endDate+1天 00:00)，含 endDate 当天）
+     */
+    private LambdaQueryWrapper<AdvisorEvaluation> applyCreateTimeRange(LambdaQueryWrapper<AdvisorEvaluation> wrapper,
+                                                                       LocalDate beginDate, LocalDate endDate) {
+        if (beginDate != null) {
+            wrapper.ge(AdvisorEvaluation::getCreateTime, beginDate.atStartOfDay());
+        }
+        if (endDate != null) {
+            wrapper.lt(AdvisorEvaluation::getCreateTime, endDate.plusDays(1).atStartOfDay());
+        }
+        return wrapper;
+    }
+
     @Override
-    public void export(HttpServletResponse response) {
-        // 全量查明细：MP 分页插件约定 size < 0 时不追加 LIMIT
-        AdvisorEvalPageReq allReq = new AdvisorEvalPageReq();
-        allReq.setPageNum(1);
-        allReq.setPageSize(-1);
+    public void export(AdvisorEvalPageReq req, HttpServletResponse response) {
+        // 全量查明细（过滤项与列表完全同口径：导师/学院/分数段/时间段）：
+        // MP 分页插件约定 size < 0 时不追加 LIMIT
+        req.setPageNum(1);
+        req.setPageSize(-1);
         List<AdvisorEvalPageItemVO> all = advisorEvaluationMapper
-                .selectEvalPage(new Page<>(1, -1), allReq)
+                .selectEvalPage(new Page<>(1, -1), req)
                 .getRecords();
 
         Map<String, String> labelMap = dictService.getDictValueMap(DictConstants.DICT_ADVISOR_EVAL_TAG);

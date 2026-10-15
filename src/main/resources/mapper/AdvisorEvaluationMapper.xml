@@ -69,11 +69,19 @@
         <if test="req.maxOverall != null">
             AND ae.score_overall &lt;= #{req.maxOverall}
         </if>
+        <!-- P6b 学年归口：评价提交时间过滤（闭开区间，endDate 含当天；LocalDate 与 datetime
+             比较时 MySQL 自动按当天 00:00:00 取值） -->
+        <if test="req.beginDate != null">
+            AND ae.create_time &gt;= #{req.beginDate}
+        </if>
+        <if test="req.endDate != null">
+            AND ae.create_time &lt; DATE_ADD(#{req.endDate}, INTERVAL 1 DAY)
+        </if>
         ORDER BY ae.create_time DESC, ae.id DESC
     </select>
 
     <!-- 导师排行：按导师聚合（only_full_group_by：SELECT 仅分组列 + 聚合列，
-         导师姓名由 Java 侧按 teacherId 批量回填） -->
+         导师姓名由 Java 侧按 teacherId 批量回填；beginDate/endDate 按评价提交时间过滤） -->
     <select id="selectTeacherRank" resultType="com.abin.checkrepeatservice.admin.dto.AdvisorEvalStatsVO$TeacherRankItem">
         SELECT
             teacher_id              AS teacherId,
@@ -81,11 +89,17 @@
             ROUND(AVG(score_overall), 2) AS avgOverall
         FROM advisor_evaluation
         WHERE is_deleted = 0
+        <if test="beginDate != null">
+            AND create_time &gt;= #{beginDate}
+        </if>
+        <if test="endDate != null">
+            AND create_time &lt; DATE_ADD(#{endDate}, INTERVAL 1 DAY)
+        </if>
         GROUP BY teacher_id
     </select>
 
     <!-- 学院对比：paper_info 无 college_name 冗余列，沿用 LEFT JOIN college 既有模式；
-         college_id 为 NULL 的行由 Java 侧归"未分配" -->
+         college_id 为 NULL 的行由 Java 侧归"未分配"；beginDate/endDate 按评价提交时间过滤 -->
     <select id="selectCollegeEvalCompare" resultType="com.abin.checkrepeatservice.admin.dto.AdvisorEvalStatsVO$CollegeCompareItem">
         SELECT
             p.college_id            AS collegeId,
@@ -96,7 +110,29 @@
         JOIN paper_info p ON ae.paper_id = p.id
         LEFT JOIN college c ON p.college_id = c.id
         WHERE ae.is_deleted = 0
+        <if test="beginDate != null">
+            AND ae.create_time &gt;= #{beginDate}
+        </if>
+        <if test="endDate != null">
+            AND ae.create_time &lt; DATE_ADD(#{endDate}, INTERVAL 1 DAY)
+        </if>
         GROUP BY p.college_id, c.college_name
+    </select>
+
+    <!-- 分段统计专用（P6b 学年归口）：某时间段内通过终期答辩的论文数（去重计数）。
+         new_status 取值对应 DictConstants.PaperStatus.DEFENSE_PASSED（'defense_passed'）；
+         时间过滤与排行同口径（闭开区间，endDate 含当天） -->
+    <select id="selectDefensePassedPaperCount" resultType="long">
+        SELECT COUNT(DISTINCT paper_id)
+        FROM paper_status_log
+        WHERE is_deleted = 0
+          AND new_status = 'defense_passed'
+        <if test="beginDate != null">
+          AND create_time &gt;= #{beginDate}
+        </if>
+        <if test="endDate != null">
+          AND create_time &lt; DATE_ADD(#{endDate}, INTERVAL 1 DAY)
+        </if>
     </select>
 
 </mapper>
