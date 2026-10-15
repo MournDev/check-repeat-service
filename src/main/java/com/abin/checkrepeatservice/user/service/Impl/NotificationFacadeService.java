@@ -567,6 +567,39 @@ public class NotificationFacadeService {
     }
 
     /**
+     * 发送导师评价临期催评通知给学生（论文全生命周期 P6b）。
+     *
+     * 由 AdvisorEvalRemindScheduler 在窗口临期（剩 remind-days-before 天）时触发，
+     * Redis SETNX 去重保证每个学生整个窗口只被催一次。与邀请通知同一套兜底口径：
+     * 取不到学生/邮箱只告警返回，任何异常内部吞掉只记日志，绝不阻断调度主流程。
+     */
+    public void sendAdvisorEvalRemindNotice(Long paperId, String paperTitle, Long studentId,
+                                            LocalDateTime windowEndTime) {
+        try {
+            SysUser student = userQueryService.getUserById(studentId);
+            if (student == null || !StringUtils.hasText(student.getEmail())) {
+                log.warn("无法发送导师评价催评：学生不存在或邮箱为空, studentId={}", studentId);
+                return;
+            }
+
+            Map<String, Object> params = new HashMap<>();
+            params.put("studentName", student.getRealName());
+            params.put("paperTitle", paperTitle);
+            params.put("windowEndTime", windowEndTime == null ? null : windowEndTime.toString());
+            params.put("submitTime", LocalDateTime.now().toString());
+
+            boolean success = emailService.sendTaskCompletionEmail(
+                    student.getEmail(), NoticeType.ADVISOR_EVAL_REMIND, params, paperId, "PAPER");
+
+            log.info("导师评价催评发送{}：student={}，paperTitle={}，窗口截止={}",
+                    success ? "成功" : "失败", student.getRealName(), paperTitle, windowEndTime);
+
+        } catch (Exception e) {
+            log.error("发送导师评价催评异常：paperId={}，studentId={}", paperId, studentId, e);
+        }
+    }
+
+    /**
      * 构建老师分配通知内容（给老师）
      */
     private String buildAdvisorAssignmentContent(Map<String, Object> params) {

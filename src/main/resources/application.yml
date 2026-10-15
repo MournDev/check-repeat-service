@@ -171,6 +171,8 @@ admin:
   advisor-eval:
     # 评价窗口：终期答辩通过后 N 天内可提交评价（存量无状态日志论文不限窗口）
     window-days: 30
+    # 催评提前量：窗口剩余 N 天仍未评价时补发一次催评通知（AdvisorEvalRemindScheduler）
+    remind-days-before: 3
 
 # MyBatis-Plus配置
 mybatis-plus:
@@ -319,3 +321,7 @@ schedule:
     # 每 10 分钟扫描评阅截止时间已过仍待评阅的任务：标记已超时转派并按
     # admin.review-assign.auto-reassign 自动改派 —— 会写库，默认关闭
     timeout-enabled: false
+  advisor-eval:
+    # 每天上午9点扫描评价窗口临期（剩 admin.advisor-eval.remind-days-before 天）的
+    # 可评未评论文，给学生补发一次催评通知（Redis 去重，整窗口只催一次）—— 会发邮件，默认关闭
+    remind-enabled: false

@@ -20,6 +20,9 @@ public enum NoticeType {
     // P6a：终期答辩 pass 后发给学生的导师评价邀请（软提醒，不卡定稿/归档门槛）。
     // EmailService 未为其定制模板，走 buildTaskSubject/buildTaskContent 的 default 分支
     ADVISOR_EVAL_INVITE("导师评价邀请", "您已通过终期答辩，欢迎对指导教师的指导工作作出评价"),
+    // P6b：评价窗口临期（默认剩3天）仍未评价时的催评提醒（AdvisorEvalRemindScheduler 发出，
+    // Redis SETNX 去重保证每人只催一次）。同走 default 分支
+    ADVISOR_EVAL_REMIND("导师评价提醒", "您的导师评价窗口即将关闭，请及时完成对指导教师的评价"),
     SYSTEM_ANNOUNCEMENT("系统公告", "系统发布重要公告"),
     ACCOUNT_ACTIVATION("账户激活", "请激活您的账户"),
     PASSWORD_RESET("密码重置", "请重置您的密码");
