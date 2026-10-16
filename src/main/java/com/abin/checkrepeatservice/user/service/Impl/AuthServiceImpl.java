@@ -136,6 +136,15 @@ public class AuthServiceImpl implements AuthService {
             return Result.error(ResultCode.PARAM_ERROR, "选择的角色无效，无法注册");
         }
 
+        // 2.1 安全守护（P0 越权修复）：自助注册仅允许学生角色。
+        // 此前只校验「角色存在」，匿名请求传 roleId=3001/4001 即可直接注册成管理员/超管。
+        // 教师、管理员、超管账号一律由超管在用户管理后台创建。
+        if (!"STUDENT".equals(sysRole.getRoleCode())) {
+            log.warn("注册越权拦截：用户名={} 尝试注册角色 roleCode={}",
+                    registerReq.getUsername(), sysRole.getRoleCode());
+            return Result.error(ResultCode.PERMISSION_NO_ACCESS, "仅允许注册学生账号，教师/管理员账号请联系管理员创建");
+        }
+
         // 3. 构建新用户实体（密码加密存储）
         SysUser newUser = new SysUser();
         newUser.setUsername(registerReq.getUsername());
