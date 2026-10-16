@@ -38,7 +38,8 @@ public class ReportVerifyServiceImpl implements ReportVerifyService {
     @Resource
     private PaperInfoMapper paperInfoMapper;
 
-    @Value("${REPORT_HASH_SALT:check-repeat-report-salt}")
+    // 安全修复（P0）：默认盐仅供本地开发，生产由环境变量 REPORT_HASH_SALT 注入（ProductionSecretValidator 强制校验）
+    @Value("${REPORT_HASH_SALT:dev-only-report-hash-salt-do-not-use-in-prod-0123456789}")
     private String reportHashSalt;
 
     @Override

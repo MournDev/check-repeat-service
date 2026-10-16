@@ -20,8 +20,9 @@ minio:
   # 拼给浏览器用的地址（如头像的 <img src>）。不配则回退成 endpoint。
   # 生产必须填浏览器可达的地址：http://<公网IP>:9000 或 https://<域名>/minio
   public-endpoint: ${MINIO_PUBLIC_ENDPOINT:${MINIO_ENDPOINT:http://localhost:9000}}
-  accesskey: ${MINIO_ACCESSKEY:minioadmin}
-  secretkey: ${MINIO_SECRETKEY:minioadmin}
+  # 安全修复（P0）：生产凭据不提供兜底默认值，缺失即由 ProductionSecretValidator 拒绝启动
+  accesskey: ${MINIO_ACCESSKEY}
+  secretkey: ${MINIO_SECRETKEY}
   bucket:
     main: check-repeat-service
     avatar: avatar
@@ -36,7 +37,8 @@ spring:
   datasource:
     url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:check-repeat-service}?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=GMT%2B8&allowPublicKeyRetrieval=true&autoReconnect=true&failOverReadOnly=false&maxReconnects=10&initialTimeout=2
     username: ${MYSQL_USERNAME:root}
-    password: ${MYSQL_PASSWORD:your_password}
+    # 安全修复（P0）：生产数据库密码不提供兜底默认值
+    password: ${MYSQL_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
       maximum-pool-size: 20
@@ -59,7 +61,8 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
-      password: ${REDIS_PASSWORD:123456}
+      # 安全修复（P0）：生产 Redis 密码不提供兜底默认值
+      password: ${REDIS_PASSWORD}
       database: 0
       timeout: 2000ms
       lettuce:
@@ -68,9 +71,9 @@ spring:
           max-idle: 16
           min-idle: 4
 
-  # JWT 配置（密钥必须通过环境变量设置）
+  # JWT 配置（密钥必须通过环境变量设置；安全修复 P0：移除弱默认值，缺失即拒绝启动）
   jwt:
-    secret-key: ${JWT_SECRET_KEY:change-this-secret-key-in-production}
+    secret-key: ${JWT_SECRET_KEY}
     expiration: 86400000
     token-header: Authorization
     token-prefix: Bearer

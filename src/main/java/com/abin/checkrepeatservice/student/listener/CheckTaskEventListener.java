@@ -89,7 +89,8 @@ public class CheckTaskEventListener {
      * 报告验真哈希盐（P5）：与 ReportVerifyService 共用同一环境变量，
      * 缺省兜底值仅用于本地开发，生产应显式注入
      */
-    @Value("${REPORT_HASH_SALT:check-repeat-report-salt}")
+    // 安全修复（P0）：默认盐仅供本地开发，生产由环境变量 REPORT_HASH_SALT 注入（ProductionSecretValidator 强制校验）
+    @Value("${REPORT_HASH_SALT:dev-only-report-hash-salt-do-not-use-in-prod-0123456789}")
     private String reportHashSalt;
 
     @Value("${check.task.timeout:3600000}")
