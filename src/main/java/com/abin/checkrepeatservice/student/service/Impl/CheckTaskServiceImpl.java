@@ -120,6 +120,10 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
     @Resource
     private CollegeQuotaService collegeQuotaService;
 
+    // 架构修复（P0）：比对库入库管道
+    @Resource
+    private com.abin.checkrepeatservice.common.service.PaperLibraryIngestService paperLibraryIngestService;
+
     // Apache Tika：提取文件文本内容
     private final Tika tika = new Tika();
 
@@ -406,16 +410,20 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
                 throw new BusinessException(ResultCode.PARAM_TYPE_ERROR,
                     "论文文本提取失败，文件可能为空或格式不支持");
             }
-        
+
+            // 架构修复（P0）：正文入本地比对库；引擎比对时排除论文自身
+            paperLibraryIngestService.ingest(paperId, paperText);
+
             // 4. 使用查重引擎执行真实查重（支持多引擎并行检测）
             log.info("开始执行查重比对 - 任务 ID: {}, 论文 ID: {}", taskId, paperInfo.getId());
-                
+
             // 执行查重（默认使用 LOCAL 本地引擎）
-            com.abin.checkrepeatservice.pojo.vo.CheckResult checkResult = 
+            com.abin.checkrepeatservice.pojo.vo.CheckResult checkResult =
                 checkEngineManager.executeCheck(
-                    paperText, 
+                    paperText,
                     paperInfo.getPaperTitle(),
-                    Arrays.asList(com.abin.checkrepeatservice.common.enums.CheckEngineTypeEnum.LOCAL)
+                    Arrays.asList(com.abin.checkrepeatservice.common.enums.CheckEngineTypeEnum.LOCAL),
+                    paperId
                 );
                 
             if (!checkResult.isSuccess()) {

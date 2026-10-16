@@ -282,13 +282,18 @@ public class PaperInfo extends BaseEntity implements Serializable {
     
     /**
      * 论文正文在MinIO中的存储路径
+     *
+     * <p>架构修复（P0）：paper_info 表中 content_path 列实际存在（init.sql/存量修复.sql
+     * 均已建列），但此前被错误标记为 exist=false，导致比对库管道写入与读取全部失效——
+     * LocalCheckEngine 全表扫到的 contentPath 恒为 null，每篇读 MinIO 必抛异常，
+     * 查重结果恒为 0%。现恢复为真实列映射。</p>
      */
-    @TableField(exist = false)
+    @TableField("content_path")
     private String contentPath;
-    
+
     /**
-     * IK分词后文本在MinIO中的存储路径
+     * IK分词后文本在MinIO中的存储路径（同上，恢复为真实列映射）
      */
-    @TableField(exist = false)
+    @TableField("segmented_path")
     private String segmentedPath;
 }

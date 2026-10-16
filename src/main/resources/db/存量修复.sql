@@ -1400,6 +1400,24 @@ PREPARE stmt FROM @ddl;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
+-- paper_info 补正文/分词 MinIO 路径两列（架构修复 P0：init.sql 建表已含，
+-- 但存量库与实体映射双双缺失——实体被错误标为 exist=false 且从未回填，
+-- 导致本地比对库恒为空、查重结果恒 0%。列必须先于新 jar 部署就位）
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.columns
+   WHERE table_schema = DATABASE()
+     AND table_name = 'paper_info'
+     AND column_name = 'content_path'
+);
+SET @ddl = IF(@col_exists = 0,
+  'ALTER TABLE `paper_info` '
+  'ADD COLUMN `content_path` varchar(255) DEFAULT NULL COMMENT ''论文正文在MinIO中的存储路径（架构修复P0：查重入库管道回填）'' AFTER `degree_type`, '
+  'ADD COLUMN `segmented_path` varchar(255) DEFAULT NULL COMMENT ''IK分词后文本在MinIO中的存储路径'' AFTER `content_path`',
+  'SELECT ''paper_info.content_path/segmented_path 已存在，跳过'' AS msg');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
 -- system_param 加成绩加权三项权重（P5：指导/评阅/答辩，默认 20/30/50）
 SET @col_exists = (
   SELECT COUNT(*) FROM information_schema.columns

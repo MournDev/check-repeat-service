@@ -59,10 +59,18 @@ public class CheckEngineManager {
      * 执行查重 - 支持多引擎组合
      */
     public CheckResult executeCheck(String paperContent, String paperTitle, List<CheckEngineTypeEnum> engineTypes) {
+        return executeCheck(paperContent, paperTitle, engineTypes, null);
+    }
+
+    /**
+     * 执行查重 - 支持多引擎组合，并把待查论文ID透传给引擎用于排除自我比对（架构修复 P0）
+     */
+    public CheckResult executeCheck(String paperContent, String paperTitle,
+                                   List<CheckEngineTypeEnum> engineTypes, Long excludePaperId) {
         if (engineTypes == null || engineTypes.isEmpty()) {
             throw new IllegalArgumentException("至少需要指定一个查重引擎");
         }
-        
+
         CheckResult compositeResult = new CheckResult();
         double maxSimilarity = 0.0;
         CheckResult bestResult = null;
@@ -73,7 +81,7 @@ public class CheckEngineManager {
         for (CheckEngineTypeEnum engineType : engineTypes) {
             try {
                 CheckEngine engine = getEngine(engineType);
-                CheckResult result = engine.check(paperContent, paperTitle);
+                CheckResult result = engine.check(paperContent, paperTitle, excludePaperId);
 
                 if (result.isSuccess() && result.getSimilarity() != null) {
                     // 记录最高相似度

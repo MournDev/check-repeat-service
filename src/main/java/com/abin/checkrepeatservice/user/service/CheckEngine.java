@@ -22,6 +22,21 @@ public interface CheckEngine {
      * @return 检查结果
      */
     CheckResult check(String paperContent, String paperTitle);
+
+    /**
+     * 检查论文重复（带排除论文ID）。
+     *
+     * <p>架构修复（P0）：待查论文在比对前已先入比对库，若不排除自己，自我相似度
+     * 必然 100%。默认实现忽略 excludePaperId，仅本地库引擎需要实现排除语义。</p>
+     *
+     * @param paperContent   论文内容
+     * @param paperTitle     论文标题
+     * @param excludePaperId 必须排除出比对库的论文ID（通常就是待查论文自身），null 不排除
+     * @return 检查结果
+     */
+    default CheckResult check(String paperContent, String paperTitle, Long excludePaperId) {
+        return check(paperContent, paperTitle);
+    }
     
     /**
      * 检查引擎健康状态

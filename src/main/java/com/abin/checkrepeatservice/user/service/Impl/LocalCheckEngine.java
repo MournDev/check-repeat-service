@@ -12,6 +12,7 @@ import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
 import com.abin.checkrepeatservice.pojo.vo.CheckResult;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
 import com.abin.checkrepeatservice.user.service.CheckEngine;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -58,6 +59,11 @@ public class LocalCheckEngine implements CheckEngine {
 
     @Override
     public CheckResult check(String paperContent, String paperTitle) {
+        return check(paperContent, paperTitle, null);
+    }
+
+    @Override
+    public CheckResult check(String paperContent, String paperTitle, Long excludePaperId) {
         CheckResult result = new CheckResult();
 
         // ===== P5 引文排除（前置）：剔除参考文献区块后再分词，避免参考文献相似污染分词向量 =====
@@ -82,8 +88,19 @@ public class LocalCheckEngine implements CheckEngine {
                     hasReferencesBlock && SentenceSplitterUtils.endsWithCitation(span.getText()));
         }
 
-        // 2. 查询论文信息（使用PaperInfo表）
-        List<PaperInfo> paperList = paperInfoMapper.selectList(null);
+        // 2. 查询比对库论文（架构修复 P0）：
+        //    - 只纳入 content_path 已回填（正文真实入库）的论文，此前 selectList(null)
+        //      把全表（含从未入库的论文）扫进来，每篇 readPaperContent(null) 必抛异常，
+        //      异常被逐篇吞掉后比对结果恒为 0；
+        //    - 排除待查论文自身（正文在比对前已入库，不排除则自我相似度必然 100%）。
+        //    比对库准入（仅定稿/归档稿）待 P4 归档落地后在此追加状态条件。
+        LambdaQueryWrapper<PaperInfo> libraryWrapper = new LambdaQueryWrapper<PaperInfo>()
+                .isNotNull(PaperInfo::getContentPath)
+                .ne(PaperInfo::getContentPath, "");
+        if (excludePaperId != null) {
+            libraryWrapper.ne(PaperInfo::getId, excludePaperId);
+        }
+        List<PaperInfo> paperList = paperInfoMapper.selectList(libraryWrapper);
         double maxSimilarity = 0.0;
         String mostSimilarPaperTitle = "";
         BigInteger mostSimilarSimHash = BigInteger.ZERO;

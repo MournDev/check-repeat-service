@@ -59,6 +59,10 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
     @Resource
     private ApplicationEventPublisher eventPublisher;
 
+    // 架构修复（P0）：比对库入库管道
+    @Resource
+    private com.abin.checkrepeatservice.common.service.PaperLibraryIngestService paperLibraryIngestService;
+
     @Resource
     private CheckReportMapper checkReportMapper;
     
@@ -316,9 +320,13 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
             task.setStartTime(LocalDateTime.now());
             updateById(task);
 
+            // 架构修复（P0）：正文入本地比对库；引擎比对时排除论文自身
+            paperLibraryIngestService.ingest(task.getPaperId(), paperText);
+
             // 执行查重
             com.abin.checkrepeatservice.pojo.vo.CheckResult checkResult =
-                    checkEngineManager.executeCheck(paperText, paperInfo.getPaperTitle(), engineTypes);
+                    checkEngineManager.executeCheck(paperText, paperInfo.getPaperTitle(), engineTypes,
+                            task.getPaperId());
             
             // 生成报告
             CheckReport report = generateCheckReport(task, checkResult);

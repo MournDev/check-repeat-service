@@ -74,6 +74,10 @@ public class CheckTaskEventListener {
     @Resource
     private NotificationService notificationService;
 
+    // 架构修复（P0）：比对库入库管道，正文提取成功后写入 MinIO 并回填 content_path
+    @Resource
+    private com.abin.checkrepeatservice.common.service.PaperLibraryIngestService paperLibraryIngestService;
+
     @Value("${file.upload.base-path}")
     private String basePath;
 
@@ -145,19 +149,26 @@ public class CheckTaskEventListener {
                 throw new RuntimeException("论文文本提取失败");
             }
 
+            // 4.1 架构修复（P0）：正文入本地比对库（MinIO + content_path 回填），
+            // 否则库内无可比论文，引擎只能空转返回 0%
+            paperLibraryIngestService.ingest(paperId, paperText);
+            // 刷新内存对象的路径，保证后续更新不回退
+            paperInfo = paperInfoMapper.selectById(paperId);
+
             // 5. 推送进度：开始比对
             publishProgress(taskId, paperId, "TEXT_COMPARING", 30, "正在进行文本相似度比对...", 30);
 
             // 5.1 推送进度：句级分析（P5：引擎在比对阶段同步完成句级标注与三项指标）
             publishProgress(taskId, paperId, "SENTENCE_ANALYZING", 60, "正在进行句级相似度标注与引文排除...", 20);
 
-            // 6. 执行查重引擎
+            // 6. 执行查重引擎（excludePaperId 排除刚入库的自己，避免自我命中 100%）
             log.info("开始执行查重比对 - 任务 ID: {}", taskId);
             com.abin.checkrepeatservice.pojo.vo.CheckResult checkResult =
                 checkEngineManager.executeCheck(
                     paperText,
                     paperInfo.getPaperTitle(),
-                    Arrays.asList(com.abin.checkrepeatservice.common.enums.CheckEngineTypeEnum.LOCAL)
+                    Arrays.asList(com.abin.checkrepeatservice.common.enums.CheckEngineTypeEnum.LOCAL),
+                    paperId
                 );
 
             if (!checkResult.isSuccess()) {
