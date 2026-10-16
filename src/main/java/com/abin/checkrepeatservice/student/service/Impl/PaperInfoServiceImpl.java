@@ -15,6 +15,7 @@ import com.abin.checkrepeatservice.pojo.entity.*;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
 import com.abin.checkrepeatservice.student.mapper.CheckTaskMapper;
 import com.abin.checkrepeatservice.student.mapper.CheckReportMapper;
+import com.abin.checkrepeatservice.student.event.PaperSubmittedEvent;
 import com.abin.checkrepeatservice.student.service.CheckTaskService;
 import com.abin.checkrepeatservice.student.service.PaperInfoService;
 import com.abin.checkrepeatservice.student.vo.PaperQueryRequest;
@@ -31,8 +32,8 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -99,6 +100,10 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
 
     @Resource
     private SubjectService subjectService;
+
+    // 架构修复（P0）：提交后分配导师/查重改为事件驱动，避免本类 @Async 自调用失效
+    @Resource
+    private ApplicationEventPublisher eventPublisher;
 
     /**
      * 由学科编码反查并写入学科ID —— 论文写路径的**唯一入口**。
@@ -347,8 +352,9 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
 //            );
             // 4. 发送论文提交成功通知
             sendPaperSubmitSuccessNotification(paperInfo, studentId, isNewPaper);
-            // 5. 异步分配指导老师并触发查重
-            asyncAllocateTeacherAndCheck(paperInfo.getId(), studentId);
+            // 5. 事务提交后异步分配指导老师并触发查重（事件驱动，修复 @Async 自调用失效）
+            eventPublisher.publishEvent(
+                    new PaperSubmittedEvent(this, paperInfo.getId(), studentId));
 
             log.info("文件ID方式提交论文成功 - 论文ID: {}, 文件ID: {}", paperInfo.getId(), fileId);
             return paperInfo;
@@ -359,10 +365,15 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
         }
     }
     /**
-     * 异步分配指导老师并在分配成功后触发查重
+     * 分配指导老师并在分配成功后触发查重。
+     *
+     * <p>架构修复（P0）：本方法不再标注 @Async，也不应被本类直接调用——由
+     * {@link com.abin.checkrepeatservice.student.listener.PaperSubmissionAllocationListener}
+     * 在论文提交事务 AFTER_COMMIT 后以独立 bean 异步调用。此前在本类事务方法内直接
+     * 调 {@code @Async} 本方法属于 Spring AOP 自调用，代理不生效，分配+解析+全库比对
+     * 全部同步跑在提交请求内并长占数据库连接。</p>
      */
-    @Async
-    public void asyncAllocateTeacherAndCheck(Long paperSubmitId, Long studentId) {
+    public void allocateAdvisorAndCheck(Long paperSubmitId, Long studentId) {
         try {
             log.info("开始异步分配指导老师 - 论文ID: {}, 学生ID: {}", paperSubmitId, studentId);
 
@@ -910,8 +921,8 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
                 throw new BusinessException(ResultCode.SYSTEM_ERROR,"创建提交记录失败");
             }
             
-            // 6. 异步分配导师并触发查重
-            asyncAllocateTeacherAndCheck(paperId, studentId);
+            // 6. 事务提交后异步分配导师并触发查重（事件驱动，修复 @Async 自调用失效）
+            eventPublisher.publishEvent(new PaperSubmittedEvent(this, paperId, studentId));
             
             PaperInfo updatedPaper = paperInfoMapper.selectById(paperId);
             log.info("撤回后重新提交成功 - 论文 ID: {}, 新版本号：{}", paperId, newVersion);

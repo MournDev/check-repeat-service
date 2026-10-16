@@ -13,6 +13,7 @@ import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
 import com.abin.checkrepeatservice.pojo.entity.*;
 import com.abin.checkrepeatservice.student.dto.CheckTaskResultDTO;
 import com.abin.checkrepeatservice.student.dto.ReportPreviewDTO;
+import com.abin.checkrepeatservice.student.event.EnhancedCheckTaskExecuteEvent;
 import com.abin.checkrepeatservice.student.mapper.CheckReportMapper;
 import com.abin.checkrepeatservice.student.mapper.CheckTaskMapper;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
@@ -28,7 +29,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.tika.Tika;
 import org.apache.tika.exception.TikaException;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.scheduling.annotation.Async;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -53,7 +54,11 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
     
     @Resource
     private PaperInfoMapper paperInfoMapper;
-    
+
+    // 架构修复（P0）：异步执行改为 AFTER_COMMIT 事件，修复本类 @Async 自调用失效
+    @Resource
+    private ApplicationEventPublisher eventPublisher;
+
     @Resource
     private CheckReportMapper checkReportMapper;
     
@@ -113,8 +118,8 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
         paperInfo.setCheckTime(LocalDateTime.now());
         paperInfoMapper.updateById(paperInfo);
         
-        // 5. 异步执行查重
-        executeCheckTaskAsync(checkTask.getId(), engines);
+        // 5. 事务提交后异步执行查重（事件驱动，修复 @Async 自调用失效）
+        eventPublisher.publishEvent(new EnhancedCheckTaskExecuteEvent(checkTask.getId(), engines));
         
         // 6. 返回结果
         CheckResultVO resultVO = buildCheckResultVO(checkTask);
@@ -209,7 +214,9 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
         updateById(task);
         
         // 异步重新执行 - 使用Collections.singletonList
-        executeCheckTaskAsync(taskId, Collections.singletonList(CheckEngineTypeEnum.LOCAL));
+        // 架构修复（P0）：事务提交后异步重试，不再自调用本类 @Async 方法
+        eventPublisher.publishEvent(new EnhancedCheckTaskExecuteEvent(
+                taskId, Collections.singletonList(CheckEngineTypeEnum.LOCAL)));
         
         return Result.success("任务重试已启动");
     }
@@ -282,10 +289,14 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
         return Result.success(progress);
     }
     
-    // ------------------------------ 异步执行方法 ------------------------------
-    
-    @Async
-    public void executeCheckTaskAsync(Long taskId, List<CheckEngineTypeEnum> engineTypes) {
+    // ------------------------------ 任务执行（由 EnhancedCheckTaskExecuteListener 异步调用） ------------------------------
+
+    /**
+     * 执行查重任务。架构修复（P0）：不再标注 @Async，由
+     * {@link com.abin.checkrepeatservice.student.listener.EnhancedCheckTaskExecuteListener}
+     * 在任务创建/重试事务 AFTER_COMMIT 后经独立 bean 异步调用，保证代理生效、数据可见。
+     */
+    public void doExecuteCheckTask(Long taskId, List<CheckEngineTypeEnum> engineTypes) {
         CheckTask task = getById(taskId);
         if (task == null) return;
         
@@ -304,9 +315,9 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
             String paperText = extractTextFromFile(paperInfo.getFilePath());
             task.setStartTime(LocalDateTime.now());
             updateById(task);
-            
+
             // 执行查重
-            com.abin.checkrepeatservice.pojo.vo.CheckResult checkResult = 
+            com.abin.checkrepeatservice.pojo.vo.CheckResult checkResult =
                     checkEngineManager.executeCheck(paperText, paperInfo.getPaperTitle(), engineTypes);
             
             // 生成报告
