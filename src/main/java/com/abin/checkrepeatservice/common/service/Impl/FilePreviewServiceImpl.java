@@ -42,6 +42,10 @@ public class FilePreviewServiceImpl implements FilePreviewService {
     @Autowired
     private CheckReportMapper checkReportMapper;
 
+    // 安全修复（S2 配套）：kkFileView 回调走签名取文件端点
+    @Autowired
+    private com.abin.checkrepeatservice.common.jwt.PreviewSignedUrlService previewSignedUrlService;
+
     @Value("${app.host:192.168.1.149}")
     private String serverHost;
 
@@ -107,17 +111,27 @@ public class FilePreviewServiceImpl implements FilePreviewService {
         }
     }
 
+    @Autowired
+    private com.abin.checkrepeatservice.common.utils.SafePreviewUrlValidator safePreviewUrlValidator;
+
     @Override
     public ResponseEntity<byte[]> onlinePreviewByUrl(String url) {
         log.info("执行KKFileView代理预览 - url: {}", url);
 
         try {
+            // 安全修复（P0）：SSRF 防护——仅允许白名单 host 或公网地址，
+            // 阻断借 kkFileView 探测内网/云元数据地址的请求
+            safePreviewUrlValidator.validate(url);
             // 直接代理到KKFileView
             return proxyToKKFileViewForUrl(url);
+        } catch (IllegalArgumentException e) {
+            log.warn("在线预览 URL 校验失败: {}, url: {}", e.getMessage(), url);
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(e.getMessage().getBytes(StandardCharsets.UTF_8));
         } catch (Exception e) {
             log.error("KKFileView代理预览失败 - url: {}", url, e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(("代理预览失败: " + e.getMessage()).getBytes());
+                    .body("代理预览失败".getBytes(StandardCharsets.UTF_8));
         }
     }
     /**
@@ -339,13 +353,15 @@ public class FilePreviewServiceImpl implements FilePreviewService {
      */
     private ResponseEntity<?> proxyToKKFileView(Long fileId, FileInfo fileInfo) {
         try {
-            // 1. 构建文件访问URL（包含文件名）
-            String fileUrl = String.format("http://%s:%s%s/api/file/download/%s/%s",
+            // 1. 构建文件访问URL（包含文件名 + 10 分钟有效签名，kkFileView 回调无法携带 JWT）
+            String encodedFileName = URLEncoder.encode(fileInfo.getOriginalFilename(), StandardCharsets.UTF_8);
+            String fileUrl = String.format("http://%s:%s%s/api/file/preview-fetch/%s/%s?pt=%s",
                     serverHost,
                     serverPort,
                     appContext,
                     fileId,
-                    URLEncoder.encode(fileInfo.getOriginalFilename(), StandardCharsets.UTF_8));
+                    encodedFileName,
+                    previewSignedUrlService.sign(fileId));
 
             log.info("构建KKFileView文件URL: {}", fileUrl);
 
@@ -403,10 +419,11 @@ public class FilePreviewServiceImpl implements FilePreviewService {
     }
 
     private ResponseEntity<?> fallbackToDownload(FileInfo fileInfo) {
-        // 降级方案：返回下载链接
-        String downloadUrl = String.format("/api/file/download/%s/%s",
+        // 降级方案：返回下载链接（签名端点：浏览器新标签打开不带 JWT，用短期签名令牌授权）
+        String downloadUrl = String.format("/api/file/preview-fetch/%s/%s?pt=%s",
                 fileInfo.getId(),
-                URLEncoder.encode(fileInfo.getOriginalFilename(), StandardCharsets.UTF_8));
+                URLEncoder.encode(fileInfo.getOriginalFilename(), StandardCharsets.UTF_8),
+                previewSignedUrlService.sign(fileInfo.getId()));
 
         return ResponseEntity.status(HttpStatus.OK)
                 .contentType(MediaType.APPLICATION_JSON)

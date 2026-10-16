@@ -120,7 +120,18 @@ public class SecurityConfig {
                         // /ws/** 是 SockJS 握手入口，握手走 HTTP 请求，必须在过滤器链上放行，
                         // 否则 /ws/info 会直接 401。握手放行不等于免鉴权：
                         // STOMP CONNECT 帧仍由 WebSocketChannelInterceptor 校验 JWT，无有效 token 照样拒绝。
-                        .requestMatchers("/api/auth/**", "/api/avatar/**", "/api/papers/**", "/api/file/**", "/api/minio/**", "/ws/**").permitAll()
+                        // 安全修复（P0）：/api/avatar/** 保留匿名（<img> 标签无法带 JWT，头像为公开资料）；
+                        // /api/file/**（论文文件上传/下载/预览）与 /api/papers/**（学生论文/查重数据）
+                        // 由匿名改为登录可访问，资源归属在 Controller/Service 层二次校验，
+                        // 修复原匿名用户可枚举 fileId 下载任意论文/报告的 IDOR 漏洞；
+                        // /api/minio/** 收归 ADMIN（配合 MinioController 类级 @PreAuthorize 双保险）。
+                        .requestMatchers("/api/auth/**", "/api/avatar/**", "/ws/**").permitAll()
+                        .requestMatchers("/api/minio/**").hasAuthority("ADMIN")
+                        // kkFileView 服务端回调专用：匿名仅可访问签名取文件端点，
+                        // 令牌绑定单个 fileId 且 10 分钟有效（PreviewSignedUrlService），
+                        // 必须在 /api/file/** 的 authenticated 规则之前
+                        .requestMatchers("/api/file/preview-fetch/**").permitAll()
+                        .requestMatchers("/api/file/**", "/api/papers/**").authenticated()
                         // P5 报告验真：对齐行业报告验真惯例，凭报告编号匿名验证报告真伪，
                         // 只回元数据（标题打码/指标/时间），不回报告文件与正文；接口内有 IP 限流
                         .requestMatchers("/api/report/verify/**").permitAll()
@@ -135,6 +146,9 @@ public class SecurityConfig {
                         // 代价：将来真接 Grafana 时抓取端需要带 JWT；若要走内网抓取，
                         // 更标准的做法是另开 management.server.port 绑内网 + 网络白名单。
                         .requestMatchers("/actuator/prometheus").hasAuthority("ADMIN")
+                        // 安全修复（P0）：metrics/info/env 等运维端点原先落到 anyRequest().authenticated()，
+                        // 任意学生登录即可查看 JVM/HTTP 指标；health 已在前面放行，其余 actuator 端点全部收归 ADMIN
+                        .requestMatchers("/actuator/**").hasAuthority("ADMIN")
                         // 学生接口：仅学生角色可访问
                         .requestMatchers("/api/student/**").hasAuthority("STUDENT")
                         // 教师接口：仅教师角色可访问
