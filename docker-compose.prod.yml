@@ -57,6 +57,10 @@ services:
       KKFILEVIEW_BASE_URL: ${KKFILEVIEW_BASE_URL:-http://kkfileview:8012}
       # JWT
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      # 报告验真哈希盐（上线后不可更换）。
+      # 注意：.env 只用于本文件的 ${...} 替换，不会自动透传进容器，必须在此显式映射，
+      # 否则容器内读不到，ProductionSecretValidator 会以「REPORT_HASH_SALT 未配置」拒绝启动。
+      REPORT_HASH_SALT: ${REPORT_HASH_SALT}
       # 存储（代码只读 STORAGE_TYPE，FILE_UPLOAD_STORAGE_TYPE 是旧变量、无人引用）
       STORAGE_TYPE: ${STORAGE_TYPE:-LOCAL}
       UPLOAD_BASE_PATH: /data/upload/
