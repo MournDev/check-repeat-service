@@ -21,6 +21,7 @@ import cn.hutool.core.util.NumberUtil;
 import cn.hutool.core.util.StrUtil;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletResponse;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 
@@ -37,6 +38,7 @@ import java.util.*;
  * 数据统计服务实现类：完整实现提交趋势、查重结果、审核效率统计与Excel导出
  */
 @Service
+@Slf4j
 public class DataStatServiceImpl implements DataStatService {
 
     @Resource
@@ -107,7 +109,7 @@ public class DataStatServiceImpl implements DataStatService {
 
             return Result.success("提交趋势统计成功", resultDTO);
         } catch (Exception e) {
-            e.printStackTrace();
+            log.error("提交趋势统计失败", e);
             return Result.error(ResultCode.SYSTEM_ERROR, "提交趋势统计失败：" + e.getMessage());
         }
     }
@@ -182,7 +184,7 @@ public class DataStatServiceImpl implements DataStatService {
 
             return Result.success("查重结果分析成功", resultDTO);
         } catch (Exception e) {
-            e.printStackTrace();
+            log.error("查重结果分析失败", e);
             return Result.error(ResultCode.SYSTEM_ERROR, "查重结果分析失败：" + e.getMessage());
         }
     }
@@ -248,7 +250,7 @@ public class DataStatServiceImpl implements DataStatService {
 
             return Result.success("审核效率统计成功", resultDTO);
         } catch (Exception e) {
-            e.printStackTrace();
+            log.error("审核效率统计失败", e);
             return Result.error(ResultCode.SYSTEM_ERROR, "审核效率统计失败：" + e.getMessage());
         }
     }
@@ -305,13 +307,13 @@ public class DataStatServiceImpl implements DataStatService {
                 }
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            log.error("统计结果Excel导出失败", e);
             // 异常时返回错误信息
             try {
                 response.setContentType("text/plain;charset=UTF-8");
                 response.getWriter().write("Excel导出失败：" + e.getMessage());
             } catch (IOException ex) {
-                ex.printStackTrace();
+                log.error("导出失败错误信息写回响应失败", ex);
             }
         }
     }
