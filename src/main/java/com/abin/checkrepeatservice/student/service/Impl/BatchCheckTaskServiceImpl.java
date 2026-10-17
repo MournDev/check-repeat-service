@@ -17,11 +17,14 @@ import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * 批量查重服务实现
@@ -50,6 +53,14 @@ public class BatchCheckTaskServiceImpl {
     private CollegeQuotaService collegeQuotaService;
 
     /**
+     * S13：批量创建并行化用线程池（AsyncConfig 的通用池，core 3 / max 10 / CallerRunsPolicy 兜底）。
+     * 单篇处理只做校验+建库+发事件（查重执行本就走 @Async 监听器），
+     * 额度扣减为原子 SQL（行锁），并行安全。
+     */
+    @Resource(name = "asyncExecutor")
+    private ThreadPoolTaskExecutor asyncExecutor;
+
+    /**
      * 批量创建查重任务
      * 
      * @param request 批量请求参数
@@ -71,23 +82,20 @@ public class BatchCheckTaskServiceImpl {
         List<BatchCheckResultDTO.TaskResult> successList = new ArrayList<>();
         List<BatchCheckResultDTO.TaskResult> failedList = new ArrayList<>();
 
-        // 逐个处理
-        for (Long paperId : paperIds) {
-            try {
-                BatchCheckResultDTO.TaskResult result = processSinglePaper(paperId, currentUserId);
-                if (result.getSuccess()) {
-                    successList.add(result);
-                } else {
-                    failedList.add(result);
-                }
-            } catch (Exception e) {
-                log.error("批量查重处理失败 - 论文 ID: {}", paperId, e);
-                BatchCheckResultDTO.TaskResult failedResult = BatchCheckResultDTO.TaskResult.builder()
-                    .paperId(paperId)
-                    .success(false)
-                    .message("系统异常：" + e.getMessage())
-                    .build();
-                failedList.add(failedResult);
+        // S13：逐篇串行改并行——原循环每篇串行执行多次 DB 校验/建库（最多 20 篇），
+        // HTTP 请求被累计阻塞；改为 CompletableFuture 并行处理，join 后按入参顺序汇总，
+        // 单篇失败仍只计入 failedList，不影响其他论文
+        List<CompletableFuture<BatchCheckResultDTO.TaskResult>> futures = paperIds.stream()
+            .map(paperId -> CompletableFuture.supplyAsync(
+                () -> processSinglePaperSafely(paperId, currentUserId), asyncExecutor))
+            .toList();
+
+        for (CompletableFuture<BatchCheckResultDTO.TaskResult> future : futures) {
+            BatchCheckResultDTO.TaskResult result = future.join();
+            if (result.getSuccess()) {
+                successList.add(result);
+            } else {
+                failedList.add(result);
             }
         }
 
@@ -102,6 +110,22 @@ public class BatchCheckTaskServiceImpl {
             .build();
 
         return Result.success("批量查重任务创建完成", batchResult);
+    }
+
+    /**
+     * 单篇处理兜底：任何未预期异常都按单篇失败返回，不让 CompletableFuture 携带异常中断汇总
+     */
+    private BatchCheckResultDTO.TaskResult processSinglePaperSafely(Long paperId, Long currentUserId) {
+        try {
+            return processSinglePaper(paperId, currentUserId);
+        } catch (Exception e) {
+            log.error("批量查重处理失败 - 论文 ID: {}", paperId, e);
+            return BatchCheckResultDTO.TaskResult.builder()
+                .paperId(paperId)
+                .success(false)
+                .message("系统异常：" + e.getMessage())
+                .build();
+        }
     }
 
     /**
@@ -137,7 +161,7 @@ public class BatchCheckTaskServiceImpl {
 
         // 2. 创建任务
         try {
-            CheckTask checkTask = createCheckTask(paperId, paperInfo);
+            CheckTask checkTask = createCheckTask(paperId, paperInfo, studentId);
             
             // 3. 发布事件（异步执行）
             eventPublisher.publishEvent(new CheckTaskCreatedEvent(this, checkTask.getId(), paperId));
@@ -170,14 +194,21 @@ public class BatchCheckTaskServiceImpl {
      * 创建查重任务
      */
     @Transactional(rollbackFor = Exception.class)
-    protected CheckTask createCheckTask(Long paperId, PaperInfo paperInfo) {
+    protected CheckTask createCheckTask(Long paperId, PaperInfo paperInfo, Long studentId) {
         CheckTask checkTask = new CheckTask();
         checkTask.setPaperId(paperId);
         checkTask.setFileId(paperInfo.getFileId());
         checkTask.setTaskNo(generateTaskNo());
         checkTask.setCheckStatus("PENDING");
-        UserBusinessInfoUtils.setAuditField(checkTask, true);
-        
+        // S13：本方法在并行线程中执行，SecurityContext 取不到当前用户
+        // （MyMetaObjectHandler 会兜底填匿名管理员 ID），审计字段显式写入；
+        // MP strictInsertFill 不覆盖非空字段，不会被自动填充回退
+        LocalDateTime now = LocalDateTime.now();
+        checkTask.setCreateBy(studentId);
+        checkTask.setCreateTime(now);
+        checkTask.setUpdateBy(studentId);
+        checkTask.setUpdateTime(now);
+
         // 保存任务
         checkTaskMapper.insert(checkTask);
         
