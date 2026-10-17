@@ -30,6 +30,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     @Resource
     private UserDetailsServiceImpl userDetailsService;
 
+    // 安全修复（S7）：登出黑名单 + 改密后用户级旧令牌吊销
+    @Resource
+    private TokenRevocationService tokenRevocationService;
+
     // 从配置文件获取JWT请求头与前缀（键与 JwtProperties 保持一致：spring.jwt.*）
     @Value("${spring.jwt.token-header:Authorization}")
     private String tokenHeader;
@@ -59,6 +63,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             String jwt = parseJwt(request);
             // 2. 验证令牌有效性
             if (jwt != null && !jwtUtils.isTokenExpired(jwt)) {
+                // 2.1 S7 吊销校验：已登出（单令牌黑名单）或签发于改密/重置之前（用户级吊销）
+                //     的令牌按匿名请求处理，后续授权规则自然返回 401/403
+                if (tokenRevocationService.isRevoked(jwt)) {
+                    logger.warn("令牌已被吊销（登出或改密后旧令牌），拒绝建立认证: " + request.getRequestURI());
+                    filterChain.doFilter(request, response);
+                    return;
+                }
                 // 3. 从令牌中提取用户名
                 String username = jwtUtils.extractUsername(jwt);
                 // 4. 从用户详情服务获取用户信息

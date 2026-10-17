@@ -47,6 +47,10 @@ public class AdminUserServiceImpl implements AdminUserService {
     @Resource
     private SysRoleMapper sysRoleMapper;
 
+    // 安全修复（S7）：管理员重置密码后吊销目标用户全部旧令牌
+    @Resource
+    private com.abin.checkrepeatservice.common.jwt.TokenRevocationService tokenRevocationService;
+
     @Override
     public Result<Page<UserInfoDTO>> getUserList(Integer page, Integer size, String userType, 
                                                Integer status, String keyword) {
@@ -328,6 +332,9 @@ public class AdminUserServiceImpl implements AdminUserService {
         // 重置密码
         user.setPassword(passwordEncoder.encode(resetReq.getNewPassword()));
         sysUserService.updateById(user);
+
+        // S7：目标用户的存量令牌立即失效，防止重置后旧会话仍可操作
+        tokenRevocationService.revokeAllTokensForUser(userId);
 
         log.info("管理员重置用户密码成功: userId={}", userId);
         return Result.success("密码重置成功");

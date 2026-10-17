@@ -163,6 +163,24 @@ public class JwtUtils {
     }
 
     /**
+     * 获取token签发时间（epoch 毫秒）。S7 令牌吊销：与用户级「吊销时间点」比较，
+     * 判定该 token 是否签发于改密/重置之前。
+     */
+    public long extractIssuedAtMillis(String token) {
+        Date issuedAt = extractAllClaims(token).getIssuedAt();
+        return issuedAt == null ? 0L : issuedAt.getTime();
+    }
+
+    /**
+     * token 剩余有效期（毫秒）；已过期返回 0。用于吊销键 TTL 设置，
+     * 使黑名单/吊销标记随 token 自然过期而自动清理，不产生永久垃圾键。
+     */
+    public long getRemainingTtlMillis(String token) {
+        long remaining = getExpirationDate(token).getTime() - System.currentTimeMillis();
+        return Math.max(0L, remaining);
+    }
+
+    /**
      *
      * @param token
      * 获取用户ID

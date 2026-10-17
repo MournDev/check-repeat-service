@@ -32,6 +32,10 @@ public class TeacherInfoServiceImpl implements TeacherInfoService{
     @Resource
     private SubjectService subjectService;
 
+    // 安全修复（S7）：修改密码后吊销目标用户全部旧令牌
+    @Resource
+    private com.abin.checkrepeatservice.common.jwt.TokenRevocationService tokenRevocationService;
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Result<String> updateInfo(UpdateTeacherInfoReq updateReq){
@@ -181,6 +185,8 @@ public class TeacherInfoServiceImpl implements TeacherInfoService{
         String encodePassword = passwordEncoder.encode(newPassword);
         user.setPassword(encodePassword);
         sysUserMapper.updateById(user);
+        // S7：目标用户存量令牌立即失效，需用新密码重新登录
+        tokenRevocationService.revokeAllTokensForUser(userId);
         log.info("用户密码修改成功：用户ID={}", userId);
         return Result.success("密码修改成功");
     }

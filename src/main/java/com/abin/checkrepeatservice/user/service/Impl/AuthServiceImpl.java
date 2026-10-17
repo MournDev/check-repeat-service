@@ -100,6 +100,10 @@ public class AuthServiceImpl implements AuthService {
     @Resource
     private LoginAttemptService loginAttemptService;
 
+    // 安全修复（S7）：JWT 登出黑名单与改密后旧令牌吊销
+    @Resource
+    private com.abin.checkrepeatservice.common.jwt.TokenRevocationService tokenRevocationService;
+
     // 找回密码验证码的 Redis 键前缀与有效期
     private static final String KEY_CODE_PREFIX = "pwd_reset_code:";
     private static final String KEY_COOLDOWN_PREFIX = "pwd_reset_code_cooldown:";
@@ -335,6 +339,13 @@ public class AuthServiceImpl implements AuthService {
     public Result<RefreshTokenVO> refreshToken(RefreshTokenReq refreshTokenReq) {
         String oldToken = refreshTokenReq.getOldToken();
 
+        // S7：刷新接口在过滤器中直接放行，必须在此显式查吊销状态，
+        // 否则已登出/改密前的旧令牌可以通过刷新「洗白」成一张全新令牌
+        if (oldToken != null && !oldToken.isBlank() && tokenRevocationService.isRevoked(oldToken)) {
+            log.warn("令牌刷新被拒：旧令牌已吊销");
+            return Result.error(ResultCode.NOT_LOGIN, "登录状态已失效，请重新登录");
+        }
+
         // 1. 校验旧令牌有效性（格式+是否过期）
         if (!jwtUtils.validateTokenFormat(oldToken)) {
             log.warn("令牌刷新失败：旧令牌格式错误，token={}", oldToken);
@@ -374,8 +385,14 @@ public class AuthServiceImpl implements AuthService {
      */
     @Override
     public Result<String> logout() {
+        // S7：把当前令牌加入 Redis 黑名单（TTL=剩余有效期），使登出立即生效；
+        // 无令牌/令牌非法时保持幂等成功，不阻断登出流程
+        String authHeader = request.getHeader("Authorization");
+        if (authHeader != null && !authHeader.isBlank()) {
+            tokenRevocationService.revokeToken(jwtUtils.normalizeToken(authHeader));
+        }
         SecurityContextHolder.clearContext();
-        log.info("用户退出登录成功：清除Security上下文");
+        log.info("用户退出登录成功：令牌已吊销并清除Security上下文");
         return Result.success("退出登录成功");
     }
 
@@ -476,6 +493,8 @@ public class AuthServiceImpl implements AuthService {
             stringRedisTemplate.delete(KEY_ATTEMPTS_PREFIX + username);
             // S6：重置密码成功后解除该账号的登录失败锁定，避免改完密码仍需等待窗口过期
             loginAttemptService.recordLoginSuccess(username);
+            // S7：吊销该用户全部旧令牌（密码已变更，旧会话必须失效，需用新密码重新登录）
+            tokenRevocationService.revokeAllTokensForUser(sysUser.getId());
 
             log.info("用户密码重置成功：用户名={}", username);
             return Result.success("密码重置成功");

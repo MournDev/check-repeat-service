@@ -66,6 +66,10 @@ public class InfoServiceImpl implements InfoService {
     @Resource
     private MinioClient minioClient;
 
+    // 安全修复（S7）：修改密码后吊销该用户全部旧令牌
+    @Resource
+    private com.abin.checkrepeatservice.common.jwt.TokenRevocationService tokenRevocationService;
+
     @Value("${minio.bucket.avatar:avatar}")
     private String avatarBucket;
 
@@ -426,8 +430,11 @@ public class InfoServiceImpl implements InfoService {
             currentUser.setPassword(passwordEncoder.encode(updatePasswordReq.getNewPassword()));
             sysUserMapper.updateById(currentUser);
 
+            // S7：吊销全部旧令牌（含本设备），前端收到响应后应跳转重新登录
+            tokenRevocationService.revokeAllTokensForUser(currentUser.getId());
+
             log.info("用户密码修改成功：用户名={}", currentUsername);
-            return Result.success("密码修改成功");
+            return Result.success("密码修改成功，请重新登录");
         } catch (Exception e) {
             log.error("用户密码修改失败：{}", e.getMessage(), e);
             return Result.error(ResultCode.SYSTEM_ERROR, "密码修改失败：" + e.getMessage());
