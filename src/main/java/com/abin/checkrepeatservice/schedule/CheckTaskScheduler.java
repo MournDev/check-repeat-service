@@ -33,8 +33,8 @@ public class CheckTaskScheduler {
     @Autowired
     private CheckTaskMapper checkTaskMapper;
 
-    /** 超时任务扫描开关，默认关：开启后会把超时任务标记为失败（写库） */
-    @Value("${schedule.check-task.timeout-scan-enabled:false}")
+    /** 超时任务扫描开关，默认开（S13 起）：把超时任务标记为失败（写库）；application.yml 可覆盖关闭 */
+    @Value("${schedule.check-task.timeout-scan-enabled:true}")
     private boolean timeoutScanEnabled;
 
     /**

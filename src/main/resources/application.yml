@@ -349,13 +349,15 @@ backup:
 # 定时任务开关
 # 本应用此前**没有** @EnableScheduling，因此下面这些 @Scheduled 方法虽然写了，
 # 却从未执行过。补上注解后它们会立刻生效，其中超时扫描会按库里的历史数据改数据：
-# 与其让"上线"成为它们第一次运行，不如默认关闭，确认过输出再逐个打开。
+# 除查重超时扫描（S13 起生产默认开启）外其余默认关闭，确认过输出再逐个打开。
 # （AutoBackupScheduler 不在这里，它由 system_param.backup_enabled 控制，
 #   也就是「系统配置」页上的那个开关。查重任务清理则由「性能配置」驱动。）
 schedule:
   check-task:
-    # 把 check_status='checking' 且已超 1 小时的任务标记为失败 —— 会写库
-    timeout-scan-enabled: false
+    # 把 check_status='checking' 且已超 1 小时的任务标记为失败 —— 会写库。
+    # S13：默认开启——卡死任务必须被回收为失败态，否则学生端永远停在"查重中"；
+    # 如需关闭改 false 即可
+    timeout-scan-enabled: true
     # 旧任务清理已改由「性能配置」页（system_config 表 performance 键的
     # autoCleanup/cleanupInterval）动态驱动：软删除 30 天前的终态任务，
     # 保存即生效，无需此开关。
