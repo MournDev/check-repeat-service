@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.fasterxml.jackson.annotation.JsonFormat;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
@@ -165,7 +166,15 @@ public class PaperInfo extends BaseEntity implements Serializable {
      */
     @TableField("check_result")
     private String checkResult;
-    
+
+    /**
+     * 审核意见（管理员/教师初审意见，独立于 check_result 查重结果存储，S12）。
+     * JSON 键输出为 feedback：学生端 MyPapers.vue「审核意见」栏按 paper.feedback 读取（既有前端契约）。
+     */
+    @TableField("audit_comment")
+    @JsonProperty("feedback")
+    private String auditComment;
+
     /**
      * 查重引擎类型
      */

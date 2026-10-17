@@ -1159,6 +1159,7 @@ CREATE TABLE `paper_info` (
   `segmented_path` varchar(255) DEFAULT NULL COMMENT 'IK分词后文本在MinIO中的存储路径',
   `internal_check_result` text COMMENT '校内查重结果（JSON格式）',
   `third_party_check_result` text COMMENT '第三方查重结果（JSON格式）',
+  `audit_comment` text COMMENT '审核意见（初审/退回意见，独立于 check_result 查重结果存储）',
   PRIMARY KEY (`id`),
   KEY `idx_paper_info_student_title` (`student_id`,`paper_title`),
   KEY `idx_paper_info_file_id` (`file_id`),

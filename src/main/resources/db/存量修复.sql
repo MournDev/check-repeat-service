@@ -1574,6 +1574,33 @@ ALTER TABLE `paper_info`
   ADD KEY `idx_pi_parent_paper_id` (`parent_paper_id`);
 
 -- ============================================================================
+-- 段 1.18：paper_info 补 audit_comment 审核意见列（S12 审核链路一致性）
+--
+-- 背景：审核意见此前混写进 check_result（查重结果），与「查重完成，相似度：x%」
+--   等查重文案互相覆盖；前端（学生端 MyPapers.vue「审核意见」栏）按 paper.feedback
+--   读取，后端从未输出。S12 起审核意见独立存 audit_comment，PaperInfo 实体以
+--   @JsonProperty("feedback") 对齐前端契约，check_result 只承载查重结果。
+--   存量 check_result 里的历史审核意见不做迁移（与查重文案无法可靠区分），
+--   以新审核产生的意见为准。
+-- 部署顺序：必须「先跑本段，再部署后端 jar」（实体已映射新列）。
+-- 幂等性：information_schema 探测列是否存在，重复执行输出"已存在，跳过"。
+-- ============================================================================
+
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.columns
+   WHERE table_schema = DATABASE()
+     AND table_name = 'paper_info'
+     AND column_name = 'audit_comment'
+);
+SET @ddl = IF(@col_exists = 0,
+  'ALTER TABLE `paper_info` '
+  'ADD COLUMN `audit_comment` text COMMENT ''审核意见（初审/退回意见，独立于 check_result 查重结果存储）'' AFTER `third_party_check_result`',
+  'SELECT ''paper_info.audit_comment 已存在，跳过'' AS msg');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- ============================================================================
 -- 段 2：similarity_threshold 系列表的 is_deleted 历史 NULL 归零
 --
 -- 背景：category_similarity_threshold.is_deleted 在 init.sql 里一度是 DEFAULT NULL，
@@ -1987,6 +2014,12 @@ SELECT COUNT(*) AS paper_version_cols FROM information_schema.COLUMNS
  WHERE TABLE_SCHEMA = DATABASE()
    AND TABLE_NAME = 'paper_info'
    AND COLUMN_NAME IN ('version','parent_paper_id');
+
+-- 5.14 段 1.18 paper_info 审核意见列执行后：期望 audit_comment_cols=1
+SELECT COUNT(*) AS audit_comment_cols FROM information_schema.COLUMNS
+ WHERE TABLE_SCHEMA = DATABASE()
+   AND TABLE_NAME = 'paper_info'
+   AND COLUMN_NAME = 'audit_comment';
 
 
 -- ============================================================================

@@ -216,9 +216,9 @@ public class TeacherDashboardServiceImpl implements TeacherDashboardService {
                         continue;
                     }
                     
-                    // 更新论文状态
+                    // 更新论文状态（S12：审核意见独立存 audit_comment，不覆盖 check_result 查重结果）
                     paper.setPaperStatus(newStatus);
-                    paper.setCheckResult(reviewOpinion);
+                    paper.setAuditComment(reviewOpinion);
                     paper.setCheckTime(LocalDateTime.now());
                     
                     paperInfoMapper.updateById(paper);
@@ -264,8 +264,9 @@ public class TeacherDashboardServiceImpl implements TeacherDashboardService {
                 return Result.error(ResultCode.PARAM_ERROR, "审核结果参数无效");
             }
             
+            // S12：审核意见独立存 audit_comment，不覆盖 check_result 查重结果
             paper.setPaperStatus(newStatus);
-            paper.setCheckResult(reviewComment);
+            paper.setAuditComment(reviewComment);
             paper.setCheckTime(LocalDateTime.now());
             
             paperInfoMapper.updateById(paper);

@@ -2,8 +2,12 @@ package com.abin.checkrepeatservice.admin.service.Impl;
 
 import com.abin.checkrepeatservice.admin.service.AdminPaperService;
 import com.abin.checkrepeatservice.common.Result;
+import com.abin.checkrepeatservice.common.Exception.BusinessException;
+import com.abin.checkrepeatservice.common.component.PaperStageGate;
 import com.abin.checkrepeatservice.common.constant.DictConstants;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
+import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
+import com.abin.checkrepeatservice.user.service.PaperStatusLogService;
 import com.abin.checkrepeatservice.common.enums.CheckStatusFilterEnum;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
 import com.abin.checkrepeatservice.mapper.SysUserMapper;
@@ -46,6 +50,12 @@ public class AdminPaperServiceImpl implements AdminPaperService {
     
     @Resource
     private EnhancedSimilarityDetectionService detectionService;
+
+    @Resource
+    private PaperStageGate paperStageGate;
+
+    @Resource
+    private PaperStatusLogService paperStatusLogService;
 
     @Override
     public Result<Page<PaperInfo>> getPaperList(Integer page, Integer size, String paperStatus, 
@@ -154,27 +164,60 @@ public class AdminPaperServiceImpl implements AdminPaperService {
             if (paperInfo == null || paperInfo.getIsDeleted() == 1) {
                 return Result.error(ResultCode.PARAM_ERROR, "论文不存在");
             }
-            
-            // 更新审核状态
+
+            // 确定目标状态
+            String targetStatus;
             if ("approved".equals(auditResult)) {
-                paperInfo.setPaperStatus(DictConstants.PaperStatus.COMPLETED);
+                targetStatus = DictConstants.PaperStatus.COMPLETED;
             } else if ("rejected".equals(auditResult)) {
-                paperInfo.setPaperStatus(DictConstants.PaperStatus.REJECTED);
+                targetStatus = DictConstants.PaperStatus.REJECTED;
             } else {
                 return Result.error(ResultCode.PARAM_ERROR, "无效的审核结果");
             }
-            
-            paperInfo.setCheckResult(auditComment);
+
+            // S12：状态流转统一走阶段门裁决（非法流转抛 40305）；
+            // 归一化兼容未跑段 3 迁移的库上残留的历史数字状态码
+            String fromStatus = paperStageGate.normalizeLegacy(paperInfo.getPaperStatus());
+            paperStageGate.assertTransition(fromStatus, targetStatus);
+
+            // S12：审核意见独立存储到 audit_comment，不再覆盖 check_result（查重结果）
+            paperInfo.setPaperStatus(targetStatus);
+            paperInfo.setAuditComment(auditComment);
             paperInfo.setUpdateTime(LocalDateTime.now());
-            
+
             paperInfoMapper.updateById(paperInfo);
-            
-            log.info("论文审核成功: paperId={}, result={}", paperId, auditResult);
+
+            // S12：补写状态日志，保证学生端时间线完整
+            paperStatusLogService.recordStatusLog(paperId, fromStatus, targetStatus,
+                    buildAuditReason(auditResult, auditComment),
+                    UserBusinessInfoUtils.getCurrentUserId(), null);
+
+            log.info("论文审核成功: paperId={}, result={}, fromStatus={}", paperId, auditResult, fromStatus);
             return Result.success("论文审核成功");
+        } catch (BusinessException e) {
+            // S12：阶段门 40305 等业务异常透传原错误码，不降级为 500
+            log.warn("论文审核被拦截: paperId={}, code={}, msg={}", paperId, e.getResultCode().getCode(), e.getMessage());
+            return Result.error(e.getResultCode(), e.getMessage());
         } catch (Exception e) {
             log.error("论文审核失败: paperId={}", paperId, e);
             return Result.error(ResultCode.SYSTEM_ERROR, "论文审核失败: " + e.getMessage());
         }
+    }
+
+    /**
+     * 构造审核动作的状态日志原因（S12）。
+     * 意见拼入原因便于学生端时间线直接可读；总长控制在 paper_status_log.status_reason 的 500 字符内。
+     */
+    private String buildAuditReason(String auditResult, String auditComment) {
+        StringBuilder reason = new StringBuilder("管理员初审").append("approved".equals(auditResult) ? "通过" : "退回");
+        if (auditComment != null && !auditComment.isBlank()) {
+            reason.append("：").append(auditComment.trim());
+        }
+        String result = reason.toString();
+        if (result.length() > 500) {
+            result = result.substring(0, 497) + "...";
+        }
+        return result;
     }
 
     @Override
