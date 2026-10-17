@@ -55,19 +55,28 @@
         <appender-ref ref="ERROR_FILE"/>
     </root>
 
-    <!-- 应用包的日志级别 -->
-    <logger name="com.abin.checkrepeatservice" level="DEBUG" additivity="false">
-        <appender-ref ref="CONSOLE"/>
-        <appender-ref ref="FILE"/>
-        <appender-ref ref="ERROR_FILE"/>
-    </logger>
-
+    <!-- 应用包的日志级别：prod 收敛为 INFO（DEBUG 会拖慢启动、SQL 参数外泄、磁盘暴涨）；非 prod 保留 DEBUG 便于本地调试 -->
+    <springProfile name="prod">
+        <logger name="com.abin.checkrepeatservice" level="INFO" additivity="false">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="FILE"/>
+            <appender-ref ref="ERROR_FILE"/>
+        </logger>
+        <logger name="com.baomidou.mybatisplus" level="WARN"/>
+    </springProfile>
+    <springProfile name="!prod">
+        <logger name="com.abin.checkrepeatservice" level="DEBUG" additivity="false">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="FILE"/>
+            <appender-ref ref="ERROR_FILE"/>
+        </logger>
+        <!-- MyBatis日志级别 -->
+        <logger name="com.baomidou.mybatisplus" level="DEBUG"/>
+    </springProfile>
+    
     <!-- Spring框架日志级别 -->
     <logger name="org.springframework" level="INFO"/>
-    
-    <!-- MyBatis日志级别 -->
-    <logger name="com.baomidou.mybatisplus" level="DEBUG"/>
-    
+
     <!-- 数据库连接池日志级别 -->
     <logger name="com.zaxxer.hikari" level="WARN"/>
     
