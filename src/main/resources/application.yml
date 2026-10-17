@@ -303,6 +303,36 @@ login:
     # 计数与锁定窗口（秒），默认 15 分钟，窗口过后自动解锁
     window-seconds: 900
 
+# XSS 全局输入过滤（S9：Jsoup 输入侧兜底，默认开启）
+xss:
+  enabled: true
+  # JSON body 最大缓存字节，超过则跳过 body 过滤原样放行（避免大包放大堆内存）
+  max-body-size: 10485760
+  # 跳过路径前缀（servletPath，相对 /check）；multipart/form-data 请求始终整体跳过
+  excludes:
+    - /ws/
+    - /actuator/
+    - /error
+  # 富文本字段（保留安全排版标签，移除 script 等危险内容，大小写不敏感）
+  rich-text-fields:
+    - reviewOpinion
+    - contentTemplate
+  # 原样放行字段（密码/令牌/密钥等，HTML 转义会改变其真实字节，大小写不敏感）
+  skip-fields:
+    - password
+    - oldPassword
+    - newPassword
+    - confirmPassword
+    - passwordConfirm
+    - token
+    - oldToken
+    - accessToken
+    - refreshToken
+    - secret
+    - secretKey
+    - authorization
+    - authCode
+
 # 兼容性配置
 upload:
   base-path: ${UPLOAD_BASE_PATH:/data/upload/}

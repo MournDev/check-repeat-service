@@ -2,6 +2,7 @@ package com.abin.checkrepeatservice.common.config;
 
 import com.abin.checkrepeatservice.common.jwt.JwtAuthenticationEntryPoint;
 import com.abin.checkrepeatservice.common.jwt.JwtAuthenticationFilter;
+import com.abin.checkrepeatservice.common.xss.XssFilter;
 import com.abin.checkrepeatservice.user.service.Impl.UserDetailsServiceImpl;
 import jakarta.servlet.DispatcherType;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,6 +38,10 @@ public class SecurityConfig {
 
     @Autowired
     private JwtAuthenticationFilter jwtAuthenticationFilter;
+
+    // 安全修复（S9）：全局 XSS 输入过滤，注册在 JWT 过滤器之前（对匿名接口同样生效）
+    @Autowired
+    private XssFilter xssFilter;
 
     /**
      * 密码编码器（BCrypt加密）
@@ -170,6 +175,8 @@ public class SecurityConfig {
                         .anyRequest().authenticated())
                 // 注册认证提供者
                 .authenticationProvider(authenticationProvider())
+                // S9：XSS 输入过滤放在 JWT 过滤器之前，保证登录/注册等匿名入口也被覆盖
+                .addFilterBefore(xssFilter, JwtAuthenticationFilter.class)
                 // 在UsernamePasswordAuthenticationFilter之前添加JWT认证过滤器
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
