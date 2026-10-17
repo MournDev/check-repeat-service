@@ -293,6 +293,16 @@ advisor-assign:
   max-task-count: 10
   retry-count: 3
 
+# 登录安全（S6 防爆破：Redis 固定窗口计数）
+login:
+  security:
+    # 同一账号窗口内连续失败上限，达到后窗口剩余时间拒绝该账号登录
+    user-max-failures: 5
+    # 同一 IP 窗口内连续失败上限（校园网/NAT 出口多用户共享，阈值放宽）
+    ip-max-failures: 20
+    # 计数与锁定窗口（秒），默认 15 分钟，窗口过后自动解锁
+    window-seconds: 900
+
 # 兼容性配置
 upload:
   base-path: ${UPLOAD_BASE_PATH:/data/upload/}

@@ -54,6 +54,9 @@ public enum ResultCode {
     BUSINESS_EVAL_ALREADY_SUBMITTED(40918, HttpStatus.CONFLICT, "您已提交过导师评价，请勿重复提交"),
     BUSINESS_EVAL_WINDOW_CLOSED(40919, HttpStatus.CONFLICT, "导师评价窗口已关闭"),
 
+    // ====================== 4.6 限流（HTTP 429） ======================
+    LOGIN_TOO_MANY_ATTEMPTS(42901, HttpStatus.TOO_MANY_REQUESTS, "登录尝试次数过多，请稍后再试"),
+
     // ====================== 5. 系统错误（HTTP 500） ======================
     SYSTEM_ERROR(50001, HttpStatus.INTERNAL_SERVER_ERROR, "系统繁忙，请稍后重试"),
     SYSTEM_TIMEOUT(50002, HttpStatus.INTERNAL_SERVER_ERROR, "系统请求超时"),

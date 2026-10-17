@@ -1,6 +1,7 @@
 package com.abin.checkrepeatservice.user.service.Impl;
 
 
+import com.abin.checkrepeatservice.common.Exception.BusinessException;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.common.service.IpLocationService;
@@ -95,6 +96,10 @@ public class AuthServiceImpl implements AuthService {
     @Resource
     private StringRedisTemplate stringRedisTemplate;
 
+    // 安全修复（S6）：登录失败计数与账号/IP 临时锁定
+    @Resource
+    private LoginAttemptService loginAttemptService;
+
     // 找回密码验证码的 Redis 键前缀与有效期
     private static final String KEY_CODE_PREFIX = "pwd_reset_code:";
     private static final String KEY_COOLDOWN_PREFIX = "pwd_reset_code_cooldown:";
@@ -176,6 +181,21 @@ public class AuthServiceImpl implements AuthService {
         String loginIp = HttpIpUtils.getRealIp(request);           // IP地址
         String loginDevice = UserAgentUtils.parseDevice(request);   // 设备信息
         String loginLocation = ipLocationService.getLocationByIp(loginIp); // 属地（离线库 ip2region）
+
+        // 0. 安全修复（S6）：登录防爆破前置校验。账号/IP 已在锁定窗口内则直接拒绝，
+        // 不再执行密码认证（避免锁定期间继续消耗 BCrypt 算力、也不给时序反馈）
+        try {
+            loginAttemptService.assertLoginAllowed(loginReq.getUsername(), loginIp);
+        } catch (BusinessException be) {
+            log.warn("登录被防爆破策略拦截：用户名={}，IP={}，原因={}",
+                    loginReq.getUsername(), loginIp, be.getMessage());
+            recordLoginLog(null, loginReq.getUsername(), loginIp, loginLocation,
+                    loginDevice, 0, be.getMessage());
+            businessMetricsService.record(BusinessMetricsService.Event.USER_LOGIN,
+                    BusinessMetricsService.Outcome.FAILURE);
+            return Result.error(be.getResultCode(), be.getMessage());
+        }
+
         // 1. 执行Spring Security认证（用户名+密码校验）
         Authentication authentication;
         try {
@@ -186,16 +206,38 @@ public class AuthServiceImpl implements AuthService {
                     )
             );
         } catch (Exception e) {
-            log.warn("用户登录失败：用户名={}，原因=用户名或密码错误", loginReq.getUsername());
+            // S6：累计失败次数，命中阈值则返回 429 锁定提示，否则提示剩余尝试次数
+            LoginAttemptService.FailureOutcome outcome =
+                    loginAttemptService.recordLoginFailure(loginReq.getUsername(), loginIp);
+            if (outcome.isLocked()) {
+                String lockMsg = outcome.isUserLocked()
+                        ? "账号或密码连续错误次数过多，为保护账号安全已临时锁定，请 "
+                            + Math.max(1, (outcome.getWindowSeconds() + 59) / 60) + " 分钟后再试"
+                        : "当前网络登录尝试过于频繁，已临时限制，请 "
+                            + Math.max(1, (outcome.getWindowSeconds() + 59) / 60) + " 分钟后再试";
+                log.warn("用户登录失败触发锁定：用户名={}，IP={}，userLocked={}",
+                        loginReq.getUsername(), loginIp, outcome.isUserLocked());
+                recordLoginLog(null, loginReq.getUsername(), loginIp, loginLocation,
+                        loginDevice, 0, lockMsg);
+                businessMetricsService.record(BusinessMetricsService.Event.USER_LOGIN,
+                        BusinessMetricsService.Outcome.FAILURE);
+                return Result.error(ResultCode.LOGIN_TOO_MANY_ATTEMPTS, lockMsg);
+            }
+            log.warn("用户登录失败：用户名={}，原因=用户名或密码错误，剩余尝试次数={}",
+                    loginReq.getUsername(), outcome.getRemainingAttempts());
+            String failMsg = "用户名或密码错误（连续再错 " + outcome.getRemainingAttempts()
+                    + " 次账号将临时锁定）";
             recordLoginLog(null, loginReq.getUsername(), loginIp, loginLocation,
-                    loginDevice, 0, "用户名或密码错误");
+                    loginDevice, 0, failMsg);
             businessMetricsService.record(BusinessMetricsService.Event.USER_LOGIN,
                     BusinessMetricsService.Outcome.FAILURE);
-            return Result.error(ResultCode.PARAM_ERROR, "用户名或密码错误");
+            return Result.error(ResultCode.PARAM_ERROR, failMsg);
         }
 
         // 2. 认证通过：设置上下文（后续权限校验会用到）
         SecurityContextHolder.getContext().setAuthentication(authentication);
+        // S6：密码校验通过即清除该账号的失败计数（IP 计数保留，防多账号扫描清零）
+        loginAttemptService.recordLoginSuccess(loginReq.getUsername());
 
         // 3. 查询用户完整信息（含基础字段、审计字段）
         SysUser sysUser = sysUserMapper.selectOne(
@@ -432,6 +474,8 @@ public class AuthServiceImpl implements AuthService {
             // 5. 用完即弃：删掉验证码和错误计数（冷却位留给它自然过期）
             stringRedisTemplate.delete(codeKey);
             stringRedisTemplate.delete(KEY_ATTEMPTS_PREFIX + username);
+            // S6：重置密码成功后解除该账号的登录失败锁定，避免改完密码仍需等待窗口过期
+            loginAttemptService.recordLoginSuccess(username);
 
             log.info("用户密码重置成功：用户名={}", username);
             return Result.success("密码重置成功");
