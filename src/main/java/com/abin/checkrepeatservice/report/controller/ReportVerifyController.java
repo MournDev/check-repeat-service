@@ -1,6 +1,7 @@
 package com.abin.checkrepeatservice.report.controller;
 
 import com.abin.checkrepeatservice.common.Result;
+import com.abin.checkrepeatservice.common.utils.HttpIpUtils;
 import com.abin.checkrepeatservice.report.dto.ReportVerifyVO;
 import com.abin.checkrepeatservice.report.service.ReportVerifyService;
 import jakarta.annotation.Resource;
@@ -77,13 +78,10 @@ public class ReportVerifyController {
     }
 
     /**
-     * 解析客户端 IP：优先取代理链首跳（X-Forwarded-For），兜底 remoteAddr
+     * 解析客户端 IP：S15 统一走 HttpIpUtils 信任链口径——原实现盲信 XFF 首跳，
+     * 攻击者可伪造 X-Forwarded-For 刷限流键；现仅信任内网直连代理追加的合法 IP
      */
     private String resolveClientIp(HttpServletRequest request) {
-        String xff = request.getHeader("X-Forwarded-For");
-        if (xff != null && !xff.isBlank()) {
-            return xff.split(",")[0].trim();
-        }
-        return request.getRemoteAddr();
+        return HttpIpUtils.getRealIp(request);
     }
 }
