@@ -232,24 +232,22 @@ public class CheckReportServiceImpl extends ServiceImpl<CheckReportMapper, Check
                 .orderByDesc(CheckReport::getCreateTime);
 
         // 1. 按角色过滤（关联任务与论文）
+        // S11 安全加固：inSql 字符串拼接改为 apply {0} 参数绑定（统一模式，防复制扩散）
         if (UserBusinessInfoUtils.isStudent()) {
             // 学生：仅查询自己论文的报告
-            queryWrapper.inSql(CheckReport::getTaskId,
-                    "SELECT id FROM check_task WHERE paper_id IN (" +
-                            "SELECT id FROM paper_info WHERE student_id = " + currentUser.getId() + " AND is_deleted = 0" +
-                            ") AND is_deleted = 0");
+            queryWrapper.apply("task_id IN (SELECT id FROM check_task WHERE paper_id IN (" +
+                    "SELECT id FROM paper_info WHERE student_id = {0} AND is_deleted = 0) AND is_deleted = 0)",
+                    currentUser.getId());
         } else if (UserBusinessInfoUtils.isTeacher()) {
             // 教师：仅查询自己指导论文的报告
-            queryWrapper.inSql(CheckReport::getTaskId,
-                    "SELECT id FROM check_task WHERE paper_id IN (" +
-                            "SELECT id FROM paper_info WHERE teacher_id = " + currentUser.getId() + " AND is_deleted = 0" +
-                            ") AND is_deleted = 0");
+            queryWrapper.apply("task_id IN (SELECT id FROM check_task WHERE paper_id IN (" +
+                    "SELECT id FROM paper_info WHERE teacher_id = {0} AND is_deleted = 0) AND is_deleted = 0)",
+                    currentUser.getId());
         }
 
         // 2. 按论文ID过滤（可选）
         if (paperId != null) {
-            queryWrapper.inSql(CheckReport::getTaskId,
-                    "SELECT id FROM check_task WHERE paper_id = " + paperId + " AND is_deleted = 0");
+            queryWrapper.apply("task_id IN (SELECT id FROM check_task WHERE paper_id = {0} AND is_deleted = 0)", paperId);
         }
 
         List<CheckReport> reportList = list(queryWrapper);

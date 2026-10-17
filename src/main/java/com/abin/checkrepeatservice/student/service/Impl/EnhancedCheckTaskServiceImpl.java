@@ -497,14 +497,13 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
     }
     
     private void applyPermissionFilter(LambdaQueryWrapper<CheckTask> wrapper) {
+        // S11 安全加固：inSql 字符串拼接改为 apply {0} 参数绑定（统一模式，防复制扩散）
         if (UserBusinessInfoUtils.isStudent()) {
             Long studentId = UserBusinessInfoUtils.getCurrentUserId();
-            wrapper.inSql(CheckTask::getPaperId,
-                    "SELECT id FROM paper_info WHERE student_id = " + studentId + " AND is_deleted = 0");
+            wrapper.apply("paper_id IN (SELECT id FROM paper_info WHERE student_id = {0} AND is_deleted = 0)", studentId);
         } else if (UserBusinessInfoUtils.isTeacher()) {
             Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
-            wrapper.inSql(CheckTask::getPaperId,
-                    "SELECT id FROM paper_info WHERE teacher_id = " + teacherId + " AND is_deleted = 0");
+            wrapper.apply("paper_id IN (SELECT id FROM paper_info WHERE teacher_id = {0} AND is_deleted = 0)", teacherId);
         }
         // 管理员无过滤
     }

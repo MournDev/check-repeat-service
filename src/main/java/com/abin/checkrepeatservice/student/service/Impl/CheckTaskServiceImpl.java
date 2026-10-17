@@ -225,14 +225,13 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
                 .orderByDesc(CheckTask::getCreateTime);
 
         // 1. 按角色过滤数据
+        // S11 安全加固：inSql 字符串拼接改为 apply {0} 参数绑定（统一模式，防复制扩散）
         if (UserBusinessInfoUtils.isStudent()) {
             // 学生：仅查询自己论文的任务（需关联论文表的student_id）
-            queryWrapper.inSql(CheckTask::getPaperId,
-                    "SELECT id FROM paper_info WHERE student_id = " + currentUser.getId() + " AND is_deleted = 0");
+            queryWrapper.apply("paper_id IN (SELECT id FROM paper_info WHERE student_id = {0} AND is_deleted = 0)", currentUser.getId());
         } else if (UserBusinessInfoUtils.isTeacher()) {
             // 教师：仅查询自己指导论文的任务（需关联论文表的teacher_id）
-            queryWrapper.inSql(CheckTask::getPaperId,
-                    "SELECT id FROM paper_info WHERE teacher_id = " + currentUser.getId() + " AND is_deleted = 0");
+            queryWrapper.apply("paper_id IN (SELECT id FROM paper_info WHERE teacher_id = {0} AND is_deleted = 0)", currentUser.getId());
         }
         // 管理员：无过滤
 

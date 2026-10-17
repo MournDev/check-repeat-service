@@ -25,6 +25,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
 /**
  * 管理员论文管理服务实现类
@@ -68,6 +70,7 @@ public class AdminPaperServiceImpl implements AdminPaperService {
             }
             
             // 关键词搜索（标题、作者、论文关键词等）
+            // S11 安全修复：inSql 字符串拼接存在 SQL 注入，改用 apply {0} 参数绑定
             if (keyword != null && !keyword.isEmpty()) {
                 wrapper.and(w -> w.like(PaperInfo::getPaperTitle, keyword)
                                 .or()
@@ -75,8 +78,7 @@ public class AdminPaperServiceImpl implements AdminPaperService {
                                 .or()
                                 .like(PaperInfo::getPaperAbstract, keyword)
                                 .or()
-                                .inSql(PaperInfo::getStudentId, 
-                                    "SELECT id FROM sys_user WHERE real_name LIKE '%" + keyword + "%' AND is_deleted = 0"));
+                                .apply("student_id IN (SELECT id FROM sys_user WHERE real_name LIKE CONCAT('%', {0}, '%') AND is_deleted = 0)", keyword));
             }
             
             // 时间范围筛选
@@ -88,15 +90,15 @@ public class AdminPaperServiceImpl implements AdminPaperService {
             }
             
             // 专业筛选（通过专业名称关联查询）
+            // S11 安全修复：inSql 字符串拼接存在 SQL 注入，改用 apply {0} 参数绑定
             if (majorName != null && !majorName.isEmpty()) {
-                wrapper.inSql(PaperInfo::getMajorId, 
-                    "SELECT id FROM major WHERE major_name LIKE '%" + majorName + "%' AND is_deleted = 0");
+                wrapper.apply("major_id IN (SELECT id FROM major WHERE major_name LIKE CONCAT('%', {0}, '%') AND is_deleted = 0)", majorName);
             }
             
             // 年级筛选（需要关联sys_user表）
+            // S11 安全修复：inSql 字符串拼接存在 SQL 注入，改用 apply {0} 参数绑定
             if (grade != null && !grade.isEmpty()) {
-                wrapper.inSql(PaperInfo::getStudentId, 
-                    "SELECT id FROM sys_user WHERE grade = '" + grade + "' AND is_deleted = 0");
+                wrapper.apply("student_id IN (SELECT id FROM sys_user WHERE grade = {0} AND is_deleted = 0)", grade);
             }
             
             // 查重状态筛选
@@ -442,10 +444,51 @@ public class AdminPaperServiceImpl implements AdminPaperService {
 
     /**
      * 补充论文列表信息
+     *
+     * <p>S10 性能修复：原实现逐篇调用 {@link #enhancePaperDetail}，每篇最多触发
+     * 2 次 selectById（学生+教师），分页列表形成 N+1。现按本页全部学生/教师 ID
+     * 各做一次 selectBatchIds，再于内存拼装。</p>
      */
     private void enhancePaperList(List<PaperInfo> papers) {
+        if (papers == null || papers.isEmpty()) {
+            return;
+        }
+        // 收集本页所有学生、教师 ID
+        List<Long> studentIds = papers.stream()
+                .map(PaperInfo::getStudentId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+        List<Long> teacherIds = papers.stream()
+                .map(PaperInfo::getTeacherId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+
+        Map<Long, SysUser> studentMap = studentIds.isEmpty() ? new HashMap<>()
+                : sysUserMapper.selectBatchIds(studentIds).stream()
+                    .collect(Collectors.toMap(SysUser::getId, u -> u));
+        Map<Long, SysUser> teacherMap = teacherIds.isEmpty() ? new HashMap<>()
+                : sysUserMapper.selectBatchIds(teacherIds).stream()
+                    .collect(Collectors.toMap(SysUser::getId, u -> u));
+
         for (PaperInfo paper : papers) {
-            enhancePaperDetail(paper);
+            if (paper.getStudentId() != null) {
+                SysUser student = studentMap.get(paper.getStudentId());
+                if (student != null) {
+                    paper.setStudentName(student.getRealName());
+                    paper.setStudentUsername(student.getUsername());
+                    paper.setStudentGrade(student.getGrade());
+                    paper.setStudentMajor(student.getMajor());
+                    paper.setStudentCollege(student.getCollegeName());
+                }
+            }
+            if (paper.getTeacherId() != null) {
+                SysUser teacher = teacherMap.get(paper.getTeacherId());
+                if (teacher != null) {
+                    paper.setTeacherRealName(teacher.getRealName());
+                }
+            }
         }
     }
 

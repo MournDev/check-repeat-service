@@ -100,10 +100,11 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
                 .eq(PaperInfo::getIsDeleted, 0);
 
         // 2. 模糊查询条件（学生姓名、论文标题）
+        // S11 安全修复：inSql 字符串拼接存在 SQL 注入，改用 apply {0} 参数绑定
         if (org.springframework.util.StringUtils.hasText(queryReq.getStudentName())) {
-            // 关联学生表查询姓名（通过inSql实现）
-            paperWrapper.inSql(PaperInfo::getStudentId,
-                    "SELECT id FROM sys_user WHERE real_name LIKE '%" + queryReq.getStudentName() + "%' AND is_deleted = 0");
+            // 关联学生表查询姓名（apply 参数绑定子查询）
+            paperWrapper.apply("student_id IN (SELECT id FROM sys_user WHERE real_name LIKE CONCAT('%', {0}, '%') AND is_deleted = 0)",
+                    queryReq.getStudentName());
         }
         if (org.springframework.util.StringUtils.hasText(queryReq.getPaperTitle())) {
             paperWrapper.like(PaperInfo::getPaperTitle, queryReq.getPaperTitle());
@@ -292,9 +293,10 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
                 .eq(PaperInfo::getIsDeleted, 0);
 
         // 2. 模糊查询条件（与待审核列表一致）
+        // S11 安全修复：inSql 字符串拼接存在 SQL 注入，改用 apply {0} 参数绑定
         if (org.springframework.util.StringUtils.hasText(queryReq.getStudentName())) {
-            paperWrapper.inSql(PaperInfo::getStudentId,
-                    "SELECT id FROM sys_user WHERE real_name LIKE '%" + queryReq.getStudentName() + "%' AND is_deleted = 0");
+            paperWrapper.apply("student_id IN (SELECT id FROM sys_user WHERE real_name LIKE CONCAT('%', {0}, '%') AND is_deleted = 0)",
+                    queryReq.getStudentName());
         }
         if (org.springframework.util.StringUtils.hasText(queryReq.getPaperTitle())) {
             paperWrapper.like(PaperInfo::getPaperTitle, queryReq.getPaperTitle());
@@ -494,6 +496,27 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
             reviewMap.put(entry.getKey(), latestReview);
         }
 
+        // S10 性能修复：批量预载本页报告与评审教师，消除循环内逐条 selectById（N+1）
+        // 1.5 批量查询查重报告（Map<报告ID, 报告>）
+        List<Long> reportIds = taskMap.values().stream()
+                .map(CheckTask::getReportId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+        Map<Long, CheckReport> reportMap = reportIds.isEmpty() ? new HashMap<>()
+                : checkReportMapper.selectBatchIds(reportIds).stream()
+                        .collect(Collectors.toMap(CheckReport::getId, r -> r));
+
+        // 1.6 批量查询评审教师姓名（Map<教师ID, 用户>）
+        List<Long> reviewerIds = reviewMap.values().stream()
+                .map(ReviewRecord::getTeacherId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+        Map<Long, SysUser> reviewerMap = reviewerIds.isEmpty() ? new HashMap<>()
+                : sysUserMapper.selectBatchIds(reviewerIds).stream()
+                        .collect(Collectors.toMap(SysUser::getId, u -> u));
+
         // 2. 转换为DTO
         return paperList.stream().map(paper -> {
             ReviewResultDTO dto = new ReviewResultDTO();
@@ -521,8 +544,8 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
                 taskBaseInfo.setTaskNo(task.getTaskNo());
                 taskBaseInfo.setCheckRate(task.getCheckRate() != null ? task.getCheckRate().doubleValue() : 0.0);
                 taskBaseInfo.setCheckEndTime(task.getEndTime());
-                // 查询报告编号
-                CheckReport report = checkReportMapper.selectById(task.getReportId());
+                // 查询报告编号（取自批量预载 Map）
+                CheckReport report = task.getReportId() == null ? null : reportMap.get(task.getReportId());
                 if (report != null) {
                     taskBaseInfo.setReportNo(report.getReportNo());
                 }
@@ -536,8 +559,8 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
                 reviewOperateInfo.setReviewStatus(review.getReviewStatus());
                 reviewOperateInfo.setReviewStatusDesc(review.getReviewStatus().equals(3) ? "审核通过" : "审核不通过");
                 reviewOperateInfo.setReviewOpinion(review.getReviewOpinion());
-                // 查询审核教师姓名
-                SysUser teacher = sysUserMapper.selectById(review.getTeacherId());
+                // 查询审核教师姓名（取自批量预载 Map）
+                SysUser teacher = review.getTeacherId() == null ? null : reviewerMap.get(review.getTeacherId());
                 if (teacher != null) {
                     reviewOperateInfo.setReviewerName(teacher.getRealName());
                 }

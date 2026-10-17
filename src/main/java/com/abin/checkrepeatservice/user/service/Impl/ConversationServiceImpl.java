@@ -40,8 +40,8 @@ public class ConversationServiceImpl extends ServiceImpl<ConversationMapper, Con
                 .orderByDesc(Conversation::getUpdateTime);
 
         // 只查询用户参与的会话
-        wrapper.inSql(Conversation::getId,
-                "SELECT conversation_id FROM conversation_members WHERE user_id = " + userId + " AND is_deleted = 0");
+        // S11 安全加固：inSql 字符串拼接改为 apply {0} 参数绑定
+        wrapper.apply("id IN (SELECT conversation_id FROM conversation_members WHERE user_id = {0} AND is_deleted = 0)", userId);
 
         return page(page, wrapper);
     }
@@ -132,8 +132,8 @@ public class ConversationServiceImpl extends ServiceImpl<ConversationMapper, Con
                 .orderByDesc(Conversation::getUpdateTime);
 
         // 只搜索用户参与的会话
-        wrapper.inSql(Conversation::getId,
-                "SELECT conversation_id FROM conversation_members WHERE user_id = " + userId + " AND is_deleted = 0");
+        // S11 安全加固：inSql 字符串拼接改为 apply {0} 参数绑定
+        wrapper.apply("id IN (SELECT conversation_id FROM conversation_members WHERE user_id = {0} AND is_deleted = 0)", userId);
 
         return page(page, wrapper);
     }

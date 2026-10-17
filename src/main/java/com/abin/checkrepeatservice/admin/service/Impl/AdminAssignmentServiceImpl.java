@@ -96,17 +96,27 @@ public class AdminAssignmentServiceImpl implements AdminAssignmentService {
                    .eq(PaperInfo::getPaperStatus, DictConstants.PaperStatus.PENDING);
             
             // 关键词搜索
+            // S11 安全修复：inSql 字符串拼接存在 SQL 注入，改用 apply {0} 参数绑定
             if (keyword != null && !keyword.isEmpty()) {
                 wrapper.and(w -> w.like(PaperInfo::getPaperTitle, keyword)
                                  .or()
-                                 .inSql(PaperInfo::getStudentId, 
-                                        "SELECT id FROM sys_user WHERE real_name LIKE '%" + keyword + "%'"));
+                                 .apply("student_id IN (SELECT id FROM sys_user WHERE real_name LIKE CONCAT('%', {0}, '%'))", keyword));
             }
             
             wrapper.orderByDesc(PaperInfo::getCreateTime);
             
             Page<PaperInfo> resultPage = paperInfoMapper.selectPage(paperPage, wrapper);
-            
+
+            // S10 性能修复：批量预载本页学生信息，避免列表内逐条 selectById（N+1）
+            List<Long> studentIds = resultPage.getRecords().stream()
+                    .map(PaperInfo::getStudentId)
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .collect(Collectors.toList());
+            Map<Long, SysUser> studentMap = studentIds.isEmpty() ? new HashMap<>()
+                    : sysUserMapper.selectBatchIds(studentIds).stream()
+                        .collect(Collectors.toMap(SysUser::getId, s -> s));
+
             // 转换为前端需要的格式
             Page<Map<String, Object>> resultMap = new Page<>(resultPage.getCurrent(), resultPage.getSize(), resultPage.getTotal());
             List<Map<String, Object>> records = resultPage.getRecords().stream().map(paper -> {
@@ -114,9 +124,9 @@ public class AdminAssignmentServiceImpl implements AdminAssignmentService {
                 record.put("id", paper.getId());
                 record.put("title", paper.getPaperTitle());
                 record.put("studentId", paper.getStudentId());
-                
-                // 获取学生信息
-                SysUser student = sysUserMapper.selectById(paper.getStudentId());
+
+                // 获取学生信息（取自批量预载 Map）
+                SysUser student = paper.getStudentId() == null ? null : studentMap.get(paper.getStudentId());
                 if (student != null) {
                     record.put("name", student.getRealName());
                     record.put("major", student.getMajorId());

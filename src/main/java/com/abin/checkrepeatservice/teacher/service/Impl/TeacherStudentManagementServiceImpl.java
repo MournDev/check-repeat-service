@@ -56,12 +56,13 @@ public class TeacherStudentManagementServiceImpl implements TeacherStudentManage
             // 添加搜索条件
             if (requestDTO.getSearch() != null && !requestDTO.getSearch().trim().isEmpty()) {
                 // 需要关联查询学生信息
-                queryWrapper.and(wrapper -> 
+                // S11 安全修复：exists 字符串拼接存在 SQL 注入，改用 apply {0} 参数绑定
+                queryWrapper.and(wrapper ->
                     wrapper.like(PaperInfo::getPaperTitle, requestDTO.getSearch())
                            .or()
-                           .exists("SELECT 1 FROM sys_user su WHERE su.id = paper_info.student_id " +
-                                 "AND (su.username LIKE '%" + requestDTO.getSearch() + "%' " +
-                                 "OR su.real_name LIKE '%" + requestDTO.getSearch() + "%')")
+                           .apply("EXISTS (SELECT 1 FROM sys_user su WHERE su.id = paper_info.student_id " +
+                                 "AND (su.username LIKE CONCAT('%', {0}, '%') OR su.real_name LIKE CONCAT('%', {1}, '%')))",
+                                 requestDTO.getSearch(), requestDTO.getSearch())
                 );
             }
 
@@ -76,9 +77,19 @@ public class TeacherStudentManagementServiceImpl implements TeacherStudentManage
             // 执行分页查询
             Page<PaperInfo> paperPage = paperInfoMapper.selectPage(page, queryWrapper);
 
+            // S10 性能修复：批量预载本页学生信息，避免转换时逐条 selectById（N+1）
+            List<Long> studentIds = paperPage.getRecords().stream()
+                    .map(PaperInfo::getStudentId)
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .collect(Collectors.toList());
+            Map<Long, SysUser> studentMap = studentIds.isEmpty() ? new HashMap<>()
+                    : sysUserMapper.selectBatchIds(studentIds).stream()
+                            .collect(Collectors.toMap(SysUser::getId, u -> u));
+
             // 转换为学生列表DTO
             List<StudentListDTO> studentList = paperPage.getRecords().stream()
-                    .map(this::convertToStudentListDTO)
+                    .map(paper -> convertToStudentListDTO(paper, studentMap.get(paper.getStudentId())))
                     .filter(Objects::nonNull)
                     .collect(Collectors.toList());
 
@@ -558,11 +569,12 @@ public class TeacherStudentManagementServiceImpl implements TeacherStudentManage
 
     /**
      * 将PaperInfo转换为StudentListDTO
+     *
+     * @param paperInfo 论文
+     * @param student   由列表层批量预载的学生信息（S10：不再逐条查库），可能为 null
      */
-    private StudentListDTO convertToStudentListDTO(PaperInfo paperInfo) {
+    private StudentListDTO convertToStudentListDTO(PaperInfo paperInfo, SysUser student) {
         try {
-            // 查询学生信息
-            SysUser student = sysUserMapper.selectById(paperInfo.getStudentId());
             if (student == null) {
                 return null;
             }
