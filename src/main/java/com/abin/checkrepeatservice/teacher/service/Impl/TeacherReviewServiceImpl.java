@@ -589,6 +589,12 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
                 dto.setReviewId(review.getId());
             }
 
+            // 2.6 审核意见回显（S12 补链）：正式审核记录优先，
+            // 无 review_record（TeacherDashboard/管理员审核路径）时回退 paper_info.audit_comment
+            String recordOpinion = review == null ? null : review.getReviewOpinion();
+            dto.setFeedback(org.springframework.util.StringUtils.hasText(recordOpinion)
+                    ? recordOpinion : paper.getAuditComment());
+
             return dto;
         }).collect(Collectors.toList());
     }

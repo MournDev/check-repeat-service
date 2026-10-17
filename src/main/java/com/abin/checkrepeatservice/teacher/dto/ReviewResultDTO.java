@@ -36,6 +36,15 @@ public class ReviewResultDTO {
      */
     private ReviewAttachDTO reviewAttach;
 
+    /**
+     * 审核意见（列表回显用）。
+     * 取数口径：优先 review_record.review_opinion（正式审核记录），
+     * 无审核记录或意见为空时回退 paper_info.audit_comment（S12）——
+     * TeacherDashboard 批量/单篇审核、管理员审核只落 audit_comment，不产生 review_record。
+     * 教师端已审列表 AuditRecords.vue 审核意见列按本字段回显。
+     */
+    private String feedback;
+
     // ------------------------------ 内部DTO ------------------------------
     /**
      * 论文基础信息
