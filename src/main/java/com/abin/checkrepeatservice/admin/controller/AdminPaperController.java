@@ -127,7 +127,7 @@ public class AdminPaperController {
      */
     @PostMapping("/batch-audit")
     @OperationLog(type = "admin_paper_batch_audit", description = "管理员批量审核论文", recordResult = true)
-    public Result<String> batchAuditPapers(@RequestBody Map<String, Object> batchAuditRequest) {
+    public Result<Map<String, Object>> batchAuditPapers(@RequestBody Map<String, Object> batchAuditRequest) {
         log.info("接收批量审核论文请求: batchAuditRequest={}", batchAuditRequest);
         try {
             @SuppressWarnings("unchecked")

@@ -242,33 +242,37 @@ public class AdminPaperServiceImpl implements AdminPaperService {
     }
 
     @Override
-    public Result<String> batchAuditPapers(List<Long> paperIds, String auditResult, String auditComment) {
+    public Result<Map<String, Object>> batchAuditPapers(List<Long> paperIds, String auditResult, String auditComment) {
         try {
             int successCount = 0;
-            int failCount = 0;
-            
+            List<String> skipReasons = new ArrayList<>();
+
             for (Long paperId : paperIds) {
                 try {
                     Result<String> result = auditPaper(paperId, auditResult, auditComment);
                     if (result.getCode() == 200) {
                         successCount++;
                     } else {
-                        failCount++;
+                        // 并发窗口：管理员填意见期间论文可能已被教师先审完（40305）等，
+                        // 逐篇跳过并记录原因，不再让单篇业务失败拖垮整批
+                        skipReasons.add("论文" + paperId + "：" + result.getMessage());
                     }
                 } catch (Exception e) {
                     log.error("批量审核单个论文失败: paperId={}", paperId, e);
-                    failCount++;
+                    skipReasons.add("论文" + paperId + "：系统异常，请稍后重试");
                 }
             }
-            
-            String message = String.format("批量审核完成: 成功%d个, 失败%d个", successCount, failCount);
-            log.info(message);
-            
-            if (successCount > 0) {
-                return Result.success(message);
-            } else {
-                return Result.error(ResultCode.SYSTEM_ERROR, "批量审核全部失败");
-            }
+
+            String message = String.format("批量审核完成: 成功%d篇, 跳过%d篇", successCount, skipReasons.size());
+            log.info("{} (auditResult={})", message, auditResult);
+
+            // 对齐答辩批量先例：返回 {total, success, skipped, skipReasons[]} 明细，
+            // 全部跳过也返回明细结构，便于前端逐条展示而非笼统 toast
+            return Result.success(message, Map.of(
+                    "total", paperIds.size(),
+                    "success", successCount,
+                    "skipped", skipReasons.size(),
+                    "skipReasons", skipReasons));
         } catch (Exception e) {
             log.error("批量审核论文失败", e);
             return Result.error(ResultCode.SYSTEM_ERROR, "批量审核论文失败: " + "系统异常，请稍后重试");

@@ -32,9 +32,9 @@ public interface AdminPaperService {
     Result<String> auditPaper(Long paperId, String auditResult, String auditComment);
 
     /**
-     * 批量审核论文
+     * 批量审核论文（逐篇跳过并发冲突，返回 {total, success, skipped, skipReasons[]} 明细）
      */
-    Result<String> batchAuditPapers(List<Long> paperIds, String auditResult, String auditComment);
+    Result<Map<String, Object>> batchAuditPapers(List<Long> paperIds, String auditResult, String auditComment);
 
     /**
      * 删除论文
