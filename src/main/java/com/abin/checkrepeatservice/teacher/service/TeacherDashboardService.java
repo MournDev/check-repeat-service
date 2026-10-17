@@ -78,23 +78,14 @@ public interface TeacherDashboardService {
     Result<Object> getRecentActivities(Long teacherId, Integer page, Integer size);
 
     /**
-     * 导出教师数据
-     * @param teacherId 教师ID
-     * @param startDate 开始日期
-     * @param endDate 结束日期
-     * @return 导出结果
+     * 导出教师数据（S12：EasyExcel 流式写出 xlsx，GET 端点兼容入口）
      */
-    Result<String> exportTeacherData(Long teacherId, String startDate, String endDate);
+    void exportTeacherData(Long teacherId, String startDate, String endDate, jakarta.servlet.http.HttpServletResponse response);
 
     /**
-     * 导出审核数据报表
-     * @param teacherId 教师ID
-     * @param format 导出格式
-     * @param startTime 开始时间
-     * @param endTime 结束时间
-     * @return 导出文件信息
+     * 导出审核数据报表（S12：excel=EasyExcel xlsx / csv=UTF-8 CSV，其他格式明确拒绝）
      */
-    Result<String> exportData(Long teacherId, String format, String startTime, String endTime);
+    void exportData(Long teacherId, String format, String startTime, String endTime, jakarta.servlet.http.HttpServletResponse response);
 
     /**
      * 获取指导学生列表

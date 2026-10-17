@@ -2,6 +2,8 @@ package com.abin.checkrepeatservice.teacher.service.Impl;
 
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
+import com.abin.checkrepeatservice.admin.vo.PaperExportExcelVO;
+import com.alibaba.excel.EasyExcel;
 import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
 import com.abin.checkrepeatservice.pojo.entity.SysUser;
 import com.abin.checkrepeatservice.teacher.dto.BatchReviewDTO;
@@ -11,14 +13,17 @@ import com.abin.checkrepeatservice.teacher.service.TeacherDashboardService;
 import com.abin.checkrepeatservice.user.service.SysUserService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.Resource;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * 教师控制台服务实现类
@@ -349,40 +354,184 @@ public class TeacherDashboardServiceImpl implements TeacherDashboardService {
     }
 
     @Override
-    public Result<String> exportTeacherData(Long teacherId, String startDate, String endDate) {
-        try {
-            // 构建导出文件名
-            String fileName = String.format("teacher_%d_data_%s.xlsx", 
-                teacherId, LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMddHHmmss")));
-            
-            // 这里应该调用实际的数据导出服务
-            // 简化实现，返回模拟的导出结果
-            log.info("教师{}导出数据: startDate={}, endDate={}, fileName={}", teacherId, startDate, endDate, fileName);
-            
-            // 模拟导出过程
-            Thread.sleep(1000); // 模拟处理时间
-            
-            return Result.success("数据导出任务已启动", fileName);
-        } catch (Exception e) {
-            log.error("教师数据导出失败: teacherId={}", teacherId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "数据导出失败: " + e.getMessage());
-        }
+    public void exportTeacherData(Long teacherId, String startDate, String endDate, HttpServletResponse response) {
+        // GET 兼容入口：固定 excel 格式，日期参数语义与 POST 一致（按 create_time 过滤）
+        doExportTeacherPapers(teacherId, "excel", startDate, endDate, response);
     }
 
     @Override
-    public Result<String> exportData(Long teacherId, String format, String startTime, String endTime) {
-        try {
-            // 这里应该调用实际的数据导出服务
-            // 简化实现，返回模拟的导出结果
-            String exportFileName = String.format("teacher_%d_export_%s.%s", 
-                teacherId, LocalDateTime.now().toString().replace(":", "-"), format);
-            
-            log.info("教师{}导出数据: format={}, file={}", teacherId, format, exportFileName);
-            return Result.success("数据导出任务已启动", exportFileName);
-        } catch (Exception e) {
-            log.error("数据导出失败: teacherId={}", teacherId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "数据导出失败: " + e.getMessage());
+    public void exportData(Long teacherId, String format, String startTime, String endTime, HttpServletResponse response) {
+        // 前端以 JSON body 调 POST 端点，@RequestParam 接不到参数时按默认值导出（全量 excel）
+        String fmt = (format == null || format.isBlank()) ? "excel" : format.trim().toLowerCase();
+        if (!"excel".equals(fmt) && !"csv".equals(fmt)) {
+            log.warn("教师{}请求了不支持的导出格式: {}", teacherId, format);
+            writeExportError(response, "暂不支持该导出格式: " + format + "（支持 excel/csv）");
+            return;
         }
+        doExportTeacherPapers(teacherId, fmt, startTime, endTime, response);
+    }
+
+    /**
+     * S12：教师数据导出真实实现——该教师指导的论文明细（EasyExcel xlsx / UTF-8 CSV）。
+     * 时间边界无法解析时跳过该过滤条件（日志告警），不让整次导出失败。
+     */
+    private void doExportTeacherPapers(Long teacherId, String format, String startTime, String endTime,
+                                       HttpServletResponse response) {
+        try {
+            LambdaQueryWrapper<PaperInfo> wrapper = new LambdaQueryWrapper<>();
+            wrapper.eq(PaperInfo::getTeacherId, teacherId)
+                   .eq(PaperInfo::getIsDeleted, 0)
+                   .orderByDesc(PaperInfo::getCreateTime)
+                   .last(" LIMIT 10000 ");
+            LocalDateTime start = parseExportTime(startTime);
+            if (start != null) {
+                wrapper.ge(PaperInfo::getCreateTime, start);
+            } else if (hasText(startTime)) {
+                log.warn("教师数据导出开始时间无法解析，忽略该过滤: {}", startTime);
+            }
+            LocalDateTime end = parseExportTime(endTime);
+            if (end != null) {
+                wrapper.le(PaperInfo::getCreateTime, end);
+            } else if (hasText(endTime)) {
+                log.warn("教师数据导出结束时间无法解析，忽略该过滤: {}", endTime);
+            }
+
+            List<PaperInfo> papers = paperInfoMapper.selectList(wrapper);
+            fillExportNames(papers);
+
+            List<PaperExportExcelVO> rows = papers.stream().map(this::toExportRow).toList();
+            String timestamp = LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+
+            if ("csv".equals(format)) {
+                writeCsv(response, rows, "教师数据统计_" + timestamp + ".csv");
+            } else {
+                response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+                response.setCharacterEncoding("utf-8");
+                response.setHeader("Content-disposition", "attachment;filename=教师数据统计_" + timestamp + ".xlsx");
+                EasyExcel.write(response.getOutputStream(), PaperExportExcelVO.class)
+                        .sheet("教师数据统计")
+                        .doWrite(rows);
+            }
+            log.info("教师{}数据导出成功: format={}, {}行", teacherId, format, rows.size());
+        } catch (Exception e) {
+            log.error("教师数据导出失败: teacherId={}", teacherId, e);
+            writeExportError(response, "数据导出失败：" + e.getMessage());
+        }
+    }
+
+    /** PaperInfo → 导出行（教师端私有映射，列结构与管理员导出一致） */
+    private PaperExportExcelVO toExportRow(PaperInfo p) {
+        PaperExportExcelVO row = new PaperExportExcelVO();
+        row.setPaperTitle(p.getPaperTitle());
+        row.setStudentName(p.getStudentName());
+        row.setStudentUsername(p.getStudentUsername());
+        row.setStudentMajor(p.getStudentMajor());
+        row.setStudentGrade(p.getStudentGrade());
+        row.setTeacherName(p.getTeacherRealName());
+        row.setPaperType(p.getPaperType());
+        row.setPaperStatus(p.getPaperStatus());
+        row.setSimilarityRate(p.getSimilarityRate() == null ? null : p.getSimilarityRate().toPlainString());
+        row.setCheckResult(p.getCheckResult());
+        row.setAuditComment(p.getAuditComment());
+        row.setSubmitTime(p.getSubmitTime() == null ? null
+                : p.getSubmitTime().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
+        return row;
+    }
+
+    /**
+     * 批量回填导出行所需的学生/教师姓名（selectBatchIds 各一次，避免 N+1）。
+     */
+    private void fillExportNames(List<PaperInfo> papers) {
+        if (papers == null || papers.isEmpty()) {
+            return;
+        }
+        List<Long> studentIds = papers.stream().map(PaperInfo::getStudentId).filter(Objects::nonNull).distinct().toList();
+        List<Long> teacherIds = papers.stream().map(PaperInfo::getTeacherId).filter(Objects::nonNull).distinct().toList();
+        Map<Long, SysUser> studentMap = studentIds.isEmpty() ? Map.of()
+                : sysUserService.listByIds(studentIds).stream().collect(Collectors.toMap(SysUser::getId, u -> u));
+        Map<Long, SysUser> teacherMap = teacherIds.isEmpty() ? Map.of()
+                : sysUserService.listByIds(teacherIds).stream().collect(Collectors.toMap(SysUser::getId, u -> u));
+        for (PaperInfo paper : papers) {
+            SysUser student = paper.getStudentId() == null ? null : studentMap.get(paper.getStudentId());
+            if (student != null) {
+                paper.setStudentName(student.getRealName());
+                paper.setStudentUsername(student.getUsername());
+                paper.setStudentGrade(student.getGrade());
+                paper.setStudentMajor(student.getMajor());
+            }
+            SysUser teacher = paper.getTeacherId() == null ? null : teacherMap.get(paper.getTeacherId());
+            if (teacher != null) {
+                paper.setTeacherRealName(teacher.getRealName());
+            }
+        }
+    }
+
+    /** 导出时间边界解析：ISO 日期时间或 yyyy-MM-dd（当天零点）；无法解析返回 null */
+    private LocalDateTime parseExportTime(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String v = value.trim();
+        try {
+            return LocalDateTime.parse(v);
+        } catch (Exception ignore) { /* 尝试下一种格式 */ }
+        try {
+            return LocalDate.parse(v.length() > 10 ? v.substring(0, 10) : v).atStartOfDay();
+        } catch (Exception ignore) { /* 两种格式均不支持 */ }
+        return null;
+    }
+
+    /** 导出失败时写 JSON 错误响应（沿用 AdminAdvisorEvalServiceImpl.export 范式） */
+    private void writeExportError(HttpServletResponse response, String message) {
+        try {
+            response.setContentType("application/json;charset=utf-8");
+            response.getWriter().write("{\"code\":500,\"message\":\"" + message + "\"}");
+        } catch (Exception ex) {
+            log.error("写导出错误响应失败", ex);
+        }
+    }
+
+    /** UTF-8 BOM + 全字段引号转义的 CSV 输出；表头顺序须与 PaperExportExcelVO 保持一致 */
+    private void writeCsv(HttpServletResponse response, List<PaperExportExcelVO> rows, String fileName) throws java.io.IOException {
+        response.setContentType("text/csv;charset=utf-8");
+        response.setCharacterEncoding("utf-8");
+        response.setHeader("Content-disposition", "attachment;filename=" + fileName);
+        java.io.OutputStream os = response.getOutputStream();
+        os.write(new byte[]{(byte) 0xEF, (byte) 0xBB, (byte) 0xBF});
+        StringBuilder sb = new StringBuilder();
+        sb.append("论文标题,作者,学号,专业,年级,指导教师,论文类型,状态,相似度(%),查重结果,审核意见,提交时间\n");
+        for (PaperExportExcelVO r : rows) {
+            sb.append(escapeCsv(r.getPaperTitle())).append(',')
+              .append(escapeCsv(r.getStudentName())).append(',')
+              .append(escapeCsv(r.getStudentUsername())).append(',')
+              .append(escapeCsv(r.getStudentMajor())).append(',')
+              .append(escapeCsv(r.getStudentGrade())).append(',')
+              .append(escapeCsv(r.getTeacherName())).append(',')
+              .append(escapeCsv(r.getPaperType())).append(',')
+              .append(escapeCsv(r.getPaperStatus())).append(',')
+              .append(escapeCsv(r.getSimilarityRate())).append(',')
+              .append(escapeCsv(r.getCheckResult())).append(',')
+              .append(escapeCsv(r.getAuditComment())).append(',')
+              .append(escapeCsv(r.getSubmitTime()))
+              .append('\n');
+        }
+        os.write(sb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        os.flush();
+    }
+
+    /** CSV 字段转义：null→空串；含逗号/引号/换行时用引号包裹并双写内部引号 */
+    private String escapeCsv(String value) {
+        if (value == null) {
+            return "";
+        }
+        if (value.contains(",") || value.contains("\"") || value.contains("\n") || value.contains("\r")) {
+            return '"' + value.replace("\"", "\"\"") + '"';
+        }
+        return value;
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 
     @Override

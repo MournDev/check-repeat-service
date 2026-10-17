@@ -12,6 +12,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.annotation.Resource;
+import jakarta.servlet.http.HttpServletResponse;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -178,16 +179,12 @@ public class AdminPaperController {
     }
 
     /**
-     * 导出论文列表
+     * 导出论文列表（S12：EasyExcel 流式写出 xlsx）
      */
     @GetMapping("/export")
-    public void exportPaperList(@RequestParam Map<String, Object> params) {
+    public void exportPaperList(@RequestParam Map<String, Object> params, HttpServletResponse response) {
         log.info("接收导出论文列表请求: params={}", params);
-        try {
-            adminPaperService.exportPaperList(params);
-        } catch (Exception e) {
-            log.error("导出论文列表失败: {}", e.getMessage(), e);
-        }
+        adminPaperService.exportPaperList(params, response);
     }
     
     /**

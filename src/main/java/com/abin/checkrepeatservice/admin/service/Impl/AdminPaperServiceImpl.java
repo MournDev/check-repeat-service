@@ -17,13 +17,19 @@ import com.abin.checkrepeatservice.common.service.FileService;
 import com.abin.checkrepeatservice.pojo.entity.FileInfo;
 import com.abin.checkrepeatservice.detection.service.EnhancedSimilarityDetectionService;
 import com.abin.checkrepeatservice.detection.dto.SimilarityDetectionResult;
+import com.abin.checkrepeatservice.admin.vo.PaperExportExcelVO;
+import com.abin.checkrepeatservice.common.service.Impl.DictService;
+import com.alibaba.excel.EasyExcel;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.Resource;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -56,6 +62,21 @@ public class AdminPaperServiceImpl implements AdminPaperService {
 
     @Resource
     private PaperStatusLogService paperStatusLogService;
+
+    @Resource
+    private DictService dictService;
+
+    /** 导出时间列格式（与 AdminAdvisorEvalServiceImpl 同口径） */
+    private static final DateTimeFormatter EXPORT_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+
+    /** 论文类型中英文映射（init.sql paper_type 注释口径）；未知值回退原码 */
+    private static final Map<String, String> PAPER_TYPE_LABELS = Map.of(
+            "graduation", "毕业论文",
+            "course", "课程论文",
+            "other", "其他");
+
+    /** 导出单次最大行数，防止全表导出打爆内存 */
+    private static final int EXPORT_MAX_ROWS = 10000;
 
     @Override
     public Result<Page<PaperInfo>> getPaperList(Integer page, Integer size, String paperStatus, 
@@ -331,9 +352,105 @@ public class AdminPaperServiceImpl implements AdminPaperService {
     }
 
     @Override
-    public void exportPaperList(Map<String, Object> params) {
-        // 导出功能暂不实现，可在后续版本中添加
-        log.info("论文列表导出功能暂未实现");
+    public void exportPaperList(Map<String, Object> params, HttpServletResponse response) {
+        try {
+            // S12：导出假实现替换为 EasyExcel 流式真实导出（沿用 AdminAdvisorEvalServiceImpl.export 范式）。
+            // 筛选口径：keyword/grade/checkStatus 与列表页同款；majorId 为精确匹配（前端导出入口传的是 ID）。
+            LambdaQueryWrapper<PaperInfo> wrapper = new LambdaQueryWrapper<>();
+            wrapper.ne(PaperInfo::getPaperStatus, DictConstants.PaperStatus.WITHDRAWN);
+
+            String paperStatus = strParam(params.get("paperStatus"));
+            if (hasText(paperStatus)) {
+                wrapper.eq(PaperInfo::getPaperStatus, paperStatus);
+            }
+
+            String keyword = strParam(params.get("keyword"));
+            if (hasText(keyword)) {
+                wrapper.and(w -> w.like(PaperInfo::getPaperTitle, keyword)
+                                .or()
+                                .like(PaperInfo::getAuthor, keyword)
+                                .or()
+                                .like(PaperInfo::getPaperAbstract, keyword)
+                                .or()
+                                .apply("student_id IN (SELECT id FROM sys_user WHERE real_name LIKE CONCAT('%', {0}, '%') AND is_deleted = 0)", keyword));
+            }
+
+            String majorId = strParam(params.get("majorId"));
+            if (hasText(majorId)) {
+                wrapper.eq(PaperInfo::getMajorId, Long.valueOf(majorId));
+            }
+
+            String grade = strParam(params.get("grade"));
+            if (hasText(grade)) {
+                wrapper.apply("student_id IN (SELECT id FROM sys_user WHERE grade = {0} AND is_deleted = 0)", grade);
+            }
+
+            String checkStatus = strParam(params.get("checkStatus"));
+            if (hasText(checkStatus) && CheckStatusFilterEnum.isValidCode(checkStatus)) {
+                addCheckStatusCondition(wrapper, checkStatus);
+            }
+
+            wrapper.eq(PaperInfo::getIsDeleted, 0);
+            wrapper.orderByDesc(PaperInfo::getCreateTime);
+            wrapper.last(" LIMIT " + EXPORT_MAX_ROWS);
+
+            List<PaperInfo> papers = paperInfoMapper.selectList(wrapper);
+            enhancePaperList(papers);
+
+            // 状态列字典中文化，缺失回退原码；论文类型走固定映射
+            Map<String, String> statusLabels = dictService.getDictValueMap(DictConstants.DICT_PAPER_STATUS);
+            List<PaperExportExcelVO> rows = papers.stream().map(p -> {
+                PaperExportExcelVO row = new PaperExportExcelVO();
+                row.setPaperTitle(p.getPaperTitle());
+                row.setStudentName(p.getStudentName());
+                row.setStudentUsername(p.getStudentUsername());
+                row.setStudentMajor(p.getStudentMajor());
+                row.setStudentGrade(p.getStudentGrade());
+                row.setTeacherName(p.getTeacherRealName());
+                row.setPaperType(p.getPaperType() == null ? null
+                        : PAPER_TYPE_LABELS.getOrDefault(p.getPaperType(), p.getPaperType()));
+                row.setPaperStatus(p.getPaperStatus() == null ? null
+                        : statusLabels.getOrDefault(p.getPaperStatus(), p.getPaperStatus()));
+                row.setSimilarityRate(p.getSimilarityRate() == null ? null : p.getSimilarityRate().toPlainString());
+                row.setCheckResult(p.getCheckResult());
+                row.setAuditComment(p.getAuditComment());
+                row.setSubmitTime(p.getSubmitTime() == null ? null : p.getSubmitTime().format(EXPORT_TIME_FORMATTER));
+                return row;
+            }).toList();
+
+            response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+            response.setCharacterEncoding("utf-8");
+            String fileName = "论文列表_" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+            response.setHeader("Content-disposition", "attachment;filename=" + fileName + ".xlsx");
+            EasyExcel.write(response.getOutputStream(), PaperExportExcelVO.class)
+                    .sheet("论文列表")
+                    .doWrite(rows);
+            log.info("导出论文列表成功: {}行", rows.size());
+        } catch (Exception e) {
+            log.error("导出论文列表失败", e);
+            writeExportError(response, "导出失败：" + e.getMessage());
+        }
+    }
+
+    /**
+     * 导出失败时按既有范式写 JSON 错误响应（response 可能已部分写入，只能尽力提示）。
+     */
+    private void writeExportError(HttpServletResponse response, String message) {
+        try {
+            response.setContentType("application/json;charset=utf-8");
+            response.getWriter().write("{\"code\":500,\"message\":\"" + message + "\"}");
+        } catch (Exception ex) {
+            log.error("写导出错误响应失败", ex);
+        }
+    }
+
+    /** Map 入参取 String（导出入口为 query string，值均为字符串） */
+    private static String strParam(Object value) {
+        return value == null ? null : String.valueOf(value).trim();
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
     
     @Override

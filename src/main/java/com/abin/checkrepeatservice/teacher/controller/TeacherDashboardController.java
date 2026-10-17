@@ -12,6 +12,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -224,22 +225,18 @@ public class TeacherDashboardController {
     }
 
     /**
-     * 6. 教师数据导出接口
+     * 6. 教师数据导出接口（S12：EasyExcel 流式输出 xlsx）
      * GET /api/teacher/export/data
      */
     @GetMapping("/export/data")
     @Operation(summary = "导出教师相关统计数据", description = "导出教师相关统计数据为Excel文件")
-    public Result<String> exportTeacherData(
+    public void exportTeacherData(
             @Parameter(description = "教师ID") @RequestParam Long teacherId,
             @Parameter(description = "开始日期") @RequestParam(required = false) String startDate,
-            @Parameter(description = "结束日期") @RequestParam(required = false) String endDate) {
-        try {
-            log.info("教师{}请求导出数据: startDate={}, endDate={}", teacherId, startDate, endDate);
-            return teacherDashboardService.exportTeacherData(teacherId, startDate, endDate);
-        } catch (Exception e) {
-            log.error("教师数据导出失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "数据导出失败: " + e.getMessage());
-        }
+            @Parameter(description = "结束日期") @RequestParam(required = false) String endDate,
+            HttpServletResponse response) {
+        log.info("教师{}请求导出数据: startDate={}, endDate={}", teacherId, startDate, endDate);
+        teacherDashboardService.exportTeacherData(teacherId, startDate, endDate, response);
     }
 
     /**
@@ -262,23 +259,19 @@ public class TeacherDashboardController {
     }
 
     /**
-     * 8. 数据导出接口
+     * 8. 数据导出接口（S12：excel=EasyExcel xlsx / csv=UTF-8 CSV，前端实际调用方）
      * POST /api/teacher/export/data
      */
     @PostMapping("/export/data")
-    @Operation(summary = "导出审核数据报表", description = "导出审核数据为Excel或PDF格式")
-    public Result<String> exportData(
+    @Operation(summary = "导出审核数据报表", description = "导出审核数据为Excel或CSV格式")
+    public void exportData(
             @Parameter(description = "导出格式") @RequestParam(defaultValue = "excel") String format,
             @Parameter(description = "开始时间") @RequestParam(required = false) String startTime,
-            @Parameter(description = "结束时间") @RequestParam(required = false) String endTime) {
-        try {
-            Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
-            log.info("教师{}请求导出数据: format={}, startTime={}, endTime={}", teacherId, format, startTime, endTime);
-            return teacherDashboardService.exportData(teacherId, format, startTime, endTime);
-        } catch (Exception e) {
-            log.error("数据导出失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "数据导出失败: " + e.getMessage());
-        }
+            @Parameter(description = "结束时间") @RequestParam(required = false) String endTime,
+            HttpServletResponse response) {
+        Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
+        log.info("教师{}请求导出数据: format={}, startTime={}, endTime={}", teacherId, format, startTime, endTime);
+        teacherDashboardService.exportData(teacherId, format, startTime, endTime, response);
     }
 
     /**

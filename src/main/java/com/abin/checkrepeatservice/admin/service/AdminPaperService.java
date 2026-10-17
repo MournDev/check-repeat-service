@@ -3,6 +3,7 @@ package com.abin.checkrepeatservice.admin.service;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import jakarta.servlet.http.HttpServletResponse;
 
 import java.util.List;
 import java.util.Map;
@@ -46,9 +47,9 @@ public interface AdminPaperService {
     Result<Map<String, Object>> getPaperStatistics();
 
     /**
-     * 导出论文列表
+     * 导出论文列表（S12：EasyExcel 流式写出 xlsx；筛选口径见实现）
      */
-    void exportPaperList(Map<String, Object> params);
+    void exportPaperList(Map<String, Object> params, HttpServletResponse response);
     
     /**
      * 下载论文文件
