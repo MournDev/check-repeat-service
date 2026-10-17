@@ -8,10 +8,12 @@ import com.abin.checkrepeatservice.teacher.vo.SimilarityDistributionVO;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 @Mapper
 public interface PaperInfoMapper extends BaseMapper<PaperInfo> {
@@ -65,4 +67,26 @@ public interface PaperInfoMapper extends BaseMapper<PaperInfo> {
      * 获取专业论文分布统计（管理员用）
      */
     List<MajorPaperStatsVO> selectMajorPaperStats();
+
+    /**
+     * S14：论文按状态聚合（单条 GROUP BY），替代管理端论文统计/仪表盘原先十多次 selectCount。
+     * <p>每个状态一行：cnt=该状态未删论文总数；todayCnt/weekCnt/monthCnt=对应时间点及以后新增数，
+     * 时间入参传 null 时对应列返回 0（论文状态为 NULL 的存量行也会单独成组，计入总数）。</p>
+     */
+    @Select("""
+            SELECT paper_status AS status,
+                   COUNT(*) AS cnt,
+                   SUM(CASE WHEN #{todayStart} IS NOT NULL AND create_time >= #{todayStart}
+                            THEN 1 ELSE 0 END) AS todayCnt,
+                   SUM(CASE WHEN #{weekStart} IS NOT NULL AND create_time >= #{weekStart}
+                            THEN 1 ELSE 0 END) AS weekCnt,
+                   SUM(CASE WHEN #{monthStart} IS NOT NULL AND create_time >= #{monthStart}
+                            THEN 1 ELSE 0 END) AS monthCnt
+            FROM paper_info
+            WHERE is_deleted = 0
+            GROUP BY paper_status
+            """)
+    List<Map<String, Object>> selectPaperStatusStats(@Param("todayStart") LocalDateTime todayStart,
+                                                     @Param("weekStart") LocalDateTime weekStart,
+                                                     @Param("monthStart") LocalDateTime monthStart);
 }

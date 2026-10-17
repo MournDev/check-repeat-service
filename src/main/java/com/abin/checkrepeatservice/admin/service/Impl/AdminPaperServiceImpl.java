@@ -299,50 +299,39 @@ public class AdminPaperServiceImpl implements AdminPaperService {
     @Override
     public Result<Map<String, Object>> getPaperStatistics() {
         try {
-            Map<String, Object> stats = new HashMap<>();
-            
-            // 总论文数
-            Long totalPapers = paperInfoMapper.selectCount(
-                new LambdaQueryWrapper<PaperInfo>().eq(PaperInfo::getIsDeleted, 0));
-            stats.put("totalPapers", totalPapers);
-            
-            // 各状态论文数
-            Map<String, Long> statusStats = new HashMap<>();
-            statusStats.put("pending", paperInfoMapper.selectCount(
-                new LambdaQueryWrapper<PaperInfo>()
-                    .eq(PaperInfo::getPaperStatus, DictConstants.PaperStatus.PENDING)
-                    .eq(PaperInfo::getIsDeleted, 0)));
-            statusStats.put("assigned", paperInfoMapper.selectCount(
-                new LambdaQueryWrapper<PaperInfo>()
-                    .eq(PaperInfo::getPaperStatus, DictConstants.PaperStatus.ASSIGNED)
-                    .eq(PaperInfo::getIsDeleted, 0)));
-            statusStats.put("checking", paperInfoMapper.selectCount(
-                new LambdaQueryWrapper<PaperInfo>()
-                    .eq(PaperInfo::getPaperStatus, DictConstants.PaperStatus.CHECKING)
-                    .eq(PaperInfo::getIsDeleted, 0)));
-            statusStats.put("auditing", paperInfoMapper.selectCount(
-                new LambdaQueryWrapper<PaperInfo>()
-                    .eq(PaperInfo::getPaperStatus, DictConstants.PaperStatus.AUDITING)
-                    .eq(PaperInfo::getIsDeleted, 0)));
-            statusStats.put("completed", paperInfoMapper.selectCount(
-                new LambdaQueryWrapper<PaperInfo>()
-                    .eq(PaperInfo::getPaperStatus, DictConstants.PaperStatus.COMPLETED)
-                    .eq(PaperInfo::getIsDeleted, 0)));
-            statusStats.put("rejected", paperInfoMapper.selectCount(
-                new LambdaQueryWrapper<PaperInfo>()
-                    .eq(PaperInfo::getPaperStatus, DictConstants.PaperStatus.REJECTED)
-                    .eq(PaperInfo::getIsDeleted, 0)));
-            
-            stats.put("statusStats", statusStats);
-            
-            // 今日新增论文数
+            // S14：原 总数+6 个状态+今日新增共 8 次 selectCount，合并为一条 GROUP BY 聚合
             LocalDateTime todayStart = LocalDateTime.now().withHour(0).withMinute(0).withSecond(0);
-            Long todayPapers = paperInfoMapper.selectCount(
-                new LambdaQueryWrapper<PaperInfo>()
-                    .ge(PaperInfo::getCreateTime, todayStart)
-                    .eq(PaperInfo::getIsDeleted, 0));
+            List<Map<String, Object>> rows =
+                    paperInfoMapper.selectPaperStatusStats(todayStart, null, null);
+
+            long totalPapers = 0L;
+            long todayPapers = 0L;
+            Map<String, Long> countByStatus = new HashMap<>();
+            for (Map<String, Object> row : rows) {
+                long cnt = row.get("cnt") == null ? 0L : ((Number) row.get("cnt")).longValue();
+                totalPapers += cnt;
+                if (row.get("todayCnt") != null) {
+                    todayPapers += ((Number) row.get("todayCnt")).longValue();
+                }
+                Object status = row.get("status");
+                if (status != null) {
+                    countByStatus.put(status.toString(), cnt);
+                }
+            }
+
+            Map<String, Long> statusStats = new HashMap<>();
+            statusStats.put("pending", countByStatus.getOrDefault(DictConstants.PaperStatus.PENDING, 0L));
+            statusStats.put("assigned", countByStatus.getOrDefault(DictConstants.PaperStatus.ASSIGNED, 0L));
+            statusStats.put("checking", countByStatus.getOrDefault(DictConstants.PaperStatus.CHECKING, 0L));
+            statusStats.put("auditing", countByStatus.getOrDefault(DictConstants.PaperStatus.AUDITING, 0L));
+            statusStats.put("completed", countByStatus.getOrDefault(DictConstants.PaperStatus.COMPLETED, 0L));
+            statusStats.put("rejected", countByStatus.getOrDefault(DictConstants.PaperStatus.REJECTED, 0L));
+
+            Map<String, Object> stats = new HashMap<>();
+            stats.put("totalPapers", totalPapers);
+            stats.put("statusStats", statusStats);
             stats.put("todayPapers", todayPapers);
-            
+
             log.info("获取论文统计信息成功");
             return Result.success("论文统计信息获取成功", stats);
         } catch (Exception e) {
