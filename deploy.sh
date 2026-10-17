@@ -16,8 +16,10 @@ COMPOSE_FILE="docker-compose.prod.yml"
 IMAGE_NAME="check-repeat-service"
 CONTAINER_NAME="check-backend"
 HEALTH_URL="http://localhost:8080/check/actuator/health"
-HEALTH_RETRIES=30
-HEALTH_INTERVAL=5
+# 健康检查：默认 72 次 × 5 秒 = 360 秒（应用类多、启动已超过旧的 150 秒上限，
+# 且随代码量增长会继续变慢）。可用环境变量覆盖，如 HEALTH_RETRIES=120 ./deploy.sh 71
+HEALTH_RETRIES="${HEALTH_RETRIES:-72}"
+HEALTH_INTERVAL="${HEALTH_INTERVAL:-5}"
 KEEP_IMAGES=3
 
 TAG="${1:-}"
