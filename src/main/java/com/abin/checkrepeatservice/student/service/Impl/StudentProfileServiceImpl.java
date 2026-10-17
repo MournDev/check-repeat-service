@@ -89,7 +89,7 @@ public class StudentProfileServiceImpl implements StudentProfileService {
             return Result.success("获取个人资料成功", profile);
         } catch (Exception e) {
             log.error("获取学生个人资料失败: studentId={}", studentId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取个人资料失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取个人资料失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -145,7 +145,7 @@ public class StudentProfileServiceImpl implements StudentProfileService {
             return Result.success("个人资料更新成功");
         } catch (Exception e) {
             log.error("更新学生个人资料失败: studentId={}", studentId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "个人资料更新失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "个人资料更新失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -171,7 +171,7 @@ public class StudentProfileServiceImpl implements StudentProfileService {
             return Result.success("获取导师信息成功", advisorInfo);
         } catch (Exception e) {
             log.error("获取导师信息失败: studentId={}", studentId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取导师信息失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取导师信息失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -213,7 +213,7 @@ public class StudentProfileServiceImpl implements StudentProfileService {
             }
         } catch (Exception e) {
             log.error("发送消息给导师失败: studentId={}, advisorId={}", studentId, advisorId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "消息发送失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "消息发送失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -243,7 +243,7 @@ public class StudentProfileServiceImpl implements StudentProfileService {
             return Result.success("获取沟通记录成功", history);
         } catch (Exception e) {
             log.error("获取沟通记录失败: studentId={}, advisorId={}", studentId, advisorId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取沟通记录失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取沟通记录失败: " + "系统异常，请稍后重试");
         }
     }
     

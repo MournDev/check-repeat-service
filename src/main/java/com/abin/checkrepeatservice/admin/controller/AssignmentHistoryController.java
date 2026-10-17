@@ -40,7 +40,7 @@ public class AssignmentHistoryController {
             return assignmentHistoryService.getAssignmentHistoryStats();
         } catch (Exception e) {
             log.error("获取分配记录统计信息失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取分配记录统计信息失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取分配记录统计信息失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -66,7 +66,7 @@ public class AssignmentHistoryController {
                     startDate, endDate, assignmentType, major, status, keyword, page, size);
         } catch (Exception e) {
             log.error("获取分配记录列表失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取分配记录列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取分配记录列表失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -80,7 +80,7 @@ public class AssignmentHistoryController {
             return assignmentHistoryService.deleteAssignmentRecords(request);
         } catch (Exception e) {
             log.error("删除分配记录失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "删除分配记录失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "删除分配记录失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -94,7 +94,7 @@ public class AssignmentHistoryController {
             return assignmentHistoryService.revokeAssignment(request);
         } catch (Exception e) {
             log.error("撤销指导老师分配失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "撤销指导老师分配失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "撤销指导老师分配失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -109,7 +109,7 @@ public class AssignmentHistoryController {
             return assignmentHistoryService.reassignTeacher(request);
         } catch (Exception e) {
             log.error("重新分配指导老师失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "重新分配指导老师失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "重新分配指导老师失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -123,7 +123,7 @@ public class AssignmentHistoryController {
             return assignmentHistoryService.getAvailableTeachers();
         } catch (Exception e) {
             log.error("获取可用教师列表失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取可用教师列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取可用教师列表失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -168,7 +168,7 @@ public class AssignmentHistoryController {
             return assignmentHistoryService.refreshAssignmentData();
         } catch (Exception e) {
             log.error("刷新分配记录数据失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "刷新分配记录数据失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "刷新分配记录数据失败: " + "系统异常，请稍后重试");
         }
     }
 }

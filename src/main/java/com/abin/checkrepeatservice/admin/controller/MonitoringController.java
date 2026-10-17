@@ -88,7 +88,7 @@ public class MonitoringController {
             return Result.success("系统监控概览获取成功", overview);
         } catch (Exception e) {
             log.error("获取系统监控概览失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取系统监控概览失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取系统监控概览失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -112,7 +112,7 @@ public class MonitoringController {
             return result;
         } catch (Exception e) {
             log.error("获取数据库监控信息失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取数据库监控信息失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取数据库监控信息失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -129,7 +129,7 @@ public class MonitoringController {
             return applicationMonitorService.getApplicationMetrics();
         } catch (Exception e) {
             log.error("获取应用性能指标失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取应用性能指标失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取应用性能指标失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -174,7 +174,7 @@ public class MonitoringController {
 
         } catch (Exception e) {
             log.error("获取系统性能监控数据失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取系统性能监控数据失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取系统性能监控数据失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -233,7 +233,7 @@ public class MonitoringController {
 
         } catch (Exception e) {
             log.error("获取当前资源使用率失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取当前资源使用率失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取当前资源使用率失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -250,7 +250,7 @@ public class MonitoringController {
             return applicationMonitorService.getCacheMetrics();
         } catch (Exception e) {
             log.error("获取缓存性能指标失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取缓存性能指标失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取缓存性能指标失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -283,7 +283,7 @@ public class MonitoringController {
 
         } catch (Exception e) {
             log.error("获取业务指标失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取业务指标失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取业务指标失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -318,7 +318,7 @@ public class MonitoringController {
 
         } catch (Exception e) {
             log.error("获取响应时间趋势失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取响应时间趋势失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取响应时间趋势失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -344,7 +344,7 @@ public class MonitoringController {
 
         } catch (Exception e) {
             log.error("获取API响应时间统计失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取API响应时间统计失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取API响应时间统计失败: " + "系统异常，请稍后重试");
         }
     }
 

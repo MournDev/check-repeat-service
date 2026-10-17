@@ -55,7 +55,7 @@ public class StudentMessageController {
             return Result.success("获取会话列表成功", sessions);
         } catch (Exception e) {
             log.error("获取消息会话列表失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取会话列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取会话列表失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -78,7 +78,7 @@ public class StudentMessageController {
             return Result.success("获取消息列表成功", messages);
         } catch (Exception e) {
             log.error("获取消息列表失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取消息列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取消息列表失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -98,7 +98,7 @@ public class StudentMessageController {
             return Result.success("消息发送成功", message);
         } catch (Exception e) {
             log.error("发送消息失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "消息发送失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "消息发送失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -118,7 +118,7 @@ public class StudentMessageController {
             return Result.success("文件上传成功", fileVO);
         } catch (Exception e) {
             log.error("文件上传失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "文件上传失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "文件上传失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -173,7 +173,7 @@ public class StudentMessageController {
             return Result.success("清空消息成功");
         } catch (Exception e) {
             log.error("清空消息失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "清空消息失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "清空消息失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -224,7 +224,7 @@ public class StudentMessageController {
             return Result.success("获取共享文件列表成功", files);
         } catch (Exception e) {
             log.error("获取共享文件列表失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取共享文件列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取共享文件列表失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -279,7 +279,7 @@ public class StudentMessageController {
             return Result.success("标记消息已读成功");
         } catch (Exception e) {
             log.error("标记消息已读失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "标记消息已读失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "标记消息已读失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -311,7 +311,7 @@ public class StudentMessageController {
             return Result.success("消息撤回成功");
         } catch (Exception e) {
             log.error("撤回消息失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "消息撤回失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "消息撤回失败: " + "系统异常，请稍后重试");
         }
     }
 

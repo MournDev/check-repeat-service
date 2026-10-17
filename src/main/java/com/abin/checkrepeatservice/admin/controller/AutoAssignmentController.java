@@ -40,7 +40,7 @@ public class AutoAssignmentController {
             return autoAssignmentService.getAlgorithmConfig();
         } catch (Exception e) {
             log.error("获取算法配置失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取算法配置失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取算法配置失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -55,7 +55,7 @@ public class AutoAssignmentController {
             return autoAssignmentService.saveAlgorithmConfig(config);
         } catch (Exception e) {
             log.error("保存算法配置失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "保存算法配置失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "保存算法配置失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -70,7 +70,7 @@ public class AutoAssignmentController {
             return autoAssignmentService.getAssignmentPreview();
         } catch (Exception e) {
             log.error("获取分配预览数据失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取分配预览数据失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取分配预览数据失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -85,7 +85,7 @@ public class AutoAssignmentController {
             return autoAssignmentService.startAutoAssignment(request);
         } catch (Exception e) {
             log.error("启动自动分配失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "启动自动分配失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "启动自动分配失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -100,7 +100,7 @@ public class AutoAssignmentController {
             return autoAssignmentService.getAssignmentProgress(taskId);
         } catch (Exception e) {
             log.error("查询分配进度失败: taskId={}, error={}", taskId, e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "查询分配进度失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "查询分配进度失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -115,7 +115,7 @@ public class AutoAssignmentController {
             return autoAssignmentService.cancelAssignmentTask(taskId);
         } catch (Exception e) {
             log.error("取消分配任务失败: taskId={}, error={}", taskId, e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "取消分配任务失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "取消分配任务失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -132,7 +132,7 @@ public class AutoAssignmentController {
             return autoAssignmentService.getAssignmentHistory(page, size);
         } catch (Exception e) {
             log.error("获取执行历史列表失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取执行历史列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取执行历史列表失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -147,7 +147,7 @@ public class AutoAssignmentController {
             return autoAssignmentService.getAssignmentDetail(id);
         } catch (Exception e) {
             log.error("获取执行详情失败: id={}, error={}", id, e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取执行详情失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取执行详情失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -162,7 +162,7 @@ public class AutoAssignmentController {
             return autoAssignmentService.applyAssignmentResult(id);
         } catch (Exception e) {
             log.error("应用分配结果失败: id={}, error={}", id, e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "应用分配结果失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "应用分配结果失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -177,7 +177,7 @@ public class AutoAssignmentController {
             return autoAssignmentService.refreshBaseData();
         } catch (Exception e) {
             log.error("刷新基础数据失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "刷新基础数据失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "刷新基础数据失败: " + "系统异常，请稍后重试");
         }
     }
 }

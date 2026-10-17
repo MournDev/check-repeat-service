@@ -36,7 +36,7 @@ public class CheckHistoryController {
             return Result.success("获取查重历史记录成功", history);
         } catch (Exception e) {
             log.error("获取查重历史记录失败 - 论文ID: {}", paperId, e);
-            return Result.error(500, "获取查重历史记录失败: " + e.getMessage());
+            return Result.error(500, "获取查重历史记录失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -54,7 +54,7 @@ public class CheckHistoryController {
             return Result.success("获取相似度趋势数据成功", trend);
         } catch (Exception e) {
             log.error("获取相似度趋势数据失败 - 论文ID: {}", paperId, e);
-            return Result.error(500, "获取相似度趋势数据失败: " + e.getMessage());
+            return Result.error(500, "获取相似度趋势数据失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -72,7 +72,7 @@ public class CheckHistoryController {
             return Result.success("版本对比分析成功", comparison);
         } catch (Exception e) {
             log.error("版本对比分析失败 - 论文ID: {}", paperId, e);
-            return Result.error(500, "版本对比分析失败: " + e.getMessage());
+            return Result.error(500, "版本对比分析失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -88,7 +88,7 @@ public class CheckHistoryController {
             return Result.success("获取统计分析数据成功", statistics);
         } catch (Exception e) {
             log.error("获取统计分析数据失败 - 论文ID: {}", paperId, e);
-            return Result.error(500, "获取统计分析数据失败: " + e.getMessage());
+            return Result.error(500, "获取统计分析数据失败: " + "系统异常，请稍后重试");
         }
     }
 }

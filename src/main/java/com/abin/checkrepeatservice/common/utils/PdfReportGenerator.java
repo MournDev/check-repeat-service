@@ -310,8 +310,8 @@ public class PdfReportGenerator {
             }
         } catch (IOException e) {
             log.error("加载字体文件失败，路径：{}", fontPath, e);
-            throw new BusinessException(ResultCode.PARAM_ERROR,
-                    "加载字体文件失败：" + e.getMessage());
+            // S15：内部字体路径/IO 细节不外泄给客户端，详情见服务端日志
+            throw new BusinessException(ResultCode.SYSTEM_ERROR, "报告生成失败，请稍后重试");
         }
     }
 

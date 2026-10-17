@@ -96,7 +96,7 @@ public class DatabaseMonitorService {
         } catch (Exception e) {
             log.error("获取数据库监控数据失败", e);
             return Result.error(com.abin.checkrepeatservice.common.enums.ResultCode.SYSTEM_ERROR,
-                              "获取数据库监控数据失败: " + e.getMessage());
+                              "获取数据库监控数据失败: 系统异常，请稍后重试");
         }
     }
 

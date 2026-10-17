@@ -87,7 +87,7 @@ public class SystemConfigServiceImpl implements SystemConfigService {
             
         } catch (Exception e) {
             log.error("更新性能配置失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "性能配置更新失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "性能配置更新失败: " + "系统异常，请稍后重试");
         }
     }
     
@@ -107,7 +107,7 @@ public class SystemConfigServiceImpl implements SystemConfigService {
             
         } catch (Exception e) {
             log.error("获取性能配置失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取性能配置失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取性能配置失败: " + "系统异常，请稍后重试");
         }
     }
     

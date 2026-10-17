@@ -165,7 +165,7 @@ public class TeacherPaperPreviewController {
 
         } catch (Exception e) {
             log.error("获取论文预览信息失败 - 论文ID: {}", paperId, e);
-            return Result.error(500, "获取预览信息失败: " + e.getMessage());
+            return Result.error(500, "获取预览信息失败: " + "系统异常，请稍后重试");
         }
     }
 

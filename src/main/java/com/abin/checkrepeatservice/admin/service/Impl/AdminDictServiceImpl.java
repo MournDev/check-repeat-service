@@ -130,8 +130,8 @@ public class AdminDictServiceImpl implements AdminDictService {
             return Result.success("专业名称映射获取成功", majorMap);
         } catch (Exception e) {
             log.error("获取专业名称映射失败: {}", e.getMessage(), e);
-            return Result.error(com.abin.checkrepeatservice.common.enums.ResultCode.SYSTEM_ERROR, 
-                              "获取专业名称映射失败: " + e.getMessage());
+            return Result.error(com.abin.checkrepeatservice.common.enums.ResultCode.SYSTEM_ERROR,
+                              "获取专业名称映射失败: 系统异常，请稍后重试");
         }
     }
 }

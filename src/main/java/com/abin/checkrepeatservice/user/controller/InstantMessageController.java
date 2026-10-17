@@ -38,7 +38,7 @@ public class InstantMessageController {
             
         } catch (Exception e) {
             log.error("发送即时消息失败", e);
-            return Result.error(500, "消息发送失败: " + e.getMessage());
+            return Result.error(500, "消息发送失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -55,7 +55,7 @@ public class InstantMessageController {
             
         } catch (Exception e) {
             log.error("获取会话列表失败", e);
-            return Result.error(500, "获取会话列表失败: " + e.getMessage());
+            return Result.error(500, "获取会话列表失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -75,7 +75,7 @@ public class InstantMessageController {
             
         } catch (Exception e) {
             log.error("获取会话消息历史失败", e);
-            return Result.error(500, "获取消息历史失败: " + e.getMessage());
+            return Result.error(500, "获取消息历史失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -96,7 +96,7 @@ public class InstantMessageController {
             
         } catch (Exception e) {
             log.error("获取私信历史失败", e);
-            return Result.error(500, "获取私信历史失败: " + e.getMessage());
+            return Result.error(500, "获取私信历史失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -113,7 +113,7 @@ public class InstantMessageController {
             
         } catch (Exception e) {
             log.error("获取未读消息数量失败", e);
-            return Result.error(500, "获取未读消息数量失败: " + e.getMessage());
+            return Result.error(500, "获取未读消息数量失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -130,7 +130,7 @@ public class InstantMessageController {
             
         } catch (Exception e) {
             log.error("标记消息已读失败", e);
-            return Result.error(500, "标记已读失败: " + e.getMessage());
+            return Result.error(500, "标记已读失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -147,7 +147,7 @@ public class InstantMessageController {
             
         } catch (Exception e) {
             log.error("删除消息失败", e);
-            return Result.error(500, "删除消息失败: " + e.getMessage());
+            return Result.error(500, "删除消息失败: " + "系统异常，请稍后重试");
         }
     }
 }

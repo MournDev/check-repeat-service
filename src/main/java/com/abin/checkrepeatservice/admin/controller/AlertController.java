@@ -62,7 +62,7 @@ public class AlertController {
             
         } catch (Exception e) {
             log.error("获取智能预警配置失败: {}", e.getMessage(), e);
-            return Result.error(500, "获取智能预警配置失败: " + e.getMessage());
+            return Result.error(500, "获取智能预警配置失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -80,7 +80,7 @@ public class AlertController {
             return Result.success("智能预警配置更新成功");
         } catch (Exception e) {
             log.error("更新智能预警配置失败: {}", e.getMessage(), e);
-            return Result.error(500, "更新智能预警配置失败: " + e.getMessage());
+            return Result.error(500, "更新智能预警配置失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -116,7 +116,7 @@ public class AlertController {
             
         } catch (Exception e) {
             log.error("获取当前活跃预警信息失败: {}", e.getMessage(), e);
-            return Result.error(500, "获取当前活跃预警信息失败: " + e.getMessage());
+            return Result.error(500, "获取当前活跃预警信息失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -135,7 +135,7 @@ public class AlertController {
             return Result.success("预警处理成功");
         } catch (Exception e) {
             log.error("处理预警失败: {}", e.getMessage(), e);
-            return Result.error(500, "处理预警失败: " + e.getMessage());
+            return Result.error(500, "处理预警失败: " + "系统异常，请稍后重试");
         }
     }
 

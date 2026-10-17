@@ -70,7 +70,7 @@ public class NoticeController {
                     userId, noticeType, isRead, priority, pageNum, pageSize));
         } catch (Exception e) {
             log.error("查询通知列表失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "查询通知列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "查询通知列表失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -85,7 +85,7 @@ public class NoticeController {
             return Result.success(sysNoticeService.getNoticeStats(userId));
         } catch (Exception e) {
             log.error("查询通知统计失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "查询通知统计失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "查询通知统计失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -99,7 +99,7 @@ public class NoticeController {
             return Result.success(sysNoticeService.getUnreadNoticeCount(userId));
         } catch (Exception e) {
             log.error("查询未读通知数失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "查询未读通知数失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "查询未读通知数失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -114,7 +114,7 @@ public class NoticeController {
             return Result.success(sysNoticeService.getUnreadCountByPriority(userId));
         } catch (Exception e) {
             log.error("按优先级查询未读通知数失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "按优先级查询未读通知数失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "按优先级查询未读通知数失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -128,7 +128,7 @@ public class NoticeController {
             return Result.success(sysNoticeService.getLatestNotices(userId, limit));
         } catch (Exception e) {
             log.error("查询最新通知失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "查询最新通知失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "查询最新通知失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -150,7 +150,7 @@ public class NoticeController {
             return Result.success("已标记为已读", null);
         } catch (Exception e) {
             log.error("标记通知已读失败: noticeId={}, {}", noticeId, e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "标记通知已读失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "标记通知已读失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -172,7 +172,7 @@ public class NoticeController {
             return Result.success("已标记 " + rows + " 条通知为已读", rows);
         } catch (Exception e) {
             log.error("批量标记通知已读失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "批量标记通知已读失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "批量标记通知已读失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -188,7 +188,7 @@ public class NoticeController {
             return Result.success("已将 " + rows + " 条通知标记为已读", rows);
         } catch (Exception e) {
             log.error("全部标记通知已读失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "全部标记通知已读失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "全部标记通知已读失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -210,7 +210,7 @@ public class NoticeController {
             return Result.success("已删除该通知", null);
         } catch (Exception e) {
             log.error("删除通知失败: noticeId={}, {}", noticeId, e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "删除通知失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "删除通知失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -232,7 +232,7 @@ public class NoticeController {
             return Result.success("已删除 " + rows + " 条通知", rows);
         } catch (Exception e) {
             log.error("批量删除通知失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "批量删除通知失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "批量删除通知失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -249,7 +249,7 @@ public class NoticeController {
             return Result.success("已清空 " + rows + " 条通知", rows);
         } catch (Exception e) {
             log.error("清空通知失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "清空通知失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "清空通知失败: " + "系统异常，请稍后重试");
         }
     }
 

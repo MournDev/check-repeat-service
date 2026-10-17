@@ -82,7 +82,7 @@ public class UserController {
             
         } catch (Exception e) {
             log.error("获取用户消息列表失败: userId={}", userId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取消息列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取消息列表失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -110,7 +110,7 @@ public class UserController {
             
         } catch (Exception e) {
             log.error("标记消息已读失败: messageId={}", messageId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "标记消息已读失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "标记消息已读失败: " + "系统异常，请稍后重试");
         }
     }
 }

@@ -103,7 +103,7 @@ public class TeacherStudentManagementServiceImpl implements TeacherStudentManage
             return Result.success("获取学生列表成功", responseData);
         } catch (Exception e) {
             log.error("获取学生列表失败: teacherId={}", requestDTO.getTeacherId(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取学生列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取学生列表失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -181,7 +181,7 @@ public class TeacherStudentManagementServiceImpl implements TeacherStudentManage
             return Result.success("获取统计信息成功", stats);
         } catch (Exception e) {
             log.error("获取学生统计信息失败: teacherId={}", teacherId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取统计信息失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取统计信息失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -481,7 +481,7 @@ public class TeacherStudentManagementServiceImpl implements TeacherStudentManage
             }
         } catch (Exception e) {
             log.error("添加学生失败: username={}", addStudentDTO.getUsername(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "添加学生失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "添加学生失败: " + "系统异常，请稍后重试");
         }
     }
     

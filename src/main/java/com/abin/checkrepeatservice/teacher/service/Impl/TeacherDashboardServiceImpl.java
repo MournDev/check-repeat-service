@@ -87,7 +87,7 @@ public class TeacherDashboardServiceImpl implements TeacherDashboardService {
             return Result.success("获取统计数据成功", stats);
         } catch (Exception e) {
             log.error("获取仪表盘统计数据失败: teacherId={}", teacherId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取统计数据失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取统计数据失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -140,7 +140,7 @@ public class TeacherDashboardServiceImpl implements TeacherDashboardService {
             return Result.success("获取待审核论文列表成功", responseData);
         } catch (Exception e) {
             log.error("获取待审核论文列表失败: teacherId={}", teacherId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取待审核论文列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取待审核论文列表失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -176,7 +176,7 @@ public class TeacherDashboardServiceImpl implements TeacherDashboardService {
             return Result.success("获取学生状态统计成功", stats);
         } catch (Exception e) {
             log.error("获取学生状态统计失败: teacherId={}", teacherId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取学生状态统计失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取学生状态统计失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -242,7 +242,7 @@ public class TeacherDashboardServiceImpl implements TeacherDashboardService {
             return Result.success(message);
         } catch (Exception e) {
             log.error("批量论文审核失败: teacherId={}", teacherId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "批量论文审核失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "批量论文审核失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -280,7 +280,7 @@ public class TeacherDashboardServiceImpl implements TeacherDashboardService {
             return Result.success("论文审核成功");
         } catch (Exception e) {
             log.error("论文审核失败: teacherId={}, paperId={}", teacherId, paperId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "论文审核失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "论文审核失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -304,7 +304,7 @@ public class TeacherDashboardServiceImpl implements TeacherDashboardService {
             return Result.success("获取下载链接成功", downloadUrl);
         } catch (Exception e) {
             log.error("论文下载失败: teacherId={}, paperId={}", teacherId, paperId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "论文下载失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "论文下载失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -330,7 +330,7 @@ public class TeacherDashboardServiceImpl implements TeacherDashboardService {
             return Result.success("获取审核进度统计成功", statistics);
         } catch (Exception e) {
             log.error("获取审核进度统计失败: teacherId={}", teacherId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取审核进度统计失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取审核进度统计失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -349,7 +349,7 @@ public class TeacherDashboardServiceImpl implements TeacherDashboardService {
             return Result.success("获取近期活动记录成功", activityPage);
         } catch (Exception e) {
             log.error("获取近期活动记录失败: teacherId={}", teacherId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取近期活动记录失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取近期活动记录失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -575,7 +575,7 @@ public class TeacherDashboardServiceImpl implements TeacherDashboardService {
             return Result.success("获取指导学生列表成功", responsePage);
         } catch (Exception e) {
             log.error("获取指导学生列表失败: teacherId={}", teacherId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取指导学生列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取指导学生列表失败: " + "系统异常，请稍后重试");
         }
     }
 

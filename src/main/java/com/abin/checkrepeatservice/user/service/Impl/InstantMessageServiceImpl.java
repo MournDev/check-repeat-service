@@ -71,7 +71,7 @@ public class InstantMessageServiceImpl implements InstantMessageService {
         } catch (Exception e) {
             log.error("发送即时消息失败 - 发送者: {}, 接收者: {}", 
                     message.getSenderId(), message.getReceiverId(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "消息发送异常: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "消息发送异常: " + "系统异常，请稍后重试");
         }
     }
 
@@ -89,7 +89,7 @@ public class InstantMessageServiceImpl implements InstantMessageService {
 
         } catch (Exception e) {
             log.error("获取会话列表失败 - 用户ID: {}", userId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取会话列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取会话列表失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -111,7 +111,7 @@ public class InstantMessageServiceImpl implements InstantMessageService {
 
         } catch (Exception e) {
             log.error("获取会话消息历史失败 - 会话ID: {}", conversationId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取消息历史失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取消息历史失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -134,7 +134,7 @@ public class InstantMessageServiceImpl implements InstantMessageService {
 
         } catch (Exception e) {
             log.error("获取私信历史失败 - 发送者: {}, 接收者: {}", senderId, receiverId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取私信历史失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取私信历史失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -152,7 +152,7 @@ public class InstantMessageServiceImpl implements InstantMessageService {
 
         } catch (Exception e) {
             log.error("获取未读消息数量失败 - 用户ID: {}", userId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取未读消息数量失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取未读消息数量失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -175,7 +175,7 @@ public class InstantMessageServiceImpl implements InstantMessageService {
 
         } catch (Exception e) {
             log.error("标记消息已读失败 - 用户ID: {}, 消息数量: {}", userId, messageIds.size(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "标记已读失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "标记已读失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -210,7 +210,7 @@ public class InstantMessageServiceImpl implements InstantMessageService {
 
         } catch (Exception e) {
             log.error("删除消息失败 - 消息ID: {}, 用户ID: {}", messageId, userId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "删除消息失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "删除消息失败: " + "系统异常，请稍后重试");
         }
     }
 }

@@ -112,7 +112,7 @@ public class MessageServiceImpl implements MessageService {
             
         } catch (Exception e) {
             log.error("获取消息列表失败 - 用户ID: {}", userId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取消息列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取消息列表失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -550,7 +550,7 @@ public class MessageServiceImpl implements MessageService {
 
         } catch (Exception e) {
             log.error("批量删除消息失败 - 消息数量: {}, 用户ID: {}", messageIds.size(), userId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "批量删除消息失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "批量删除消息失败: " + "系统异常，请稍后重试");
         }
     }
 

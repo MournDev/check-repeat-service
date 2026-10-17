@@ -56,7 +56,7 @@ public class MessageController {
             return result;
         } catch (Exception e) {
             log.error("获取消息列表失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取消息列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取消息列表失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -76,7 +76,7 @@ public class MessageController {
             return result;
         } catch (Exception e) {
             log.error("发送消息失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "消息发送失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "消息发送失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -94,7 +94,7 @@ public class MessageController {
             return result;
         } catch (Exception e) {
             log.error("获取用户消息列表失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取用户消息列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取用户消息列表失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -111,7 +111,7 @@ public class MessageController {
             return result;
         } catch (Exception e) {
             log.error("获取未读消息失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取未读消息失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取未读消息失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -126,7 +126,7 @@ public class MessageController {
             return result;
         } catch (Exception e) {
             log.error("获取未读消息数失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取未读消息数失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取未读消息数失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -141,7 +141,7 @@ public class MessageController {
             return result;
         } catch (Exception e) {
             log.error("标记消息已读失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "标记消息已读失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "标记消息已读失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -156,7 +156,7 @@ public class MessageController {
             return result;
         } catch (Exception e) {
             log.error("删除消息失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "删除消息失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "删除消息失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -171,7 +171,7 @@ public class MessageController {
             return result;
         } catch (Exception e) {
             log.error("批量删除消息失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "批量删除消息失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "批量删除消息失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -186,7 +186,7 @@ public class MessageController {
             return result;
         } catch (Exception e) {
             log.error("获取消息详情失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取消息详情失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取消息详情失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -205,7 +205,7 @@ public class MessageController {
             return Result.success("获取用户会话列表成功", conversations);
         } catch (Exception e) {
             log.error("获取用户会话列表失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取用户会话列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取用户会话列表失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -223,7 +223,7 @@ public class MessageController {
             return Result.success("创建会话成功", conversation);
         } catch (Exception e) {
             log.error("创建会话失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "创建会话失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "创建会话失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -240,7 +240,7 @@ public class MessageController {
             return Result.success("更新会话信息成功", result);
         } catch (Exception e) {
             log.error("更新会话信息失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "更新会话信息失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "更新会话信息失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -255,7 +255,7 @@ public class MessageController {
             return Result.success("退出会话成功", result);
         } catch (Exception e) {
             log.error("退出会话失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "退出会话失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "退出会话失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -272,7 +272,7 @@ public class MessageController {
             return Result.success("获取会话成员成功", members);
         } catch (Exception e) {
             log.error("获取会话成员失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取会话成员失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取会话成员失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -290,7 +290,7 @@ public class MessageController {
             return Result.success("搜索会话成功", conversations);
         } catch (Exception e) {
             log.error("搜索会话失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "搜索会话失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "搜索会话失败: " + "系统异常，请稍后重试");
         }
     }
 }

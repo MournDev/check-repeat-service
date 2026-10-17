@@ -200,7 +200,7 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
             return Result.success("系统统计数据获取成功", stats);
         } catch (Exception e) {
             log.error("获取系统统计数据失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR,"获取系统统计数据失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR,"获取系统统计数据失败: " + "系统异常，请稍后重试");
         }
     }
 

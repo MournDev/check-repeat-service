@@ -149,7 +149,7 @@ public class NoticeBroadcastServiceImpl implements NoticeBroadcastService {
 
         } catch (Exception e) {
             log.error("系统公告发布失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "公告发布失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "公告发布失败: " + "系统异常，请稍后重试");
         }
     }
 }

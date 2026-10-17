@@ -49,7 +49,7 @@ public class KnowledgeController {
             return Result.success(knowledgeCategoryService.listActiveWithArticleCount());
         } catch (Exception e) {
             log.error("查询知识库分类失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "查询知识库分类失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "查询知识库分类失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -69,7 +69,7 @@ public class KnowledgeController {
             return Result.success(knowledgeArticleService.getPublishedArticlePage(category, keyword, page, size));
         } catch (Exception e) {
             log.error("查询知识库文章列表失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "查询知识库文章列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "查询知识库文章列表失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -82,7 +82,7 @@ public class KnowledgeController {
             return Result.success(knowledgeArticleService.getPopularArticles(limit));
         } catch (Exception e) {
             log.error("查询知识库热门文章失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "查询知识库热门文章失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "查询知识库热门文章失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -102,7 +102,7 @@ public class KnowledgeController {
             return Result.success(article);
         } catch (Exception e) {
             log.error("查询知识库文章详情失败: id={}, {}", id, e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "查询知识库文章详情失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "查询知识库文章详情失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -120,7 +120,7 @@ public class KnowledgeController {
             return Result.success(knowledgeArticleService.getPublishedArticlePage(category, keyword, page, size));
         } catch (Exception e) {
             log.error("搜索知识库文章失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "搜索知识库文章失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "搜索知识库文章失败: " + "系统异常，请稍后重试");
         }
     }
 }

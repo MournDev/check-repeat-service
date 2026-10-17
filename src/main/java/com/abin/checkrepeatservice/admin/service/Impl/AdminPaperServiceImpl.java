@@ -155,7 +155,7 @@ public class AdminPaperServiceImpl implements AdminPaperService {
             return Result.success("论文列表获取成功", resultPage);
         } catch (Exception e) {
             log.error("获取论文列表失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取论文列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取论文列表失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -174,7 +174,7 @@ public class AdminPaperServiceImpl implements AdminPaperService {
             return Result.success("论文详情获取成功", paperInfo);
         } catch (Exception e) {
             log.error("获取论文详情失败: paperId={}", paperId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取论文详情失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取论文详情失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -221,7 +221,7 @@ public class AdminPaperServiceImpl implements AdminPaperService {
             return Result.error(e.getResultCode(), e.getMessage());
         } catch (Exception e) {
             log.error("论文审核失败: paperId={}", paperId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "论文审核失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "论文审核失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -271,7 +271,7 @@ public class AdminPaperServiceImpl implements AdminPaperService {
             }
         } catch (Exception e) {
             log.error("批量审核论文失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "批量审核论文失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "批量审核论文失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -292,7 +292,7 @@ public class AdminPaperServiceImpl implements AdminPaperService {
             return Result.success("论文删除成功");
         } catch (Exception e) {
             log.error("论文删除失败: paperId={}", paperId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "论文删除失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "论文删除失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -336,7 +336,7 @@ public class AdminPaperServiceImpl implements AdminPaperService {
             return Result.success("论文统计信息获取成功", stats);
         } catch (Exception e) {
             log.error("获取论文统计信息失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取论文统计信息失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取论文统计信息失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -470,7 +470,7 @@ public class AdminPaperServiceImpl implements AdminPaperService {
             
         } catch (Exception e) {
             log.error("论文文件下载失败: paperId={}", paperId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "论文文件下载失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "论文文件下载失败: " + "系统异常，请稍后重试");
         }
     }
     
@@ -506,7 +506,7 @@ public class AdminPaperServiceImpl implements AdminPaperService {
             
         } catch (Exception e) {
             log.error("校内查重检测失败：paperId={}", paperId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "校内查重检测失败：" + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "校内查重检测失败：" + "系统异常，请稍后重试");
         }
     }
         
@@ -566,7 +566,7 @@ public class AdminPaperServiceImpl implements AdminPaperService {
                 
         } catch (Exception e) {
             log.error("批量校内查重失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "批量校内查重失败：" + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "批量校内查重失败：" + "系统异常，请稍后重试");
         }
     }
         
@@ -587,7 +587,7 @@ public class AdminPaperServiceImpl implements AdminPaperService {
                 
         } catch (Exception e) {
             log.error("批量第三方查重失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "批量第三方查重失败：" + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "批量第三方查重失败：" + "系统异常，请稍后重试");
         }
     }
 

@@ -135,7 +135,7 @@ public class InfoServiceImpl implements InfoService {
             return Result.success("用户信息更新成功", toLoginVO(currentUser, sysRole.getRoleCode()));
         } catch (Exception e) {
             log.error("用户信息更新失败：{}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR,"用户信息更新失败：" + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR,"用户信息更新失败：" + "系统异常，请稍后重试");
         }
     }
 
@@ -231,7 +231,7 @@ public class InfoServiceImpl implements InfoService {
             return Result.success(toLoginVO(currentUser, sysRole.getRoleCode()));
         } catch (Exception e) {
             log.error("查询当前用户信息失败：{}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "查询用户信息失败：" + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "查询用户信息失败：" + "系统异常，请稍后重试");
         }
     }
 
@@ -357,10 +357,10 @@ public class InfoServiceImpl implements InfoService {
                 return Result.error(ResultCode.SYSTEM_ERROR, "头像存储未初始化（存储桶不存在），请联系管理员");
             }
             log.error("头像上传失败: 错误信息={}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "头像上传失败：" + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "头像上传失败：" + "系统异常，请稍后重试");
         } catch (Exception e) {
             log.error("头像上传失败: 错误信息={}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "头像上传失败：" + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "头像上传失败：" + "系统异常，请稍后重试");
         }
     }
 
@@ -392,7 +392,7 @@ public class InfoServiceImpl implements InfoService {
             return Result.success("查询成功", voPage);
         } catch (Exception e) {
             log.error("查询登录历史失败：{}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "查询失败：" + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "查询失败：" + "系统异常，请稍后重试");
         }
     }
 
@@ -437,7 +437,7 @@ public class InfoServiceImpl implements InfoService {
             return Result.success("密码修改成功，请重新登录");
         } catch (Exception e) {
             log.error("用户密码修改失败：{}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "密码修改失败：" + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "密码修改失败：" + "系统异常，请稍后重试");
         }
     }
 

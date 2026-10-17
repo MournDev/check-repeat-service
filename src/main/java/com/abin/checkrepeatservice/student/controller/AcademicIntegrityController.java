@@ -38,7 +38,7 @@ public class AcademicIntegrityController {
             return Result.success("获取个性化学术建议成功", advice);
         } catch (Exception e) {
             log.error("获取个性化学术建议失败", e);
-            return Result.error(500, "获取个性化学术建议失败: " + e.getMessage());
+            return Result.error(500, "获取个性化学术建议失败: " + "系统异常，请稍后重试");
         }
     }
     
@@ -55,7 +55,7 @@ public class AcademicIntegrityController {
             return Result.success("获取推荐学习资源成功", resources);
         } catch (Exception e) {
             log.error("获取推荐学习资源失败", e);
-            return Result.error(500, "获取推荐学习资源失败: " + e.getMessage());
+            return Result.error(500, "获取推荐学习资源失败: " + "系统异常，请稍后重试");
         }
     }
     
@@ -71,7 +71,7 @@ public class AcademicIntegrityController {
             return Result.success("获取用户检查清单成功", checklist);
         } catch (Exception e) {
             log.error("获取用户检查清单失败", e);
-            return Result.error(500, "获取用户检查清单失败: " + e.getMessage());
+            return Result.error(500, "获取用户检查清单失败: " + "系统异常，请稍后重试");
         }
     }
     
@@ -93,7 +93,7 @@ public class AcademicIntegrityController {
             }
         } catch (Exception e) {
             log.error("更新检查项状态失败", e);
-            return Result.error(500, "更新检查项状态失败: " + e.getMessage());
+            return Result.error(500, "更新检查项状态失败: " + "系统异常，请稍后重试");
         }
     }
     
@@ -109,7 +109,7 @@ public class AcademicIntegrityController {
             return Result.success("初始化用户检查清单成功");
         } catch (Exception e) {
             log.error("初始化用户检查清单失败", e);
-            return Result.error(500, "初始化用户检查清单失败: " + e.getMessage());
+            return Result.error(500, "初始化用户检查清单失败: " + "系统异常，请稍后重试");
         }
     }
 }

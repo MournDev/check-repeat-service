@@ -57,7 +57,7 @@ public class CommonDictServiceImpl implements CommonDictService {
             return Result.success("学院列表获取成功", result);
         } catch (Exception e) {
             log.error("获取学院列表失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取学院列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取学院列表失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -92,7 +92,7 @@ public class CommonDictServiceImpl implements CommonDictService {
             return Result.success("专业列表获取成功", result);
         } catch (Exception e) {
             log.error("获取专业列表失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取专业列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取专业列表失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -128,7 +128,7 @@ public class CommonDictServiceImpl implements CommonDictService {
             return Result.success("年级列表获取成功", grades);
         } catch (Exception e) {
             log.error("获取年级列表失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取年级列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取年级列表失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -152,7 +152,7 @@ public class CommonDictServiceImpl implements CommonDictService {
             return Result.success("专业名称映射获取成功", majorMap);
         } catch (Exception e) {
             log.error("获取专业名称映射失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取专业名称映射失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取专业名称映射失败: " + "系统异常，请稍后重试");
         }
     }
 }

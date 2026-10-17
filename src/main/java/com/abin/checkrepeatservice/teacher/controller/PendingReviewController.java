@@ -70,7 +70,7 @@ public class PendingReviewController {
             return pendingReviewService.getPendingReviews(queryDTO);
         } catch (Exception e) {
             log.error("获取待审核论文列表失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取待审核论文列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取待审核论文列表失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -93,7 +93,7 @@ public class PendingReviewController {
             return pendingReviewService.getPendingStats(teacherId);
         } catch (Exception e) {
             log.error("获取待审核统计信息失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取统计信息失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取统计信息失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -111,7 +111,7 @@ public class PendingReviewController {
             return pendingReviewService.reviewPaper(teacherId, reviewDTO);
         } catch (Exception e) {
             log.error("论文审核失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "论文审核失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "论文审核失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -134,7 +134,7 @@ public class PendingReviewController {
             return pendingReviewService.recheckPlagiarism(teacherId, paperId);
         } catch (Exception e) {
             log.error("重新查重检测失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "重新查重检测失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "重新查重检测失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -152,7 +152,7 @@ public class PendingReviewController {
             return pendingReviewService.sendReminder(teacherId, reminderDTO);
         } catch (Exception e) {
             log.error("发送提醒消息失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "发送提醒消息失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "发送提醒消息失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -171,7 +171,7 @@ public class PendingReviewController {
             return pendingReviewService.contactStudent(teacherId, contactDTO);
         } catch (Exception e) {
             log.error("联系学生失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "联系学生失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "联系学生失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -208,7 +208,7 @@ public class PendingReviewController {
             return pendingReviewService.getPlagiarismReport(teacherId, paperId);
         } catch (Exception e) {
             log.error("获取查重报告失败: paperId={}", paperId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取查重报告失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取查重报告失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -230,7 +230,7 @@ public class PendingReviewController {
             return pendingReviewService.getTodayReviewedCount(teacherId);
         } catch (Exception e) {
             log.error("获取今日审核统计失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取今日审核统计失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取今日审核统计失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -249,7 +249,7 @@ public class PendingReviewController {
             return pendingReviewService.delegateReview(teacherId, delegateDTO);
         } catch (Exception e) {
             log.error("委托审核失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "委托审核失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "委托审核失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -272,7 +272,7 @@ public class PendingReviewController {
             return pendingReviewService.getTeacherReviewStatistics(teacherId, startDate, endDate, page, pageSize);
         } catch (Exception e) {
             log.error("获取教师审核历史统计失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取教师审核历史统计失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取教师审核历史统计失败: " + "系统异常，请稍后重试");
         }
     }
     @GetMapping("/history/{paperId}")
@@ -285,7 +285,7 @@ public class PendingReviewController {
             return pendingReviewService.getPaperReviewHistory(teacherId, paperId);
         } catch (Exception e) {
             log.error("获取论文审核历史失败: paperId={}", paperId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取论文审核历史失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取论文审核历史失败: " + "系统异常，请稍后重试");
         }
     }
     @GetMapping({"/preview-url/{paperId}", "/preview/{paperId}"})
@@ -298,7 +298,7 @@ public class PendingReviewController {
             return pendingReviewService.getPaperPreviewUrl(teacherId, paperId);
         } catch (Exception e) {
             log.error("获取论文预览URL失败: paperId={}", paperId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取论文预览URL失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取论文预览URL失败: " + "系统异常，请稍后重试");
         }
     }
     @GetMapping("/content/{paperId}")
@@ -311,7 +311,7 @@ public class PendingReviewController {
             return pendingReviewService.getPaperContent(teacherId, paperId);
         } catch (Exception e) {
             log.error("获取论文内容失败: paperId={}", paperId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取论文内容失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取论文内容失败: " + "系统异常，请稍后重试");
         }
     }
 }

@@ -90,7 +90,7 @@ public class MaintenanceServiceImpl implements MaintenanceService {
 
         } catch (Exception e) {
             log.error("更新维护模式失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "更新维护模式失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "更新维护模式失败: " + "系统异常，请稍后重试");
         }
     }
 

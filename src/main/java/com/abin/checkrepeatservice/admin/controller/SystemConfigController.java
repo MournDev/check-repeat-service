@@ -43,7 +43,7 @@ public class SystemConfigController {
             return systemConfigService.updatePerformanceConfig(performanceConfig);
         } catch (Exception e) {
             log.error("更新性能配置失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR,"更新性能配置失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR,"更新性能配置失败: " + "系统异常，请稍后重试");
         }
     }
     
@@ -58,7 +58,7 @@ public class SystemConfigController {
             return systemConfigService.getPerformanceConfig();
         } catch (Exception e) {
             log.error("获取性能配置失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR,"获取性能配置失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR,"获取性能配置失败: " + "系统异常，请稍后重试");
         }
     }
     
@@ -76,7 +76,7 @@ public class SystemConfigController {
             return systemConfigService.updatePerformanceConfig(defaultConfig);
         } catch (Exception e) {
             log.error("重置性能配置失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR,"重置性能配置失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR,"重置性能配置失败: " + "系统异常，请稍后重试");
         }
     }
     
@@ -95,7 +95,7 @@ public class SystemConfigController {
             return Result.success("性能配置测试应用成功");
         } catch (Exception e) {
             log.error("测试性能配置失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR,"测试性能配置失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR,"测试性能配置失败: " + "系统异常，请稍后重试");
         }
     }
 }

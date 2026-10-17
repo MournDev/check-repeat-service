@@ -284,8 +284,8 @@ public class SystemMonitorService {
             
             return Result.success("系统状态获取成功", status);
         } catch (Exception e) {
-            return Result.error(com.abin.checkrepeatservice.common.enums.ResultCode.SYSTEM_ERROR, 
-                              "获取系统状态失败: " + e.getMessage());
+            return Result.error(com.abin.checkrepeatservice.common.enums.ResultCode.SYSTEM_ERROR,
+                              "获取系统状态失败: 系统异常，请稍后重试");
         }
     }
 

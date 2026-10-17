@@ -161,7 +161,7 @@ public class AdvisorAssignServiceImpl implements AdvisorAssignService {
             return Result.error(ResultCode.SYSTEM_ERROR, "自动分配失败，请联系管理员手动分配");
         } catch (Exception e) {
             log.error("自动分配指导老师异常 - 论文ID: {}", paperId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "指导老师分配过程发生异常：" + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "指导老师分配过程发生异常：" + "系统异常，请稍后重试");
         }
     }
 

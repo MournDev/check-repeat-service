@@ -99,7 +99,7 @@ public class ApplicationMonitorService {
         } catch (Exception e) {
             log.error("获取应用性能指标失败", e);
             return Result.error(com.abin.checkrepeatservice.common.enums.ResultCode.SYSTEM_ERROR,
-                              "获取应用性能指标失败: " + e.getMessage());
+                              "获取应用性能指标失败: 系统异常，请稍后重试");
         }
     }
 
@@ -140,7 +140,7 @@ public class ApplicationMonitorService {
         } catch (Exception e) {
             log.error("获取缓存性能指标失败", e);
             return Result.error(com.abin.checkrepeatservice.common.enums.ResultCode.SYSTEM_ERROR,
-                              "获取缓存性能指标失败: " + e.getMessage());
+                              "获取缓存性能指标失败: 系统异常，请稍后重试");
         }
     }
 

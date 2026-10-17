@@ -54,7 +54,7 @@ public class CheckPolicyController {
                     .collect(Collectors.toList()));
         } catch (Exception e) {
             log.error("查询检测策略列表失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "查询失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "查询失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -115,7 +115,7 @@ public class CheckPolicyController {
             return Result.success(creating ? "新增成功" : "更新成功");
         } catch (Exception e) {
             log.error("保存检测策略失败: degreeType={}", degreeType, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "保存失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "保存失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -135,7 +135,7 @@ public class CheckPolicyController {
             return Result.success("删除成功");
         } catch (Exception e) {
             log.error("删除检测策略失败: id={}, error={}", id, e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "删除失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "删除失败: " + "系统异常，请稍后重试");
         }
     }
 

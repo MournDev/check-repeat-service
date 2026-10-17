@@ -36,7 +36,7 @@ public class AdminAssignmentController {
             return adminAssignmentService.getAssignmentStats();
         } catch (Exception e) {
             log.error("获取分配统计信息失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取分配统计信息失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取分配统计信息失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -54,7 +54,7 @@ public class AdminAssignmentController {
             return adminAssignmentService.getUnassignedStudents(keyword, page, size);
         } catch (Exception e) {
             log.error("获取未分配学生列表失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取未分配学生列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取未分配学生列表失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -72,7 +72,7 @@ public class AdminAssignmentController {
             return adminAssignmentService.getAvailableTeachers(keyword, page, size);
         } catch (Exception e) {
             log.error("获取可用教师列表失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取可用教师列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取可用教师列表失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -95,7 +95,7 @@ public class AdminAssignmentController {
             return adminAssignmentService.singleAssign(studentId, teacherId, remark);
         } catch (Exception e) {
             log.error("单个分配失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "单个分配失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "单个分配失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -123,7 +123,7 @@ public class AdminAssignmentController {
             return adminAssignmentService.batchAssign(studentIds, teacherId, strategy, remark);
         } catch (Exception e) {
             log.error("批量分配失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "批量分配失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "批量分配失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -138,7 +138,7 @@ public class AdminAssignmentController {
             return adminAssignmentService.getMajorNameMap();
         } catch (Exception e) {
             log.error("获取专业名称映射失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取专业名称映射失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取专业名称映射失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -153,7 +153,7 @@ public class AdminAssignmentController {
             return adminAssignmentService.getAssignmentRules();
         } catch (Exception e) {
             log.error("获取分配规则配置失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取分配规则配置失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取分配规则配置失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -167,7 +167,7 @@ public class AdminAssignmentController {
             return adminAssignmentService.saveAssignmentRules(config);
         } catch (Exception e) {
             log.error("保存分配规则配置失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "保存分配规则配置失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "保存分配规则配置失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -182,7 +182,7 @@ public class AdminAssignmentController {
             return adminAssignmentService.refreshAssignmentData();
         } catch (Exception e) {
             log.error("刷新分配数据失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "刷新分配数据失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "刷新分配数据失败: " + "系统异常，请稍后重试");
         }
     }
 }

@@ -186,7 +186,7 @@ public class AdminRuleConfigController {
             
         } catch (Exception e) {
             log.error("获取系统配置失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取系统配置失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取系统配置失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -320,7 +320,7 @@ public class AdminRuleConfigController {
             return Result.success("基础配置更新成功");
         } catch (Exception e) {
             log.error("更新基础配置失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "更新基础配置失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "更新基础配置失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -336,7 +336,7 @@ public class AdminRuleConfigController {
             return Result.success("查重配置更新成功");
         } catch (Exception e) {
             log.error("更新查重配置失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "更新查重配置失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "更新查重配置失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -352,7 +352,7 @@ public class AdminRuleConfigController {
             return Result.success("安全配置更新成功");
         } catch (Exception e) {
             log.error("更新安全配置失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "更新安全配置失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "更新安全配置失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -368,7 +368,7 @@ public class AdminRuleConfigController {
             return Result.success("邮件配置更新成功");
         } catch (Exception e) {
             log.error("更新邮件配置失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "更新邮件配置失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "更新邮件配置失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -400,7 +400,7 @@ public class AdminRuleConfigController {
             return Result.success("测试邮件发送成功，请检查邮箱: " + testEmail);
         } catch (Exception e) {
             log.error("邮件测试发送失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "邮件测试发送失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "邮件测试发送失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -477,7 +477,7 @@ public class AdminRuleConfigController {
             
         } catch (Exception e) {
             log.error("保存配置失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "保存配置失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "保存配置失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -498,7 +498,7 @@ public class AdminRuleConfigController {
             return Result.success("默认配置恢复成功");
         } catch (Exception e) {
             log.error("恢复默认配置失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "恢复默认配置失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "恢复默认配置失败: " + "系统异常，请稍后重试");
         }
     }
     

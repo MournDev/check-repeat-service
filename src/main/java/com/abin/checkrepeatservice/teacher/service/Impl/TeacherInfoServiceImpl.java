@@ -76,7 +76,7 @@ public class TeacherInfoServiceImpl implements TeacherInfoService{
             return Result.success("用户信息更新成功");
         } catch (Exception e) {
             log.error("用户信息更新失败：{}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "用户信息更新失败：" + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "用户信息更新失败：" + "系统异常，请稍后重试");
         }
     }
 
@@ -163,7 +163,7 @@ public class TeacherInfoServiceImpl implements TeacherInfoService{
             return Result.success("获取用户信息成功", info);
         } catch (Exception e) {
             log.error("获取用户信息失败：用户ID={}, 错误信息={}", userId, e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取用户信息失败：" + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取用户信息失败：" + "系统异常，请稍后重试");
         }
     }
 

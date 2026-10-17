@@ -75,7 +75,7 @@ public class TeacherDataAnalysisController {
             return Result.success(responseData);
         } catch (BusinessException e) {
             log.error("获取审核趋势图表数据失败: {}", e.getMessage());
-            return Result.error(ResultCode.SYSTEM_ERROR,e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR,"系统异常，请稍后重试");
         } catch (Exception e) {
             log.error("获取审核趋势图表数据失败: {}", e.getMessage());
             return Result.error(ResultCode.SYSTEM_ERROR,"参数解析失败");

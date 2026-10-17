@@ -110,7 +110,7 @@ public class CheckReportServiceImpl extends ServiceImpl<CheckReportMapper, Check
 
         } catch (Exception e) {
             log.error("PDF报告生成失败（任务ID：{}）：", taskId, e);
-            throw new BusinessException(ResultCode.SYSTEM_ERROR, "报告文件生成失败: " + e.getMessage());
+            throw new BusinessException(ResultCode.SYSTEM_ERROR, "报告文件生成失败: " + "系统异常，请稍后重试");
         }
 
         // 2. 文件生成成功后再保存数据库记录

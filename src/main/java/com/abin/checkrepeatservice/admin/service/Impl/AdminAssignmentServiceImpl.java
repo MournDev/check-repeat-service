@@ -240,7 +240,7 @@ public class AdminAssignmentServiceImpl implements AdminAssignmentService {
             return Result.success("分配成功");
         } catch (Exception e) {
             log.error("单个分配失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "分配失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "分配失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -313,7 +313,7 @@ public class AdminAssignmentServiceImpl implements AdminAssignmentService {
             return Result.success("批量分配完成", result);
         } catch (Exception e) {
             log.error("批量分配失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "批量分配失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "批量分配失败: " + "系统异常，请稍后重试");
         }
     }
 

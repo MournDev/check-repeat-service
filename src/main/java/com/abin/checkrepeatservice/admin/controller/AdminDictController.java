@@ -37,7 +37,7 @@ public class AdminDictController {
             return adminDictService.getMajors();
         } catch (Exception e) {
             log.error("获取专业列表失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取专业列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取专业列表失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -51,7 +51,7 @@ public class AdminDictController {
             return adminDictService.getGrades();
         } catch (Exception e) {
             log.error("获取年级列表失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取年级列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取年级列表失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -65,7 +65,7 @@ public class AdminDictController {
             return adminDictService.getColleges();
         } catch (Exception e) {
             log.error("获取学院列表失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取学院列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取学院列表失败: " + "系统异常，请稍后重试");
         }
     }
     
@@ -80,7 +80,7 @@ public class AdminDictController {
             return adminDictService.getMajorNameMap();
         } catch (Exception e) {
             log.error("获取专业名称映射失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取专业名称映射失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取专业名称映射失败: " + "系统异常，请稍后重试");
         }
     }
 }

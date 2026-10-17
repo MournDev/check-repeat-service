@@ -54,7 +54,7 @@ public class SimilarityDetectionController {
             return result;
         } catch (Exception e) {
             log.error("查重检测失败: paperId={}", paperId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "查重检测失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "查重检测失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -75,7 +75,7 @@ public class SimilarityDetectionController {
             return Result.success("获取查重历史成功", java.util.Collections.emptyList());
         } catch (Exception e) {
             log.error("获取查重历史失败: paperId={}", paperId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取查重历史失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取查重历史失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -94,7 +94,7 @@ public class SimilarityDetectionController {
             return detectionService.detectPaperSimilarity(paperId, null);
         } catch (Exception e) {
             log.error("重新查重失败: paperId={}", paperId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "重新查重失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "重新查重失败: " + "系统异常，请稍后重试");
         }
     }
 }

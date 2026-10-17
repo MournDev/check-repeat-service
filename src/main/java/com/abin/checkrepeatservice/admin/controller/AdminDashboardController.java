@@ -35,7 +35,7 @@ public class AdminDashboardController {
             return adminDashboardService.getSystemStats();
         } catch (Exception e) {
             log.error("获取系统统计数据失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取系统统计数据失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取系统统计数据失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -49,7 +49,7 @@ public class AdminDashboardController {
             return adminDashboardService.getQuickActions();
         } catch (Exception e) {
             log.error("获取快捷操作菜单失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取快捷操作菜单失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取快捷操作菜单失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -63,7 +63,7 @@ public class AdminDashboardController {
             return adminDashboardService.getRealtimeStats();
         } catch (Exception e) {
             log.error("获取实时统计数据失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取实时统计数据失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取实时统计数据失败: " + "系统异常，请稍后重试");
         }
     }
 }

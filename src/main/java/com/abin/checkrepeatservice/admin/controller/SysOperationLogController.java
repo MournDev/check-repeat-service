@@ -62,7 +62,7 @@ public class SysOperationLogController {
             
         } catch (Exception e) {
             log.error("分页查询操作日志失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "查询失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "查询失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -83,7 +83,7 @@ public class SysOperationLogController {
             
         } catch (Exception e) {
             log.error("获取操作日志详情失败: id={}, error={}", id, e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -102,7 +102,7 @@ public class SysOperationLogController {
             
         } catch (Exception e) {
             log.error("获取操作统计信息失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -122,7 +122,7 @@ public class SysOperationLogController {
             
         } catch (Exception e) {
             log.error("获取热门操作统计失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -141,7 +141,7 @@ public class SysOperationLogController {
             
         } catch (Exception e) {
             log.error("获取用户活跃度统计失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -160,7 +160,7 @@ public class SysOperationLogController {
             
         } catch (Exception e) {
             log.error("获取模块使用统计失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -186,7 +186,7 @@ public class SysOperationLogController {
             
         } catch (Exception e) {
             log.error("批量删除操作日志失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "删除失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "删除失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -208,7 +208,7 @@ public class SysOperationLogController {
             
         } catch (Exception e) {
             log.error("清理过期操作日志失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "清理失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "清理失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -241,7 +241,7 @@ public class SysOperationLogController {
 
         } catch (Exception e) {
             log.error("获取审计日志汇总失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取失败: " + "系统异常，请稍后重试");
         }
     }
 

@@ -43,7 +43,7 @@ public class AdminPermissionServiceImpl implements AdminPermissionService {
             return Result.success("角色列表获取成功", roles);
         } catch (Exception e) {
             log.error("获取角色列表失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR,"获取角色列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR,"获取角色列表失败: " + "系统异常，请稍后重试");
         }
     }
 

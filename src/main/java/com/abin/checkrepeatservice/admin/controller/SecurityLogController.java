@@ -75,7 +75,7 @@ public class SecurityLogController {
             
         } catch (Exception e) {
             log.error("获取安全日志列表失败: {}", e.getMessage(), e);
-            return Result.error(500, "获取安全日志列表失败: " + e.getMessage());
+            return Result.error(500, "获取安全日志列表失败: " + "系统异常，请稍后重试");
         }
     }
 

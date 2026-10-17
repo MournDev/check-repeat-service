@@ -49,7 +49,7 @@ public class TeacherDashboardController {
             return teacherDashboardService.getDashboardStats(teacherId);
         } catch (Exception e) {
             log.error("获取仪表盘统计数据失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取统计数据失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取统计数据失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -66,7 +66,7 @@ public class TeacherDashboardController {
             return teacherDashboardService.getDashboardStats(teacherId);
         } catch (Exception e) {
             log.error("获取仪表盘统计数据失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取统计数据失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取统计数据失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -89,7 +89,7 @@ public class TeacherDashboardController {
             return teacherDashboardService.getPendingPapers(teacherId, pageNum, pageSize);
         } catch (Exception e) {
             log.error("获取待审核论文列表失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取待审核论文列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取待审核论文列表失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -106,7 +106,7 @@ public class TeacherDashboardController {
             return teacherDashboardService.getStudentStats(teacherId);
         } catch (Exception e) {
             log.error("获取学生状态统计失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取学生状态统计失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取学生状态统计失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -123,7 +123,7 @@ public class TeacherDashboardController {
             return teacherDashboardService.getStudentStats(teacherId);
         } catch (Exception e) {
             log.error("获取学生状态统计失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取学生状态统计失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取学生状态统计失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -141,7 +141,7 @@ public class TeacherDashboardController {
             return teacherDashboardService.batchReviewPapers(teacherId, reviewDTO);
         } catch (Exception e) {
             log.error("批量论文审核失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "批量论文审核失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "批量论文审核失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -162,7 +162,7 @@ public class TeacherDashboardController {
             return teacherDashboardService.reviewPaper(teacherId, paperId, reviewResult, reviewComment);
         } catch (Exception e) {
             log.error("论文审核操作失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "论文审核失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "论文审核失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -185,7 +185,7 @@ public class TeacherDashboardController {
             }
         } catch (Exception e) {
             log.error("发送消息失败: receiverId={}", sendMessageDTO.getReceiverId(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "消息发送失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "消息发送失败: " + "系统异常，请稍后重试");
         }
     }
     
@@ -203,7 +203,7 @@ public class TeacherDashboardController {
             return teacherDashboardService.downloadPaper(teacherId, paperId);
         } catch (Exception e) {
             log.error("论文下载失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "论文下载失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "论文下载失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -220,7 +220,7 @@ public class TeacherDashboardController {
             return teacherDashboardService.getReviewStatistics(teacherId);
         } catch (Exception e) {
             log.error("获取审核进度统计失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取审核进度统计失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取审核进度统计失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -254,7 +254,7 @@ public class TeacherDashboardController {
             return teacherDashboardService.getRecentActivities(teacherId, page, size);
         } catch (Exception e) {
             log.error("获取近期活动记录失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取近期活动记录失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取近期活动记录失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -289,7 +289,7 @@ public class TeacherDashboardController {
             return teacherDashboardService.getStudentList(teacherId, page, size);
         } catch (Exception e) {
             log.error("获取指导学生列表失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取指导学生列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取指导学生列表失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -306,7 +306,7 @@ public class TeacherDashboardController {
             return teacherDashboardService.refreshDashboard(teacherId);
         } catch (Exception e) {
             log.error("刷新仪表盘数据失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "刷新仪表盘数据失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "刷新仪表盘数据失败: " + "系统异常，请稍后重试");
         }
     }
 }

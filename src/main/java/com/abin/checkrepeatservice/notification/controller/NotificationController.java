@@ -58,7 +58,7 @@ public class NotificationController {
             return messageService.getMessageList(userId, messageType, isRead, pageNum, pageSize, sortBy, sortOrder);
         } catch (Exception e) {
             log.error("获取消息列表失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取消息列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取消息列表失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -75,7 +75,7 @@ public class NotificationController {
             return messageService.getUnreadCount(userId);
         } catch (Exception e) {
             log.error("获取未读消息数失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取未读消息数失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取未读消息数失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -94,7 +94,7 @@ public class NotificationController {
             return messageService.markAsRead(messageId, userId);
         } catch (Exception e) {
             log.error("标记消息已读失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "标记消息已读失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "标记消息已读失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -113,7 +113,7 @@ public class NotificationController {
             return messageService.batchMarkAsRead(messageIds, userId);
         } catch (Exception e) {
             log.error("批量标记消息已读失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "批量标记消息已读失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "批量标记消息已读失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -132,7 +132,7 @@ public class NotificationController {
             return messageService.deleteMessage(messageId, userId);
         } catch (Exception e) {
             log.error("删除消息失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "删除消息失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "删除消息失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -151,7 +151,7 @@ public class NotificationController {
             return messageService.getMessageDetail(messageId, userId);
         } catch (Exception e) {
             log.error("获取消息详情失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取消息详情失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取消息详情失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -180,7 +180,7 @@ public class NotificationController {
                 studentId, paperId, paperTitle, newStatus, remarks);
         } catch (Exception e) {
             log.error("发送论文状态变更通知失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "发送通知失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "发送通知失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -207,7 +207,7 @@ public class NotificationController {
                 studentId, paperId, paperTitle, reviewResult, reviewComments);
         } catch (Exception e) {
             log.error("发送论文审核结果通知失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "发送通知失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "发送通知失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -230,7 +230,7 @@ public class NotificationController {
             return notificationService.sendSystemAnnouncement(targetType, title, content, priority);
         } catch (Exception e) {
             log.error("发布公告失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "发布公告失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "发布公告失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -252,7 +252,7 @@ public class NotificationController {
             return notificationService.sendEmergencyNotification(userId, title, content);
         } catch (Exception e) {
             log.error("发送紧急通知失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "发送紧急通知失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "发送紧急通知失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -290,7 +290,7 @@ public class NotificationController {
             return Result.success("获取通知统计成功", statistics);
         } catch (Exception e) {
             log.error("获取通知统计失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取通知统计失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取通知统计失败: " + "系统异常，请稍后重试");
         }
     }
 }

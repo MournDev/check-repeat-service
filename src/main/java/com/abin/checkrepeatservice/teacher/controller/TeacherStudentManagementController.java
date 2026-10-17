@@ -96,7 +96,7 @@ public class TeacherStudentManagementController {
             return studentManagementService.getStudentList(requestDTO);
         } catch (Exception e) {
             log.error("获取学生列表失败: teacherId={}", teacherId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取学生列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取学生列表失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -120,7 +120,7 @@ public class TeacherStudentManagementController {
             }
         } catch (Exception e) {
             log.error("删除学生失败: studentId={}", studentId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "删除失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "删除失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -142,7 +142,7 @@ public class TeacherStudentManagementController {
             return studentManagementService.getStudentStats(teacherId);
         } catch (Exception e) {
             log.error("获取学生统计信息失败: teacherId={}", teacherId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取统计信息失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取统计信息失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -167,7 +167,7 @@ public class TeacherStudentManagementController {
             }
         } catch (Exception e) {
             log.error("分配导师失败: studentId={}, advisorId={}", studentId, assignAdvisorDTO.getAdvisorId(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "导师分配失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "导师分配失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -190,7 +190,7 @@ public class TeacherStudentManagementController {
             }
         } catch (Exception e) {
             log.error("发送消息失败: receiverId={}", sendMessageDTO.getReceiverId(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "消息发送失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "消息发送失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -210,7 +210,7 @@ public class TeacherStudentManagementController {
             return Result.<Object>success("批量分配完成", result);
         } catch (Exception e) {
             log.error("批量分配导师失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "批量分配失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "批量分配失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -230,7 +230,7 @@ public class TeacherStudentManagementController {
             return Result.<Object>success("批量发送完成", result);
         } catch (Exception e) {
             log.error("批量发送消息失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "批量发送失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "批量发送失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -249,7 +249,7 @@ public class TeacherStudentManagementController {
             return Result.<Object>success("批量删除完成", result);
         } catch (Exception e) {
             log.error("批量删除学生失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "批量删除失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "批量删除失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -285,7 +285,7 @@ public class TeacherStudentManagementController {
             return Result.success("导出成功", filePath);
         } catch (Exception e) {
             log.error("导出学生数据失败: teacherId={}", teacherId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "导出失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "导出失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -304,7 +304,7 @@ public class TeacherStudentManagementController {
             return studentManagementService.addStudent(addStudentDTO);
         } catch (Exception e) {
             log.error("添加学生失败: username={}", addStudentDTO.getUsername(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "添加学生失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "添加学生失败: " + "系统异常，请稍后重试");
         }
     }
     
@@ -323,7 +323,7 @@ public class TeacherStudentManagementController {
             return Result.success("导入完成", result);
         } catch (Exception e) {
             log.error("导入学生数据失败: fileName={}", file.getOriginalFilename(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "导入失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "导入失败: " + "系统异常，请稍后重试");
         }
     }
     
@@ -392,7 +392,7 @@ public class TeacherStudentManagementController {
             
         } catch (Exception e) {
             log.error("获取学生论文信息失败: studentId={}", studentId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取论文信息失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取论文信息失败: " + "系统异常，请稍后重试");
         }
     }
     

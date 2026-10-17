@@ -81,7 +81,7 @@ public class EnhancedSimilarityDetectionService {
             
         } catch (Exception e) {
             log.error("论文查重检测失败: paperId={}", paperId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "查重检测失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "查重检测失败: " + "系统异常，请稍后重试");
         }
     }
 

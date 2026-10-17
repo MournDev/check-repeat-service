@@ -50,7 +50,7 @@ public class AdminUserController {
             return adminUserService.getUserList(page, size, userType, status, keyword);
         } catch (Exception e) {
             log.error("获取用户列表失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取用户列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取用户列表失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -65,7 +65,7 @@ public class AdminUserController {
             return adminUserService.createUser(createReq);
         } catch (Exception e) {
             log.error("创建用户失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "创建用户失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "创建用户失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -81,7 +81,7 @@ public class AdminUserController {
             return adminUserService.updateUser(userId, updateReq);
         } catch (Exception e) {
             log.error("更新用户信息失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "更新用户信息失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "更新用户信息失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -96,7 +96,7 @@ public class AdminUserController {
             return adminUserService.deleteUser(userId);
         } catch (Exception e) {
             log.error("删除用户失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "删除用户失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "删除用户失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -111,7 +111,7 @@ public class AdminUserController {
             return adminUserService.batchDeleteUsers(batchReq);
         } catch (Exception e) {
             log.error("批量删除用户失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "批量删除用户失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "批量删除用户失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -128,7 +128,7 @@ public class AdminUserController {
             return adminUserService.updateUserStatus(userId, status);
         } catch (Exception e) {
             log.error("更新用户状态失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "更新用户状态失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "更新用户状态失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -144,7 +144,7 @@ public class AdminUserController {
             return adminUserService.resetPassword(userId, resetReq);
         } catch (Exception e) {
             log.error("重置用户密码失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "重置用户密码失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "重置用户密码失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -158,7 +158,7 @@ public class AdminUserController {
             return adminUserService.getUserDetail(userId);
         } catch (Exception e) {
             log.error("获取用户详细信息失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取用户详细信息失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取用户详细信息失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -176,7 +176,7 @@ public class AdminUserController {
             return adminUserService.getUserLoginHistory(userId, page, size);
         } catch (Exception e) {
             log.error("获取用户登录历史失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取用户登录历史失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取用户登录历史失败: " + "系统异常，请稍后重试");
         }
     }
 }

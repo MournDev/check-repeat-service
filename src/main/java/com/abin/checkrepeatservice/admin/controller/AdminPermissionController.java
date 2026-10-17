@@ -45,7 +45,7 @@ public class AdminPermissionController {
             return adminPermissionService.getRoleList();
         } catch (Exception e) {
             log.error("获取角色列表失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取角色列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取角色列表失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -61,7 +61,7 @@ public class AdminPermissionController {
             return adminPermissionService.createRole(createReq);
         } catch (Exception e) {
             log.error("创建角色失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "创建角色失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "创建角色失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -78,7 +78,7 @@ public class AdminPermissionController {
             return adminPermissionService.updateRole(roleId, updateReq);
         } catch (Exception e) {
             log.error("更新角色失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "更新角色失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "更新角色失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -94,7 +94,7 @@ public class AdminPermissionController {
             return adminPermissionService.deleteRole(roleId);
         } catch (Exception e) {
             log.error("删除角色失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "删除角色失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "删除角色失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -108,7 +108,7 @@ public class AdminPermissionController {
             return adminPermissionService.getPermissionTree();
         } catch (Exception e) {
             log.error("获取权限树失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取权限树失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取权限树失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -125,7 +125,7 @@ public class AdminPermissionController {
             return adminPermissionService.assignUserRole(userId, roleId);
         } catch (Exception e) {
             log.error("分配用户角色失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "分配用户角色失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "分配用户角色失败: " + "系统异常，请稍后重试");
         }
     }
 }

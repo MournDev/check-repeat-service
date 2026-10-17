@@ -114,7 +114,7 @@ public class StudentPaperController {
 
         } catch (Exception e) {
             log.error("论文提交失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "论文提交失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "论文提交失败: " + "系统异常，请稍后重试");
         }
     }
     /**
@@ -205,7 +205,7 @@ public class StudentPaperController {
 
         } catch (Exception e) {
             log.error("论文删除失败 - 论文ID: {}", paperId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "论文删除失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "论文删除失败: " + "系统异常，请稍后重试");
         }
     }
     @DeleteMapping("/delete/file")
@@ -233,7 +233,7 @@ public class StudentPaperController {
             return studentReviewService.reSubmitPaper(reSubmitReq);
         } catch (Exception e) {
             log.error("论文重新提交失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "论文重新提交失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "论文重新提交失败: " + "系统异常，请稍后重试");
         }
     }
     
@@ -264,7 +264,7 @@ public class StudentPaperController {
             }
         } catch (Exception e) {
             log.error("论文撤回失败 - 论文 ID: {}", paperId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "论文撤回失败：" + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "论文撤回失败：" + "系统异常，请稍后重试");
         }
     }
     
@@ -304,7 +304,7 @@ public class StudentPaperController {
             return Result.error(ResultCode.BUSINESS_NO_SAFE, e.getMessage());
         } catch (Exception e) {
             log.error("撤回后重新提交失败 - 论文 ID: {}", paperId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "重新提交失败：" + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "重新提交失败：" + "系统异常，请稍后重试");
         }
     }
     
@@ -331,7 +331,7 @@ public class StudentPaperController {
             }
         } catch (Exception e) {
             log.error("申请修改论文失败 - 论文ID: {}", paperId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "申请提交失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "申请提交失败: " + "系统异常，请稍后重试");
         }
     }
     
@@ -374,7 +374,7 @@ public class StudentPaperController {
             return Result.success("批量删除成功", result);
         } catch (Exception e) {
             log.error("批量删除论文失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "批量删除失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "批量删除失败: " + "系统异常，请稍后重试");
         }
     }
     
@@ -394,7 +394,7 @@ public class StudentPaperController {
             return Result.success(version);
         } catch (Exception e) {
             log.error("获取论文版本详情失败 - 论文ID: {}, 版本ID: {}", paperId, versionId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取版本详情失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取版本详情失败: " + "系统异常，请稍后重试");
         }
     }
     
@@ -414,7 +414,7 @@ public class StudentPaperController {
             return Result.success(result);
         } catch (Exception e) {
             log.error("论文版本对比失败 - 论文ID: {}", request.getPaperId(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "版本对比失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "版本对比失败: " + "系统异常，请稍后重试");
         }
     }
     

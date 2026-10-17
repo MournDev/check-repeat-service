@@ -110,7 +110,7 @@ public class DataStatServiceImpl implements DataStatService {
             return Result.success("提交趋势统计成功", resultDTO);
         } catch (Exception e) {
             log.error("提交趋势统计失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "提交趋势统计失败：" + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "提交趋势统计失败：" + "系统异常，请稍后重试");
         }
     }
 
@@ -185,7 +185,7 @@ public class DataStatServiceImpl implements DataStatService {
             return Result.success("查重结果分析成功", resultDTO);
         } catch (Exception e) {
             log.error("查重结果分析失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "查重结果分析失败：" + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "查重结果分析失败：" + "系统异常，请稍后重试");
         }
     }
 
@@ -251,7 +251,7 @@ public class DataStatServiceImpl implements DataStatService {
             return Result.success("审核效率统计成功", resultDTO);
         } catch (Exception e) {
             log.error("审核效率统计失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "审核效率统计失败：" + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "审核效率统计失败：" + "系统异常，请稍后重试");
         }
     }
 

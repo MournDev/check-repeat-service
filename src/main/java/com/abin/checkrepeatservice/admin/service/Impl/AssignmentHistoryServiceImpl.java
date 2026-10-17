@@ -78,7 +78,7 @@ public class AssignmentHistoryServiceImpl implements AssignmentHistoryService {
             return Result.success(stats);
         } catch (Exception e) {
             log.error("获取分配记录统计信息失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取分配记录统计信息失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取分配记录统计信息失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -161,7 +161,7 @@ public class AssignmentHistoryServiceImpl implements AssignmentHistoryService {
             return Result.success(dtoPage);
         } catch (Exception e) {
             log.error("获取分配记录列表失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取分配记录列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取分配记录列表失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -194,7 +194,7 @@ public class AssignmentHistoryServiceImpl implements AssignmentHistoryService {
             return Result.success("删除成功，共删除" + deletedCount + "条记录");
         } catch (Exception e) {
             log.error("删除分配记录失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "删除分配记录失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "删除分配记录失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -246,7 +246,7 @@ public class AssignmentHistoryServiceImpl implements AssignmentHistoryService {
             return Result.error(ResultCode.PARAM_ERROR, "记录ID格式不正确");
         } catch (Exception e) {
             log.error("撤销指导老师分配失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "撤销指导老师分配失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "撤销指导老师分配失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -313,7 +313,7 @@ public class AssignmentHistoryServiceImpl implements AssignmentHistoryService {
             return Result.error(ResultCode.PARAM_ERROR, "ID格式不正确");
         } catch (Exception e) {
             log.error("重新分配指导老师失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "重新分配指导老师失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "重新分配指导老师失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -336,7 +336,7 @@ public class AssignmentHistoryServiceImpl implements AssignmentHistoryService {
             return Result.success(dtoList);
         } catch (Exception e) {
             log.error("获取可用教师列表失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取可用教师列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取可用教师列表失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -421,7 +421,7 @@ public class AssignmentHistoryServiceImpl implements AssignmentHistoryService {
             return Result.success("刷新成功");
         } catch (Exception e) {
             log.error("刷新分配记录数据失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "刷新分配记录数据失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "刷新分配记录数据失败: " + "系统异常，请稍后重试");
         }
     }
 

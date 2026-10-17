@@ -69,7 +69,7 @@ public class NotificationServiceImpl implements NotificationService {
             return result;
         } catch (Exception e) {
             log.error("发送论文状态变更通知失败: studentId={}, paperId={}", studentId, paperId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "发送通知失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "发送通知失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -100,7 +100,7 @@ public class NotificationServiceImpl implements NotificationService {
             return result;
         } catch (Exception e) {
             log.error("发送论文审核结果通知失败: studentId={}, paperId={}", studentId, paperId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "发送通知失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "发送通知失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -129,7 +129,7 @@ public class NotificationServiceImpl implements NotificationService {
             return result;
         } catch (Exception e) {
             log.error("发送系统公告失败: targetType={}, title={}", targetType, title, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "发送公告失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "发送公告失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -160,7 +160,7 @@ public class NotificationServiceImpl implements NotificationService {
             return result;
         } catch (Exception e) {
             log.error("发送查重结果通知失败: studentId={}, paperId={}", studentId, paperId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "发送通知失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "发送通知失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -186,7 +186,7 @@ public class NotificationServiceImpl implements NotificationService {
             return result;
         } catch (Exception e) {
             log.error("发送紧急通知失败: userId={}, title={}", userId, title, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "发送紧急通知失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "发送紧急通知失败: " + "系统异常，请稍后重试");
         }
     }
 

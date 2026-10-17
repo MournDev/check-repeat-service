@@ -43,7 +43,7 @@ public class StudentProfileController {
             return studentProfileService.getStudentProfile(studentId);
         } catch (Exception e) {
             log.error("获取个人资料失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取个人资料失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取个人资料失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -61,7 +61,7 @@ public class StudentProfileController {
             return studentProfileService.updateProfile(studentId, updateReq);
         } catch (Exception e) {
             log.error("更新个人资料失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "更新个人资料失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "更新个人资料失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -77,7 +77,7 @@ public class StudentProfileController {
             return studentProfileService.getAdvisorInfo(studentId);
         } catch (Exception e) {
             log.error("获取导师信息失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取导师信息失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取导师信息失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -96,7 +96,7 @@ public class StudentProfileController {
             return studentProfileService.sendMessageToAdvisor(studentId, advisorId, content);
         } catch (Exception e) {
             log.error("发送消息失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "发送消息失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "发送消息失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -116,7 +116,7 @@ public class StudentProfileController {
             return studentProfileService.getCommunicationHistory(studentId, advisorId, pageNum, pageSize);
         } catch (Exception e) {
             log.error("获取沟通记录失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取沟通记录失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取沟通记录失败: " + "系统异常，请稍后重试");
         }
     }
 }

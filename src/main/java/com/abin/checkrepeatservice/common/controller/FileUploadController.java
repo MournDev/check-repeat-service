@@ -122,7 +122,7 @@ public class FileUploadController {
 
         } catch (Exception e) {
             log.error("文件上传失败 - 文件名：{}", file.getOriginalFilename(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "文件上传失败：" + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "文件上传失败：" + "系统异常，请稍后重试");
         }
     }
 

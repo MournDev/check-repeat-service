@@ -634,7 +634,7 @@ public class TeacherDataAnalysisImpl implements TeacherDataAnalysisService {
 
             } catch (IOException e) {
                 log.error("导出数据失败: {}", e.getMessage());
-                throw new BusinessException(ResultCode.SYSTEM_ERROR, "导出数据失败: " + e.getMessage());
+                throw new BusinessException(ResultCode.SYSTEM_ERROR, "导出数据失败: " + "系统异常，请稍后重试");
             }
         }
 

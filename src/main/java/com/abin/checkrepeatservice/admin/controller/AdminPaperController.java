@@ -61,7 +61,7 @@ public class AdminPaperController {
             return adminPaperService.getPaperList(page, size, paperStatus, paperType, keyword, startDate, endDate, majorName, grade, checkStatus, minSimilarity, maxSimilarity);
         } catch (Exception e) {
             log.error("获取论文列表失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取论文列表失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取论文列表失败: " + "系统异常，请稍后重试");
         }
     }
     
@@ -95,7 +95,7 @@ public class AdminPaperController {
             return adminPaperService.getPaperDetail(paperId);
         } catch (Exception e) {
             log.error("获取论文详情失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取论文详情失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取论文详情失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -118,7 +118,7 @@ public class AdminPaperController {
             return adminPaperService.auditPaper(paperId, auditResult, auditComment);
         } catch (Exception e) {
             log.error("审核论文失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "审核论文失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "审核论文失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -145,7 +145,7 @@ public class AdminPaperController {
             return adminPaperService.batchAuditPapers(paperIds, auditResult, auditComment);
         } catch (Exception e) {
             log.error("批量审核论文失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "批量审核论文失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "批量审核论文失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -160,7 +160,7 @@ public class AdminPaperController {
             return adminPaperService.deletePaper(paperId);
         } catch (Exception e) {
             log.error("删除论文失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "删除论文失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "删除论文失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -174,7 +174,7 @@ public class AdminPaperController {
             return adminPaperService.getPaperStatistics();
         } catch (Exception e) {
             log.error("获取论文统计信息失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取论文统计信息失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取论文统计信息失败: " + "系统异常，请稍后重试");
         }
     }
 
@@ -197,7 +197,7 @@ public class AdminPaperController {
             return adminPaperService.downloadPaper(paperId);
         } catch (Exception e) {
             log.error("下载论文文件失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "下载论文文件失败: " + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "下载论文文件失败: " + "系统异常，请稍后重试");
         }
     }
     
@@ -211,7 +211,7 @@ public class AdminPaperController {
             return adminPaperService.schoolInternalCheckPaper(paperId);
         } catch (Exception e) {
             log.error("校内查重检测失败：{}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "校内查重检测失败：" + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "校内查重检测失败：" + "系统异常，请稍后重试");
         }
     }
     
@@ -225,7 +225,7 @@ public class AdminPaperController {
             return adminPaperService.batchSchoolInternalCheckPaper(paperIds);
         } catch (Exception e) {
             log.error("批量校内查重检测失败：{}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "批量校内查重检测失败：" + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "批量校内查重检测失败：" + "系统异常，请稍后重试");
         }
     }
     
@@ -239,7 +239,7 @@ public class AdminPaperController {
             return adminPaperService.batchThirdPartyCheckPaper(paperIds);
         } catch (Exception e) {
             log.error("批量第三方查重检测失败：{}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "批量第三方查重检测失败：" + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "批量第三方查重检测失败：" + "系统异常，请稍后重试");
         }
     }
     
@@ -255,7 +255,7 @@ public class AdminPaperController {
             return adminPaperService.batchThirdPartyCheckPaper(paperIds);
         } catch (Exception e) {
             log.error("第三方查重检测失败：{}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "第三方查重检测失败：" + e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "第三方查重检测失败：" + "系统异常，请稍后重试");
         }
     }
 }
