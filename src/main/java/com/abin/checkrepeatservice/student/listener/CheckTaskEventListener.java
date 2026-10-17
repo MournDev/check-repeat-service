@@ -346,7 +346,7 @@ public class CheckTaskEventListener {
         CheckReport checkReport = new CheckReport();
         checkReport.setTaskId(checkTask.getId());
         checkReport.setReportNo(reportNo);
-        checkReport.setRepeatDetails(com.alibaba.fastjson.JSON.toJSONString(repeatDetails));
+        checkReport.setRepeatDetails(com.alibaba.fastjson2.JSON.toJSONString(repeatDetails));
         checkReport.setReportPath(reportPath);
         checkReport.setReportType("pdf");
         // P5 报告验真码：关键要素（任务/编号/三项指标/论文）JSON + 盐 → SHA-256，
@@ -417,7 +417,7 @@ public class CheckTaskEventListener {
             detailSummary.put("maxPerSource", maxPerSource == null ? null : maxPerSource.toPlainString());
             detailSummary.put("citationRate", citationRate == null ? null : citationRate.toPlainString());
             detailSummary.put("hitSentenceCount", sentenceHits.size());
-            dbCheckResult.setCheckDetails(com.alibaba.fastjson.JSON.toJSONString(detailSummary));
+            dbCheckResult.setCheckDetails(com.alibaba.fastjson2.JSON.toJSONString(detailSummary));
 
             UserBusinessInfoUtils.setAuditField(dbCheckResult, true);
             checkResultMapper.insert(dbCheckResult);

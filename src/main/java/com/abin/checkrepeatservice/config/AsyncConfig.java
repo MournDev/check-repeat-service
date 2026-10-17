@@ -3,7 +3,7 @@ package com.abin.checkrepeatservice.config;
 import com.abin.checkrepeatservice.admin.dto.PerformanceConfigDTO;
 import com.abin.checkrepeatservice.admin.mapper.SystemConfigMapper;
 import com.abin.checkrepeatservice.pojo.entity.SystemConfig;
-import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson2.JSON;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

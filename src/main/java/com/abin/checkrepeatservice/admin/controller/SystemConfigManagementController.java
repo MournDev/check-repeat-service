@@ -5,7 +5,8 @@ import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.annotation.OperationLog;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.pojo.entity.SystemConfig;
-import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONWriter;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
@@ -258,8 +259,8 @@ public class SystemConfigManagementController {
             response.setCharacterEncoding("utf-8");
             response.setHeader("Content-Disposition", "attachment;filename=" + encodedFileName);
             
-            // 写入JSON数据
-            String jsonContent = JSON.toJSONString(allConfig, true);
+            // 写入JSON数据（fastjson2 用 PrettyFormat 特性替代 1.x 的 toJSONString(obj, true)）
+            String jsonContent = JSON.toJSONString(allConfig, JSONWriter.Feature.PrettyFormat);
             response.getWriter().write(jsonContent);
             response.getWriter().flush();
             

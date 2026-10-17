@@ -16,7 +16,7 @@ import com.abin.checkrepeatservice.pojo.entity.CheckRule;
 import com.abin.checkrepeatservice.pojo.entity.CompareLib;
 import com.abin.checkrepeatservice.pojo.entity.SystemConfig;
 import com.abin.checkrepeatservice.pojo.entity.SystemParam;
-import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson2.JSON;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import jakarta.annotation.Resource;
 import jakarta.validation.Valid;

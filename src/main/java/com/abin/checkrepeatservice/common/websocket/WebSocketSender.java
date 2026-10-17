@@ -1,7 +1,7 @@
 package com.abin.checkrepeatservice.common.websocket;
 
 import com.abin.checkrepeatservice.common.websocket.manager.WebSocketConnectionManager;
-import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson2.JSON;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
