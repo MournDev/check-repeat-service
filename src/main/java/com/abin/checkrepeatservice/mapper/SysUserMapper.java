@@ -4,9 +4,11 @@ import com.abin.checkrepeatservice.pojo.entity.SysUser;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 import java.util.List;
+import java.util.Map;
 
 @Mapper
 public  interface SysUserMapper extends BaseMapper<SysUser> {
@@ -49,4 +51,12 @@ public  interface SysUserMapper extends BaseMapper<SysUser> {
      * @return 邮箱对应的用户
      */
     SysUser selectByEmail(String email);
+
+    /**
+     * S14：用户按类型聚合（单条 GROUP BY），替代仪表盘原先总数+三类共 4 次 selectCount。
+     * user_type 为 NULL 的账号单独成组（其 cnt 仍计入总用户数，由调用方对所有行求和）。
+     */
+    @Select("SELECT user_type AS userType, COUNT(*) AS cnt " +
+            "FROM sys_user WHERE is_deleted = 0 GROUP BY user_type")
+    List<Map<String, Object>> selectUserTypeStats();
 }

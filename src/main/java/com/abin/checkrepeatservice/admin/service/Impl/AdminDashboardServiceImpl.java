@@ -17,6 +17,7 @@ import com.abin.checkrepeatservice.pojo.entity.SysLoginLog;
 import com.abin.checkrepeatservice.pojo.entity.SysUser;
 import com.abin.checkrepeatservice.user.mapper.SysLoginLogMapper;
 import com.abin.checkrepeatservice.user.service.SysUserService;
+import com.abin.checkrepeatservice.mapper.SysUserMapper;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.extern.slf4j.Slf4j;
@@ -37,6 +38,9 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
 
     @Resource
     private SysUserService sysUserService;
+
+    @Resource
+    private SysUserMapper sysUserMapper;
     
     @Resource
     private PaperInfoMapper paperInfoMapper;
@@ -62,86 +66,79 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
             Map<String, Object> stats = new HashMap<>();
             
             // 用户统计
-            Long totalUsers = sysUserService.count(new LambdaQueryWrapper<SysUser>()
-                    .eq(SysUser::getIsDeleted, 0));
+            // S14：原「总数 + 管理员/学生/教师」共 4 次 count 合并为一条 GROUP BY
+            List<Map<String, Object>> userTypeRows = sysUserMapper.selectUserTypeStats();
+            long totalUsers = 0L;
+            Map<String, Long> usersByType = new HashMap<>();
+            for (Map<String, Object> row : userTypeRows) {
+                long cnt = row.get("cnt") == null ? 0L : ((Number) row.get("cnt")).longValue();
+                totalUsers += cnt;
+                Object userType = row.get("userType");
+                if (userType != null) {
+                    usersByType.put(userType.toString(), cnt);
+                }
+            }
             stats.put("totalUsers", totalUsers);
-            
-            // 各类型用户统计
-            Long adminCount = sysUserService.count(new LambdaQueryWrapper<SysUser>()
-                    .eq(SysUser::getUserType, "ADMIN")
-                    .eq(SysUser::getIsDeleted, 0));
-            Long studentCount = sysUserService.count(new LambdaQueryWrapper<SysUser>()
-                    .eq(SysUser::getUserType, "STUDENT")
-                    .eq(SysUser::getIsDeleted, 0));
-            Long teacherCount = sysUserService.count(new LambdaQueryWrapper<SysUser>()
-                    .eq(SysUser::getUserType, "TEACHER")
-                    .eq(SysUser::getIsDeleted, 0));
-            
-            stats.put("admins", adminCount);
-            stats.put("students", studentCount);
-            stats.put("teachers", teacherCount);
+
+            stats.put("admins", usersByType.getOrDefault("ADMIN", 0L));
+            stats.put("students", usersByType.getOrDefault("STUDENT", 0L));
+            stats.put("teachers", usersByType.getOrDefault("TEACHER", 0L));
             
             // 论文统计
-            Long totalPapers = paperInfoMapper.selectCount(null);
+            // 时间边界提前声明：下方聚合与「今日访问」卡片都要用 todayStart
+            LocalDateTime todayStart = LocalDateTime.now().withHour(0).withMinute(0).withSecond(0);
+            LocalDateTime weekStart = LocalDateTime.now().minusDays(7);
+            LocalDateTime monthStart = LocalDateTime.now().minusDays(30);
+
+            // S14：原 总数/有效/撤回/5 状态/今周月新增共 11 次 selectCount 合并为一条 GROUP BY 聚合
+            List<Map<String, Object>> paperRows =
+                    paperInfoMapper.selectPaperStatusStats(todayStart, weekStart, monthStart);
+            long totalPapers = 0L;
+            long nullStatusPapers = 0L;
+            long todaySubmissions = 0L;
+            long weekSubmissions = 0L;
+            long monthSubmissions = 0L;
+            Map<String, Long> papersByStatus = new HashMap<>();
+            for (Map<String, Object> row : paperRows) {
+                long cnt = row.get("cnt") == null ? 0L : ((Number) row.get("cnt")).longValue();
+                totalPapers += cnt;
+                todaySubmissions += row.get("todayCnt") == null ? 0L : ((Number) row.get("todayCnt")).longValue();
+                weekSubmissions += row.get("weekCnt") == null ? 0L : ((Number) row.get("weekCnt")).longValue();
+                monthSubmissions += row.get("monthCnt") == null ? 0L : ((Number) row.get("monthCnt")).longValue();
+                Object status = row.get("status");
+                if (status == null) {
+                    nullStatusPapers += cnt;
+                } else {
+                    papersByStatus.put(status.toString(), cnt);
+                }
+            }
             stats.put("totalPapers", totalPapers);
-            
-            // 【新增】有效论文数（排除已撤回）
-            Long validPapers = paperInfoMapper.selectCount(
-                new LambdaQueryWrapper<PaperInfo>()
-                    .ne(PaperInfo::getPaperStatus, DictConstants.PaperStatus.WITHDRAWN)
-                    .eq(PaperInfo::getIsDeleted, 0)
-            );
+
+            long withdrawnPapers = papersByStatus.getOrDefault(DictConstants.PaperStatus.WITHDRAWN, 0L);
+            // 有效论文=非撤回；原 SQL 用 ne 比较，status IS NULL 的行同样不命中，这里减去 null 组保持同口径
+            long validPapers = totalPapers - withdrawnPapers - nullStatusPapers;
             stats.put("validPapers", validPapers);
-            
-            // 【新增】撤回论文统计
-            Long withdrawnPapers = paperInfoMapper.selectCount(
-                new LambdaQueryWrapper<PaperInfo>()
-                    .eq(PaperInfo::getPaperStatus, DictConstants.PaperStatus.WITHDRAWN)
-                    .eq(PaperInfo::getIsDeleted, 0)
-            );
             stats.put("withdrawnPapers", withdrawnPapers);
-            
-            // 【新增】撤回率计算
+
+            // 撤回率计算（口径不变）
             if (totalPapers > 0) {
-                Double withdrawalRate = withdrawnPapers.doubleValue() / totalPapers * 100;
+                Double withdrawalRate = (double) withdrawnPapers / totalPapers * 100;
                 stats.put("withdrawalRate", String.format("%.2f%%", withdrawalRate));
             }
-            
+
             // 不同状态论文统计
-            Long pendingPapers = paperInfoMapper.selectCount(new LambdaQueryWrapper<PaperInfo>()
-                    .eq(PaperInfo::getPaperStatus, DictConstants.PaperStatus.PENDING));
-            Long checkingPapers = paperInfoMapper.selectCount(new LambdaQueryWrapper<PaperInfo>()
-                    .eq(PaperInfo::getPaperStatus, DictConstants.PaperStatus.CHECKING));
-            Long auditingPapers = paperInfoMapper.selectCount(new LambdaQueryWrapper<PaperInfo>()
-                    .eq(PaperInfo::getPaperStatus, DictConstants.PaperStatus.AUDITING));
-            Long completedPapers = paperInfoMapper.selectCount(new LambdaQueryWrapper<PaperInfo>()
-                    .eq(PaperInfo::getPaperStatus, DictConstants.PaperStatus.COMPLETED));
-            Long rejectedPapers = paperInfoMapper.selectCount(new LambdaQueryWrapper<PaperInfo>()
-                    .eq(PaperInfo::getPaperStatus, DictConstants.PaperStatus.REJECTED));
-            
-            stats.put("pendingPapers", pendingPapers);
-            stats.put("checkingPapers", checkingPapers);
-            stats.put("auditingPapers", auditingPapers);
-            stats.put("completedPapers", completedPapers);
-            stats.put("rejectedPapers", rejectedPapers);
-            
+            stats.put("pendingPapers", papersByStatus.getOrDefault(DictConstants.PaperStatus.PENDING, 0L));
+            stats.put("checkingPapers", papersByStatus.getOrDefault(DictConstants.PaperStatus.CHECKING, 0L));
+            stats.put("auditingPapers", papersByStatus.getOrDefault(DictConstants.PaperStatus.AUDITING, 0L));
+            stats.put("completedPapers", papersByStatus.getOrDefault(DictConstants.PaperStatus.COMPLETED, 0L));
+            stats.put("rejectedPapers", papersByStatus.getOrDefault(DictConstants.PaperStatus.REJECTED, 0L));
+
             // 高相似度论文统计
             Long highSimilarityPapers = checkResultMapper.selectCount(new LambdaQueryWrapper<CheckResult>()
                     .ge(CheckResult::getRepeatRate, new BigDecimal("80")));
             stats.put("highSimilarityPapers", highSimilarityPapers);
-            
-            // 时间维度统计
-            LocalDateTime todayStart = LocalDateTime.now().withHour(0).withMinute(0).withSecond(0);
-            LocalDateTime weekStart = LocalDateTime.now().minusDays(7);
-            LocalDateTime monthStart = LocalDateTime.now().minusDays(30);
-            
-            Long todaySubmissions = paperInfoMapper.selectCount(new LambdaQueryWrapper<PaperInfo>()
-                    .ge(PaperInfo::getCreateTime, todayStart));
-            Long weekSubmissions = paperInfoMapper.selectCount(new LambdaQueryWrapper<PaperInfo>()
-                    .ge(PaperInfo::getCreateTime, weekStart));
-            Long monthSubmissions = paperInfoMapper.selectCount(new LambdaQueryWrapper<PaperInfo>()
-                    .ge(PaperInfo::getCreateTime, monthStart));
-            
+
+            // 时间维度统计（计数来自上面的聚合）
             stats.put("todaySubmissions", todaySubmissions);
             stats.put("weekSubmissions", weekSubmissions);
             stats.put("monthSubmissions", monthSubmissions);
