@@ -197,7 +197,9 @@ public class AuthServiceImpl implements AuthService {
                     loginDevice, 0, be.getMessage());
             businessMetricsService.record(BusinessMetricsService.Event.USER_LOGIN,
                     BusinessMetricsService.Outcome.FAILURE);
-            return Result.error(be.getResultCode(), be.getMessage());
+            // 响应形态统一：rethrow 交 GlobalExceptionHandler 转「真 429」
+            // （直接 return Result 会变成 HTTP 200 + 42901，网关/监控无法按状态码统计攻击量）
+            throw be;
         }
 
         // 1. 执行Spring Security认证（用户名+密码校验）
@@ -225,7 +227,9 @@ public class AuthServiceImpl implements AuthService {
                         loginDevice, 0, lockMsg);
                 businessMetricsService.record(BusinessMetricsService.Event.USER_LOGIN,
                         BusinessMetricsService.Outcome.FAILURE);
-                return Result.error(ResultCode.LOGIN_TOO_MANY_ATTEMPTS, lockMsg);
+                // 响应形态统一：抛 BusinessException 交 GlobalExceptionHandler 转「真 429」，
+                // 与前置检查路径一致（ResultCode 声明的 TOO_MANY_REQUESTS 仅在异常路径生效）
+                throw new BusinessException(ResultCode.LOGIN_TOO_MANY_ATTEMPTS, lockMsg);
             }
             log.warn("用户登录失败：用户名={}，原因=用户名或密码错误，剩余尝试次数={}",
                     loginReq.getUsername(), outcome.getRemainingAttempts());
