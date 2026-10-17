@@ -21,6 +21,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.context.SecurityContextHolderFilter;
 
 /**
  * Spring Security配置：权限控制、JWT集成、安全过滤
@@ -175,8 +176,12 @@ public class SecurityConfig {
                         .anyRequest().authenticated())
                 // 注册认证提供者
                 .authenticationProvider(authenticationProvider())
-                // S9：XSS 输入过滤放在 JWT 过滤器之前，保证登录/注册等匿名入口也被覆盖
-                .addFilterBefore(xssFilter, JwtAuthenticationFilter.class)
+                // S9：XSS 输入过滤放在 Security 链前段，保证登录/注册等匿名入口也被覆盖。
+                // 注意：addFilterBefore/After 的锚点必须是 Spring Security 内置过滤器——
+                // 自定义过滤器（如 JwtAuthenticationFilter）未在 FilterOrderRegistration 注册
+                // order，作为锚点会在启动时抛 IllegalArgumentException:
+                // "does not have a registered order"（此 bug 曾导致 prod 启动失败）
+                .addFilterBefore(xssFilter, SecurityContextHolderFilter.class)
                 // 在UsernamePasswordAuthenticationFilter之前添加JWT认证过滤器
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
