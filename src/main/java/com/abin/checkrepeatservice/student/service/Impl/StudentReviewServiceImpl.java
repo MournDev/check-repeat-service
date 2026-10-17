@@ -4,8 +4,10 @@ import com.abin.checkrepeatservice.common.Exception.BusinessException;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.constant.DictConstants;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
+import com.abin.checkrepeatservice.admin.mapper.PaperSubmitMapper;
 import com.abin.checkrepeatservice.mapper.SysUserMapper;
 import com.abin.checkrepeatservice.pojo.entity.*;
+import com.abin.checkrepeatservice.student.event.PaperSubmittedEvent;
 import com.abin.checkrepeatservice.student.vo.PaperReSubmitReq;
 import com.abin.checkrepeatservice.student.dto.StudentReviewDetailDTO;
 import com.abin.checkrepeatservice.student.vo.StudentReviewQueryReq;
@@ -23,6 +25,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
@@ -65,6 +68,12 @@ public class StudentReviewServiceImpl extends ServiceImpl<PaperInfoMapper, Paper
     @Resource
     private CheckRuleMapper checkRuleMapper;
 
+    @Resource
+    private PaperSubmitMapper paperSubmitMapper;
+
+    @Resource
+    private ApplicationEventPublisher eventPublisher;
+
     // 论文存储根路径（复用之前的配置）
     @Value("${paper.upload.base-path:/data/paper-upload}")
     private String paperBasePath;
@@ -81,7 +90,6 @@ public class StudentReviewServiceImpl extends ServiceImpl<PaperInfoMapper, Paper
         Long currentStudentId = UserBusinessInfoUtils.getCurrentUserId();
         Integer currentPage = queryReq.getCurrentPage();
         Integer pageSize = queryReq.getPageSize();
-        Integer paperStatus = queryReq.getPaperStatus();
 
         // 1. 构建分页查询条件（仅查询当前学生的论文）
         Page<PaperInfo> paperPage = new Page<>(currentPage, pageSize);
@@ -89,26 +97,45 @@ public class StudentReviewServiceImpl extends ServiceImpl<PaperInfoMapper, Paper
         paperWrapper.eq(PaperInfo::getStudentId, currentStudentId)
                 .eq(PaperInfo::getIsDeleted, 0);
 
-        // 2. 按论文状态过滤（可选：2-待审核，3-通过，4-不通过）
-        if (paperStatus != null && Arrays.asList(2, 3, 4).contains(paperStatus)) {
-            paperWrapper.eq(PaperInfo::getPaperStatus, paperStatus);
+        // 2. 按论文状态过滤（前端数字码 → paper_info.paper_status 的 varchar 字典值：
+        //    2-待审核 auditing，3-审核通过 completed，4-审核不通过 rejected）。
+        //    旧代码直接把 Integer 传给 varchar 列做 eq，MyBatis 拼出 paper_status = 2，
+        //    字符串列与数字经隐式转换后无一匹配，带筛选的请求恒为空。
+        Integer paperStatus = queryReq.getPaperStatus();
+        String statusFilter = mapReviewStatusCode(paperStatus);
+        if (statusFilter != null) {
+            paperWrapper.eq(PaperInfo::getPaperStatus, statusFilter);
         }
 
         // 3. 执行分页查询（按提交时间倒序，最新的在前）
         IPage<PaperInfo> paperIPage = baseMapper.selectPage(paperPage, paperWrapper);
-        List<PaperInfo> paperList = paperIPage.getRecords();
-        if (CollectionUtils.isEmpty(paperList)) {
-            return Result.success("审核结果列表查询成功", new Page<>());
-        }
 
         // 4. 批量转换为学生端DTO（减少SQL查询）
-        List<StudentReviewDetailDTO> detailDTOList = convertToStudentReviewDTO(paperList);
+        List<StudentReviewDetailDTO> detailDTOList = convertToStudentReviewDTO(paperIPage.getRecords());
 
-        // 5. 构建分页结果
-        Page<StudentReviewDetailDTO> pageInfo = new Page<>(
-        );
+        // 5. 构建分页结果（旧代码返回 new Page<>() 空对象，records/total/pages 从未回填）
+        Page<StudentReviewDetailDTO> pageInfo = new Page<>(paperIPage.getCurrent(), paperIPage.getSize());
+        pageInfo.setRecords(detailDTOList);
+        pageInfo.setTotal(paperIPage.getTotal());
+        pageInfo.setPages(paperIPage.getPages());
 
         return Result.success("审核结果列表查询成功", pageInfo);
+    }
+
+    /**
+     * 学生审核列表状态码映射：2-待审核 / 3-审核通过 / 4-审核不通过；
+     * null 或其他值不做状态过滤（与旧实现对非法码的宽松口径一致）。
+     */
+    private String mapReviewStatusCode(Integer code) {
+        if (code == null) {
+            return null;
+        }
+        return switch (code) {
+            case 2 -> DictConstants.PaperStatus.AUDITING;
+            case 3 -> DictConstants.PaperStatus.COMPLETED;
+            case 4 -> DictConstants.PaperStatus.REJECTED;
+            default -> null;
+        };
     }
 
     @Override
@@ -194,9 +221,12 @@ public class StudentReviewServiceImpl extends ServiceImpl<PaperInfoMapper, Paper
         if (!originalPaper.getStudentId().equals(currentStudentId)) {
             return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权限重新提交他人论文");
         }
-        if (originalPaper.getPaperStatus()!= DictConstants.CheckStatus.FAILURE) {
+        // 仅「审核不通过(rejected)」的论文可重新提交。
+        // 旧代码误用 CheckStatus.FAILURE（"failure"=查重失败）且以 != 比较 String 引用，
+        // 条件对任何状态恒为 true，接口此前对所有请求都报"仅审核不通过可重新提交"。
+        if (!DictConstants.PaperStatus.REJECTED.equals(originalPaper.getPaperStatus())) {
             return Result.error(ResultCode.PERMISSION_NOT_STATUS,
-                    String.format("仅审核不通过（状态4）的论文可重新提交，当前状态：%s", getPaperStatusDesc(Integer.valueOf(originalPaper.getPaperStatus()))));
+                    String.format("仅审核不通过的论文可重新提交，当前状态：%s", originalPaper.getPaperStatus()));
         }
 
         // 1.2 校验修改后文件
@@ -220,11 +250,36 @@ public class StudentReviewServiceImpl extends ServiceImpl<PaperInfoMapper, Paper
         // 2. 保存修改后的论文文件
         String revisedPaperPath = saveRevisedPaperFile(revisedFile, currentStudentId, originalPaperId);
 
-        // 3. 生成新的论文记录（原论文保留，新增重新提交记录）
+        // 3. 生成新的论文记录（原论文保留，新增修改版，靠 parent_paper_id 精确关联）
+        // 3.1 链式重提（修改版再次被驳回后又重提）时父版本始终指向根论文，标题也基于
+        //     根标题生成，避免出现「xxx(修改版_日期)(修改版_日期)」且查询断链
+        Long rootPaperId = originalPaper.getParentPaperId() != null
+                ? originalPaper.getParentPaperId() : originalPaperId;
+        PaperInfo rootPaper = rootPaperId.equals(originalPaperId)
+                ? originalPaper : baseMapper.selectById(rootPaperId);
+        if (rootPaper == null || rootPaper.getIsDeleted() == 1) {
+            return Result.error(ResultCode.RESOURCE_NOT_FOUND, "原论文的根版本不存在或已删除");
+        }
+
         PaperInfo revisedPaper = new PaperInfo();
-        // 基础信息（复用原论文的标题、教师ID等）
-        revisedPaper.setPaperTitle(originalPaper.getPaperTitle() + "(修改版_" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd")) + ")");
+        revisedPaper.setPaperTitle(rootPaper.getPaperTitle() + "(修改版_" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd")) + ")");
         revisedPaper.setStudentId(currentStudentId);
+        // 父子版本关联（version/parent_paper_id 两列 init.sql 早已声明，此前实体未映射、插入漏写）
+        revisedPaper.setParentPaperId(rootPaperId);
+        revisedPaper.setVersion((originalPaper.getVersion() != null ? originalPaper.getVersion() : 1) + 1);
+        // 继承原论文归属与业务属性：否则修改版没有导师/文件路径/论文类型，后续查重与审核全断
+        revisedPaper.setTeacherId(originalPaper.getTeacherId());
+        revisedPaper.setTeacherName(originalPaper.getTeacherName());
+        revisedPaper.setCollegeId(originalPaper.getCollegeId());
+        revisedPaper.setMajorId(originalPaper.getMajorId());
+        revisedPaper.setAuthor(originalPaper.getAuthor());
+        revisedPaper.setPaperType(originalPaper.getPaperType());
+        revisedPaper.setPaperAbstract(originalPaper.getPaperAbstract());
+        revisedPaper.setDegreeType(originalPaper.getDegreeType());
+        revisedPaper.setSubjectCode(originalPaper.getSubjectCode());
+        revisedPaper.setSubjectId(originalPaper.getSubjectId());
+        revisedPaper.setAllocationType(originalPaper.getAllocationType());
+        revisedPaper.setAllocationStatus(originalPaper.getAllocationStatus());
         // 计算文件MD5（防重复上传）
         String fileMd5;
         try {
@@ -234,17 +289,34 @@ public class StudentReviewServiceImpl extends ServiceImpl<PaperInfoMapper, Paper
             throw new BusinessException(ResultCode.SYSTEM_ERROR, "文件校验失败，请重试");
         }
         revisedPaper.setFileMd5(fileMd5);
-        // 状态：0-待查重，提交时间：当前时间
+        // 文件落盘路径此前只存了局部变量从未写库，查重链路按 file_path 取文件必然读不到
+        revisedPaper.setFilePath(revisedPaperPath);
         revisedPaper.setSubmitTime(LocalDateTime.now());
         revisedPaper.setPaperStatus(DictConstants.PaperStatus.PENDING);
         // 填充审计字段（创建人=当前学生）
         UserBusinessInfoUtils.setAuditField(revisedPaper, true);
         baseMapper.insert(revisedPaper);
 
-        // 4. 记录修改说明（可选：可新增re_submit_record表，此处简化为在原论文备注中记录）
-        baseMapper.updateById(originalPaper);
+        // 4. 写 paper_submit 版本记录（与主提交/撤回重提同一版本体系），修改说明落 remark
+        PaperSubmit submitRecord = new PaperSubmit();
+        submitRecord.setPaperId(revisedPaper.getId());
+        submitRecord.setStudentId(currentStudentId);
+        submitRecord.setSubmitVersion(1);
+        submitRecord.setFileMd5(fileMd5);
+        submitRecord.setSubmitTime(LocalDateTime.now());
+        String submitRemark = "审核不通过重新提交";
+        if (StringUtils.hasText(revisionDesc)) {
+            submitRemark += "；修改说明：" + revisionDesc.trim();
+        }
+        submitRecord.setRemark(submitRemark.length() > 500 ? submitRemark.substring(0, 500) : submitRemark);
+        paperSubmitMapper.insert(submitRecord);
 
-        // 5. 构建返回结果
+        // 5. 事务提交后异步走「分配导师 + 触发查重」（与主链路同一事件监听器）。
+        //    修改版已继承原导师：autoAssignAdvisor 见 teacherId 非空会直接返回成功，
+        //    不会重新分配给别人，随后正常触发查重。
+        eventPublisher.publishEvent(new PaperSubmittedEvent(this, revisedPaper.getId(), currentStudentId));
+
+        // 6. 构建返回结果
         Map<String, Object> resultMap = new HashMap<>(4);
         resultMap.put("revisedPaperId", revisedPaper.getId());
         resultMap.put("reSubmitTime", revisedPaper.getSubmitTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
@@ -270,17 +342,19 @@ public class StudentReviewServiceImpl extends ServiceImpl<PaperInfoMapper, Paper
             return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权限查看他人论文的重新提交记录");
         }
 
-        // 2. 查询重新提交记录（通过标题中的“修改版”标识，或通过关联表，此处简化）
+        // 2. 按 parent_paper_id 精确查询该原论文的修改版（链式重提也统一挂根论文ID）
         Page<PaperInfo> paperPage = new Page<>(currentPage, pageSize);
         LambdaQueryWrapper<PaperInfo> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(PaperInfo::getStudentId, currentStudentId)
-                .like(PaperInfo::getPaperTitle, "修改版")
+        wrapper.eq(PaperInfo::getParentPaperId, originalPaperId)
                 .eq(PaperInfo::getIsDeleted, 0)
                 .orderByDesc(PaperInfo::getSubmitTime);
 
         IPage<PaperInfo> paperIPage = baseMapper.selectPage(paperPage, wrapper);
-        Page<PaperInfo> pageInfo = new Page<>(
-        );
+        // 旧代码返回 new Page<>() 空对象，分页查询结果从未带给前端
+        Page<PaperInfo> pageInfo = new Page<>(paperIPage.getCurrent(), paperIPage.getSize());
+        pageInfo.setRecords(paperIPage.getRecords());
+        pageInfo.setTotal(paperIPage.getTotal());
+        pageInfo.setPages(paperIPage.getPages());
 
         return Result.success("重新提交记录查询成功", pageInfo);
     }
@@ -333,6 +407,52 @@ public class StudentReviewServiceImpl extends ServiceImpl<PaperInfoMapper, Paper
             reviewMap.put(entry.getKey(), latestReview);
         }
 
+        // S10 性能修复：批量查询本页全部成功任务关联的查重报告，避免在下方循环内逐篇 selectById（N+1）
+        List<Long> reportIds = taskMap.values().stream()
+                .map(CheckTask::getReportId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+        Map<Long, CheckReport> reportMap = reportIds.isEmpty() ? new HashMap<>()
+                : checkReportMapper.selectBatchIds(reportIds).stream()
+                        .collect(Collectors.toMap(CheckReport::getId, r -> r));
+
+        // 修改版↔原论文精确关联：一次查出本页所有原论文（parent_paper_id IN paperIds）
+        // 的修改版，按原论文分组取 submit_time 最新一条；修改说明从 paper_submit.remark
+        // 批量取。替代旧实现「全局标题 LIKE '%修改版%' 取一条共享给每篇」的串数据问题。
+        Map<Long, PaperInfo> latestResubmitMap = new HashMap<>();
+        Map<Long, String> resubmitRemarkMap = new HashMap<>();
+        List<PaperInfo> resubmitPapers = baseMapper.selectList(
+                new LambdaQueryWrapper<PaperInfo>()
+                        .in(PaperInfo::getParentPaperId, paperIds)
+                        .eq(PaperInfo::getIsDeleted, 0));
+        if (!resubmitPapers.isEmpty()) {
+            Map<Long, List<PaperInfo>> resubmitGroup = resubmitPapers.stream()
+                    .collect(Collectors.groupingBy(PaperInfo::getParentPaperId));
+            List<Long> resubmitPaperIds = resubmitPapers.stream()
+                    .map(PaperInfo::getId)
+                    .collect(Collectors.toList());
+            Map<Long, List<PaperSubmit>> submitGroup = paperSubmitMapper.selectList(
+                            new LambdaQueryWrapper<PaperSubmit>()
+                                    .in(PaperSubmit::getPaperId, resubmitPaperIds))
+                    .stream()
+                    .collect(Collectors.groupingBy(PaperSubmit::getPaperId));
+            for (Map.Entry<Long, List<PaperInfo>> entry : resubmitGroup.entrySet()) {
+                PaperInfo latest = entry.getValue().stream()
+                        .max(Comparator.comparing(PaperInfo::getSubmitTime))
+                        .orElse(null);
+                if (latest == null) {
+                    continue;
+                }
+                latestResubmitMap.put(entry.getKey(), latest);
+                submitGroup.getOrDefault(latest.getId(), Collections.emptyList()).stream()
+                        .max(Comparator.comparing(PaperSubmit::getSubmitVersion,
+                                Comparator.nullsFirst(Integer::compareTo)))
+                        .map(PaperSubmit::getRemark)
+                        .ifPresent(remark -> resubmitRemarkMap.put(latest.getId(), remark));
+            }
+        }
+
 //        // 1.4 批量查询教师信息（Map<教师ID, 教师实体>）
 //        Set<Long> teacherIds = paperList.stream()
 //                .map(PaperInfo::getTeacherId)
@@ -362,8 +482,8 @@ public class StudentReviewServiceImpl extends ServiceImpl<PaperInfoMapper, Paper
                 StudentReviewDetailDTO.CheckCoreDTO checkCore = new StudentReviewDetailDTO.CheckCoreDTO();
                 checkCore.setCheckRate(task.getCheckRate() != null ? task.getCheckRate().doubleValue() : 0.0);
 //                checkCore.setCheckTime(task.getEndTime().format("yyyy-MM-dd HH:mm:ss"));
-                // 构建查重报告下载URL
-                CheckReport report = checkReportMapper.selectById(task.getReportId());
+                // 构建查重报告下载URL（取自批量预载 Map）
+                CheckReport report = task.getReportId() == null ? null : reportMap.get(task.getReportId());
                 if (report != null) {
                     String reportDownloadUrl = "/api/student/reports/download?reportId=" + report.getId();
                     checkCore.setReportDownloadUrl(reportDownloadUrl);
@@ -399,28 +519,15 @@ public class StudentReviewServiceImpl extends ServiceImpl<PaperInfoMapper, Paper
                 dto.setReviewResult(reviewResult);
             }
 
-            // 2.4 填充最新重新提交记录（若有）
-            StudentReviewDetailDTO.LatestResubmitDTO latestResubmit = getLatestResubmitRecord(paper.getId());
+            // 2.4 填充最新重新提交记录（按 parent_paper_id 精确匹配本篇）
+            PaperInfo latestResubmit = latestResubmitMap.get(paper.getId());
             if (latestResubmit != null) {
-                dto.setLatestResubmit(latestResubmit);
+                dto.setLatestResubmit(buildLatestResubmitDTO(latestResubmit,
+                        resubmitRemarkMap.get(latestResubmit.getId())));
             }
 
             return dto;
         }).collect(Collectors.toList());
-    }
-
-    /**
-     * 获取论文状态描述
-     */
-    private String getPaperStatusDesc(Integer status) {
-        return switch (status) {
-            case 0 -> "待查重";
-            case 1 -> "查重中";
-            case 2 -> "待审核";
-            case 3 -> "审核通过";
-            case 4 -> "审核不通过";
-            default -> "未知状态";
-        };
     }
 
     /**
@@ -455,35 +562,21 @@ public class StudentReviewServiceImpl extends ServiceImpl<PaperInfoMapper, Paper
     }
 
     /**
-     * 获取原论文的最新重新提交记录
+     * 组装「最新修改版」DTO。
+     * 修改说明来自 paper_submit.remark（写入格式见 reSubmitPaper：「审核不通过重新提交；修改说明：xxx」）。
      */
-    private StudentReviewDetailDTO.LatestResubmitDTO getLatestResubmitRecord(Long originalPaperId) {
-        // 查询标题含“修改版”且备注含原论文ID的最新论文
-        LambdaQueryWrapper<PaperInfo> wrapper = new LambdaQueryWrapper<>();
-        wrapper.like(PaperInfo::getPaperTitle, "修改版")
-//                .like(PaperInfo::getRemark, "原论文ID：" + originalPaperId)
-                .eq(PaperInfo::getIsDeleted, 0)
-                .orderByDesc(PaperInfo::getSubmitTime)
-                .last("LIMIT 1");
-
-        PaperInfo resubmitPaper = baseMapper.selectOne(wrapper);
-        if (resubmitPaper == null) {
-            return null;
-        }
-
-        // 转换为DTO
+    private StudentReviewDetailDTO.LatestResubmitDTO buildLatestResubmitDTO(PaperInfo resubmitPaper, String submitRemark) {
         StudentReviewDetailDTO.LatestResubmitDTO resubmitDTO = new StudentReviewDetailDTO.LatestResubmitDTO();
         resubmitDTO.setResubmitPaperId(resubmitPaper.getId());
         resubmitDTO.setResubmitTime(resubmitPaper.getSubmitTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
-        // 提取修改说明（从备注中截取）
-//        String remark = resubmitPaper.getRemark();
-//        if (StringUtils.hasText(remark) && remark.contains("修改说明：")) {
-//            String revisionDesc = remark.substring(remark.indexOf("修改说明：") + 5);
-//            resubmitDTO.setRevisionDesc(revisionDesc);
-//        } else {
-//            resubmitDTO.setRevisionDesc("无");
-//        }
-
+        String revisionDesc = "无";
+        if (StringUtils.hasText(submitRemark)) {
+            int markerIndex = submitRemark.indexOf("修改说明：");
+            if (markerIndex >= 0) {
+                revisionDesc = submitRemark.substring(markerIndex + "修改说明：".length());
+            }
+        }
+        resubmitDTO.setRevisionDesc(revisionDesc);
         return resubmitDTO;
     }
 }

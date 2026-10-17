@@ -296,4 +296,20 @@ public class PaperInfo extends BaseEntity implements Serializable {
      */
     @TableField("segmented_path")
     private String segmentedPath;
+
+    /**
+     * 论文版本号（初版为 1；审核不通过后每重新提交生成一个修改版时在上一版基础上 +1。
+     * 列见 db/init.sql 与 db/存量修复.sql 段 1.17；注意这不是 MyBatis-Plus 乐观锁版本）
+     */
+    @TableField("version")
+    private Integer version;
+
+    /**
+     * 父版本论文ID（修改版指向被驳回原论文的 paper_info.id；链式重提时始终指向根论文；
+     * 初版为 NULL。学生端「审核不通过后重新提交」靠这一列做精确关联，
+     * 不再依赖标题 LIKE '%修改版%'）
+     */
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
+    @TableField("parent_paper_id")
+    private Long parentPaperId;
 }

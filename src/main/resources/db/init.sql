@@ -1168,7 +1168,8 @@ CREATE TABLE `paper_info` (
   KEY `idx_paper_info_delete_by` (`delete_by`),
   KEY `idx_paper_info_lib_id` (`lib_id`),
   KEY `idx_paper_info_subject_id` (`subject_id`),
-  KEY `idx_pi_degree` (`degree_type`)
+  KEY `idx_pi_degree` (`degree_type`),
+  KEY `idx_pi_parent_paper_id` (`parent_paper_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='论文信息表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 

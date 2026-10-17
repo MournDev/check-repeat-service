@@ -183,6 +183,13 @@ SELECT COUNT(*) AS lifecycle_new_cols FROM information_schema.COLUMNS
      OR (TABLE_NAME = 'check_report' AND COLUMN_NAME = 'content_hash')
      OR (TABLE_NAME = 'system_param' AND COLUMN_NAME IN ('guidance_weight','review_weight','defense_weight')));
 
+-- 0.12 段 1.17 paper_info 版本关联两列的前置现状
+--   没跑过 1.17 的老库期望 paper_version_cols=0；跑过（或用 init.sql 新建的库）期望 2。
+SELECT COUNT(*) AS paper_version_cols FROM information_schema.COLUMNS
+ WHERE TABLE_SCHEMA = DATABASE()
+   AND TABLE_NAME = 'paper_info'
+   AND COLUMN_NAME IN ('version','parent_paper_id');
+
 
 -- ============================================================================
 -- 段 1：库结构对齐（sys_user 合并教师/学生属性 等 9 处）
@@ -1544,8 +1551,27 @@ VALUES
   (7403, 3, '要求严格',   'strict_demanding',   'advisor_eval_tag', 'N', '0', '1546278765432123458', NOW(), '正向'),
   (7404, 4, '因材施教',   'tailored_guidance',  'advisor_eval_tag', 'N', '0', '1546278765432123458', NOW(), '正向'),
   (7405, 5, '资源丰富',   'resource_support',   'advisor_eval_tag', 'N', '0', '1546278765432123458', NOW(), '正向'),
-  (7406, 6, '指导偏少',   'guidance_lacking',   'advisor_eval_tag', 'N', '0', '1546278765432123458', NOW(), '负向'),
+  (7406, 6, '指导偏少',   'guidance_lacking',  'advisor_eval_tag', 'N', '0', '1546278765432123458', NOW(), '负向'),
   (7407, 7, '反馈较慢',   'feedback_slow',      'advisor_eval_tag', 'N', '0', '1546278765432123458', NOW(), '负向');
+
+-- ============================================================================
+-- 段 1.17：paper_info 补 version / parent_paper_id 两列（审核不通过→修改版关联）
+--
+-- 背景：init.sql 的 paper_info 建表语句早已声明这两列，但 PaperInfo 实体长期未映射，
+--   学生端「审核不通过后重新提交」（StudentReviewServiceImpl.reSubmitPaper）插入修改版时
+--   也从未写入——修改版与原论文之间只剩「标题 + '(修改版_日期)'」的字符串约定，
+--   查询只能全局 LIKE '%修改版%'，A 论文的重提记录会串到 B 论文上。
+--   本段给老库补齐两列与查询索引；新库（init.sql 建库）无需执行。
+--   幂等性：MySQL 8 的 ADD COLUMN/ADD INDEX 不支持 IF NOT EXISTS，
+--   重复执行报 1060（列已存在）/1061（索引已存在）均属预期，用 --force 跑。
+-- ============================================================================
+
+ALTER TABLE `paper_info`
+  ADD COLUMN `version` int DEFAULT '1' COMMENT '论文版本号（初版为1，审核不通过后每重新提交一次在上一版基础上+1）' AFTER `check_source`,
+  ADD COLUMN `parent_paper_id` bigint DEFAULT NULL COMMENT '父版本论文ID（修改版指向被驳回的原论文paper_info.id，链式重提始终指向根论文；初版为NULL）' AFTER `version`;
+
+ALTER TABLE `paper_info`
+  ADD KEY `idx_pi_parent_paper_id` (`parent_paper_id`);
 
 -- ============================================================================
 -- 段 2：similarity_threshold 系列表的 is_deleted 历史 NULL 归零
@@ -1954,6 +1980,13 @@ SELECT (SELECT COUNT(*) FROM sys_dict_data WHERE dict_type = 'paper_status')    
               'defense_result','defense_grade'))                                          AS defense_dict,
        (SELECT COUNT(*) FROM sys_dict_data WHERE dict_type = 'degree_type')               AS degree_dict,
        (SELECT COUNT(*) FROM sys_dict_data WHERE dict_type = 'advisor_eval_tag')          AS eval_tag_dict;
+
+-- 5.13 段 1.17 paper_info 版本关联两列执行后（和 0.12 对照）
+--   期望：paper_version_cols=2
+SELECT COUNT(*) AS paper_version_cols FROM information_schema.COLUMNS
+ WHERE TABLE_SCHEMA = DATABASE()
+   AND TABLE_NAME = 'paper_info'
+   AND COLUMN_NAME IN ('version','parent_paper_id');
 
 
 -- ============================================================================
