@@ -118,6 +118,14 @@ public interface PaperInfoService extends IService<PaperInfo> {
      * @return 版本详情
      */
     PaperVersionDTO getPaperVersion(Long paperId, Long versionId, Long studentId);
+
+    /**
+     * 获取论文版本历史列表接口
+     * @param paperId 论文ID
+     * @param studentId 学生ID（归属校验）
+     * @return 版本列表（按提交版本号升序）
+     */
+    List<PaperVersionItemDTO> getPaperVersions(Long paperId, Long studentId);
     
     /**
      * 版本对比接口

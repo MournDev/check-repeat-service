@@ -381,8 +381,8 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
             Result<Boolean> result = advisorAssignService.autoAssignAdvisor(paperSubmitId);
             boolean allocationSuccess = result.isSuccess();
             if (allocationSuccess) {
-                // 发送指导老师分配成功通知
-                sendAdvisorAllocatedNotification(paperSubmitId, studentId);
+                // 分配成功的站内通知已在 autoAssignAdvisor 内部 sendAssignmentNotifications
+                // 统一发送（带导师姓名，师生各一条），此处不再重复发送
                 log.info("指导老师分配成功，开始触发查重 - 论文ID: {}", paperSubmitId);
                 // 2. 分配成功后触发查重
                 triggerCheckRepeat(paperSubmitId);
@@ -748,30 +748,8 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
 
 // ========== 指导老师分配相关通知 ==========
 
-    /**
-     * 发送指导老师分配成功通知
-     */
-    private void sendAdvisorAllocatedNotification(Long paperId, Long studentId) {
-        try {
-            PaperInfo paperInfo = paperInfoMapper.selectById(paperId);
-            if (paperInfo == null) return;
-
-            String title = "指导老师分配成功";
-            String content = String.format("您的论文《%s》已成功分配指导老师，系统将开始进行查重检测。",
-                    paperInfo.getPaperTitle());
-
-            notificationService.sendSystemNotice(
-                    studentId,
-                    title,
-                    content,
-                    PaperNoticeConstants.NOTICE_TYPE_ADVISOR_ASSIGN_SUCCESS,
-                    paperId
-            );
-            log.info("指导老师分配成功通知发送成功 - 论文ID: {}", paperId);
-        } catch (Exception e) {
-            log.error("发送指导老师分配成功通知失败 - 论文ID: {}", paperId, e);
-        }
-    }
+    // 分配成功通知不在此类发送：autoAssignAdvisor 的 sendAssignmentNotifications 已统一发
+    // （此前此处再发一条「指导老师分配成功」，学生端同事件收到两条站内消息 + 两条 WS 弹窗）
 
     /**
      * 发送指导老师分配失败通知
@@ -1087,6 +1065,41 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
         return result;
     }
     
+    /**
+     * 获取论文版本历史列表接口实现
+     *
+     * <p>此前前端「展开版本历史」调 GET /api/papers/{paperId}/versions 一直 404
+     * （后端只有版本详情/对比/下载端点，从未实现列表）。数据以 paper_submit 为准，
+     * 按 submit_version 升序，最新一条标记 isCurrent。
+     */
+    @Override
+    public List<PaperVersionItemDTO> getPaperVersions(Long paperId, Long studentId) {
+        // 1. 论文归属校验（与 getPaperVersion 同口径）
+        PaperInfo paperInfo = paperInfoMapper.selectById(paperId);
+        if (paperInfo == null || !paperInfo.getStudentId().equals(studentId)) {
+            throw new BusinessException(ResultCode.PERMISSION_NO_ACCESS, "论文不存在或无权限访问");
+        }
+
+        // 2. 查询全部提交版本（升序，时间轴按提交先后展示）
+        List<PaperSubmit> submits = paperSubmitMapper.selectList(
+                new LambdaQueryWrapper<PaperSubmit>()
+                        .eq(PaperSubmit::getPaperId, paperId)
+                        .orderByAsc(PaperSubmit::getSubmitVersion));
+
+        // 3. 映射 DTO，最后一条（版本号最大）为当前版本
+        return submits.stream().map(s -> {
+            PaperVersionItemDTO dto = new PaperVersionItemDTO();
+            dto.setId(s.getId());
+            dto.setPaperId(s.getPaperId());
+            dto.setSubmitVersion(s.getSubmitVersion());
+            dto.setSubmitTime(s.getSubmitTime());
+            dto.setFileId(s.getFileId());
+            dto.setRemark(s.getRemark());
+            dto.setIsCurrent(s == submits.get(submits.size() - 1));
+            return dto;
+        }).toList();
+    }
+
     /**
      * 获取论文版本详情接口实现
      */

@@ -379,6 +379,20 @@ public class StudentPaperController {
     }
     
     /**
+     * 7.5 获取论文版本历史列表接口
+     * 学生端「我的论文」展开版本历史时间轴调用
+     *
+     * @param paperId 论文ID
+     * @return 版本列表（按提交版本号升序）
+     */
+    @GetMapping("/{paperId}/versions")
+    public Result<List<PaperVersionItemDTO>> getPaperVersions(@PathVariable Long paperId) {
+        Long studentId = UserBusinessInfoUtils.getCurrentUserId();
+        List<PaperVersionItemDTO> versions = paperInfoService.getPaperVersions(paperId, studentId);
+        return Result.success(versions);
+    }
+
+    /**
      * 8. 获取论文版本详情接口
      * 获取指定版本的详细信息
      *
