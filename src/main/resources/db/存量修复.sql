@@ -24,6 +24,9 @@
 --   · 管理端「用户管理」列表 500，日志报
 --     Cannot invoke "String.hashCode()" because "<local4>" is null
 --     —— 有 sys_user.user_type 为 NULL 的行（自注册的遗留），跑 4.3 段回填。
+--   · 学生端「我的论文」对从未查重的论文也显示「查重报告」按钮、点击报
+--     「未找到该论文的查重报告」，总相似比列错显示 0% 而非「未检测」
+--     —— similarity_rate 被落成 0.00 而非 NULL，跑 4.4 段归位。
 --   · 需要「学科领域」独立成表（subject / major_subject / teacher_subject）、
 --     论文带 subject_id、阈值支持学科维度 —— 跑 1.10 段（纯加表加列，不动字典）。
 --   · 论文类型升级成 PaperTypeEnum、阈值要能按论文类型分档 —— 跑 1.11 段
@@ -1840,6 +1843,41 @@ UPDATE sys_user u
  WHERE (u.user_type IS NULL OR u.user_type = '')
    AND r.role_code IS NOT NULL
    AND r.role_code <> '';
+
+
+-- ============================================================================
+-- 段 4.4：paper_info.similarity_rate 未检测语义归位（0.00 → NULL，2026-10-19）
+--
+-- 背景：PaperInfoServiceImpl 旧逻辑在创建/重新提交论文时把 similarity_rate
+--   落成 0.00，而语义约定是 NULL = 未检测。前端「我的论文」按
+--   similarityRate != null 显示「查重报告」按钮、按 null 显示「未检测」，
+--   于是从未查重的论文也露出报告入口，点击必报「未找到该论文的查重报告」，
+--   总相似比列也错显示 0%。
+-- 规则：凡是没有任何一条 completed 查重任务的论文，similarity_rate 一律置
+--   NULL；查重成功过的行不动。幂等，可重复执行。
+-- ============================================================================
+
+-- 4.4.0 先看清要动多少行（similarity_rate 非 NULL 但无 completed 任务的行数）
+SELECT COUNT(*) AS stale_similarity_rows
+FROM paper_info p
+WHERE p.similarity_rate IS NOT NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM check_task t
+      WHERE t.paper_id = p.id
+        AND t.check_status = 'completed'
+        AND t.is_deleted = 0
+  );
+
+-- 4.4.1 归位：无 completed 任务的论文 similarity_rate 置 NULL
+UPDATE paper_info p
+   SET p.similarity_rate = NULL
+ WHERE p.similarity_rate IS NOT NULL
+   AND NOT EXISTS (
+       SELECT 1 FROM check_task t
+       WHERE t.paper_id = p.id
+         AND t.check_status = 'completed'
+         AND t.is_deleted = 0
+   );
 
 
 -- ============================================================================
