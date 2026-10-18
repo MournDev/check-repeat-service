@@ -6,7 +6,6 @@ import com.abin.checkrepeatservice.common.service.CheckPolicyResolver;
 import com.abin.checkrepeatservice.common.statemachine.CheckTaskStateMachine;
 import com.abin.checkrepeatservice.common.utils.ReportHashUtils;
 import com.abin.checkrepeatservice.common.utils.RiskLevelUtils;
-import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
 import com.abin.checkrepeatservice.detection.dto.SentenceHit;
 import com.abin.checkrepeatservice.notification.service.NotificationService;
 import com.abin.checkrepeatservice.pojo.entity.CheckReport;
@@ -355,7 +354,9 @@ public class CheckTaskEventListener {
         String hashSource = ReportHashUtils.buildHashSource(checkTask.getId(), reportNo,
                 checkRate, maxPerSource, citationRate, checkTask.getPaperId(), reportHashSalt);
         checkReport.setContentHash(ReportHashUtils.sha256Hex(hashSource));
-        UserBusinessInfoUtils.setAuditField(checkReport, true);
+        // 异步线程无登录上下文，不能调 UserBusinessInfoUtils.setAuditField（必抛未登录异常）；
+        // createBy 直接继承任务创建人（即发起查重的学生），时间/isDeleted 由 MyMetaObjectHandler 兜底填充
+        checkReport.setCreateBy(checkTask.getCreateBy());
         checkReportMapper.insert(checkReport);
 
         return checkReport;
@@ -419,7 +420,8 @@ public class CheckTaskEventListener {
             detailSummary.put("hitSentenceCount", sentenceHits.size());
             dbCheckResult.setCheckDetails(com.alibaba.fastjson2.JSON.toJSONString(detailSummary));
 
-            UserBusinessInfoUtils.setAuditField(dbCheckResult, true);
+            // 同上报原因：异步线程手工归属到学生本人，其余审计字段交 MyMetaObjectHandler
+            dbCheckResult.setCreateBy(paperInfo.getStudentId());
             checkResultMapper.insert(dbCheckResult);
 
             // P5：句级命中明细落库（单任务通常几十~几百行，逐条 insert 复用 MP 审计填充）
@@ -436,7 +438,7 @@ public class CheckTaskEventListener {
                 row.setIsCitation(Boolean.TRUE.equals(hit.getIsCitation()) ? 1 : 0);
                 row.setHitPaperId(hit.getHitPaperId());
                 row.setHitPaperTitle(hit.getHitPaperTitle());
-                UserBusinessInfoUtils.setAuditField(row, true);
+                row.setCreateBy(paperInfo.getStudentId());
                 checkSentenceHitMapper.insert(row);
             }
 

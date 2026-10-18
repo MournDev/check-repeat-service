@@ -412,9 +412,18 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
         CheckReport report = new CheckReport();
         report.setTaskId(task.getId());
         report.setReportNo(reportNo);
+        // repeat_details 为 NOT NULL 无默认值列，必填；口径与 CheckTaskEventListener 落库保持一致
+        java.util.Map<String, Object> detail = new java.util.HashMap<>();
+        detail.put("similarity", checkResult.getSimilarity() != null ? checkResult.getSimilarity().doubleValue() : 0.0d);
+        detail.put("source", "论文信息库（SimHash+ 余弦相似度）");
+        detail.put("reportUrl", reportPath);
+        detail.put("extraInfo", checkResult.getExtraInfo());
+        report.setRepeatDetails(com.alibaba.fastjson2.JSON.toJSONString(java.util.Collections.singletonList(detail)));
         report.setReportPath(reportPath);
         report.setReportType("pdf");
-        UserBusinessInfoUtils.setAuditField(report, true);
+        // 异步线程无登录上下文，调 setAuditField 必抛未登录异常；
+        // createBy 继承任务创建人，时间/isDeleted 由 MyMetaObjectHandler 兜底填充
+        report.setCreateBy(task.getCreateBy());
         checkReportMapper.insert(report);
         
         // 生成PDF报告
