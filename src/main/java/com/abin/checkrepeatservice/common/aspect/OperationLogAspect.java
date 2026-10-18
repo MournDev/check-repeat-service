@@ -95,6 +95,12 @@ public class OperationLogAspect {
             String username = extractUsername(token);
             Long userId = extractUserId(token);
 
+            // 匿名入口（登录/注册）：请求头无 token，从入参 DTO 反射取 username 回填，
+            // 补全「谁在何时登录/注册」的审计链（此前硬编码 anonymous）
+            if (token == null) {
+                username = resolveUsernameFromArgs(joinPoint.getArgs(), username);
+            }
+
             logEntity.setUserId(userId);
             logEntity.setUserName(username);
             // 用户类型取 token 里的 roleCode，与前端 STUDENT/TEACHER/ADMIN 字典一致；
@@ -120,6 +126,13 @@ public class OperationLogAspect {
 
             // 记录操作结果状态——不显式写入会走库默认值 1，「失败操作」将恒为 0
             logEntity.setStatus(errorMsg == null ? 1 : 0);
+
+            // 匿名入口回填：登录成功后从 Result<LoginVO> 取 userId/roleCode 补全审计身份。
+            // 此前登录成功也记 anonymous+userId=0（token 是本次响应才发出的），日志中心
+            // 无法审计「谁在何时登录」；失败场景 result=null，仅保留入参回填的用户名
+            if (token == null) {
+                userId = enrichIdentityFromResult(logEntity, result);
+            }
 
             // S15：落库改为真异步后线程内无 SecurityContext/RequestContext，
             // MyMetaObjectHandler 兜底会填匿名管理员 ID——审计字段在移交前显式写入
@@ -178,6 +191,74 @@ public class OperationLogAspect {
         } catch (Exception e) {
             log.warn("从token解析用户名失败: {}", e.getMessage());
             return "anonymous";
+        }
+    }
+
+    /**
+     * 匿名入口（登录/注册）从入参 DTO 反射取 username（LoginReq/RegisterReq 均为
+     * Lombok @Data，有 getUsername()；logout 等无此字段的入参静默跳过保持 anonymous）
+     */
+    private String resolveUsernameFromArgs(Object[] args, String fallback) {
+        if (args == null) {
+            return fallback;
+        }
+        for (Object arg : args) {
+            if (arg == null) {
+                continue;
+            }
+            try {
+                Object v = arg.getClass().getMethod("getUsername").invoke(arg);
+                if (v instanceof String s && !s.isBlank()) {
+                    return s;
+                }
+            } catch (NoSuchMethodException ignored) {
+                // 该入参没有 username 字段，继续看下一个参数
+            } catch (Exception e) {
+                log.warn("从入参提取用户名失败: {}", e.getMessage());
+            }
+        }
+        return fallback;
+    }
+
+    /**
+     * 登录成功后从返回体 Result&lt;LoginVO&gt; 回填 userId/roleCode 到日志实体，
+     * 返回回填后的 userId（供审计字段使用）。仅匿名入口调用；data 非 LoginVO
+     * （如 register 返回 String）或回填失败时静默跳过、维持原值
+     */
+    private Long enrichIdentityFromResult(SysOperationLog logEntity, Object result) {
+        try {
+            if (result == null) {
+                return logEntity.getUserId();
+            }
+            Object data = result.getClass().getMethod("getData").invoke(result);
+            if (data == null) {
+                return logEntity.getUserId();
+            }
+            Long resolvedUserId = invokeGetter(data, "getUserId", Long.class);
+            if (resolvedUserId != null && resolvedUserId > 0) {
+                logEntity.setUserId(resolvedUserId);
+                logEntity.setCreateBy(resolvedUserId);
+                logEntity.setUpdateBy(resolvedUserId);
+            }
+            String roleCode = invokeGetter(data, "getRoleCode", String.class);
+            if (roleCode != null && !roleCode.isBlank()) {
+                logEntity.setUserType(roleCode);
+            }
+            return logEntity.getUserId();
+        } catch (Exception e) {
+            log.warn("从登录返回体回填审计身份失败: {}", e.getMessage());
+            return logEntity.getUserId();
+        }
+    }
+
+    /** 反射调用无参 getter 并按期望类型收敛，失败返回 null */
+    @SuppressWarnings("unchecked")
+    private <T> T invokeGetter(Object target, String getter, Class<T> type) {
+        try {
+            Object v = target.getClass().getMethod(getter).invoke(target);
+            return type.isInstance(v) ? (T) v : null;
+        } catch (Exception e) {
+            return null;
         }
     }
 
