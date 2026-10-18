@@ -27,6 +27,7 @@ import com.abin.checkrepeatservice.user.service.MessageService;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.TypeReference;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import jakarta.annotation.Resource;
@@ -492,7 +493,8 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
         paperInfo.setWordCount(fileInfo.getWordCount());
         paperInfo.setStudentId(studentId);
         paperInfo.setPaperStatus(DictConstants.PaperStatus.PENDING);
-        paperInfo.setSimilarityRate(BigDecimal.ZERO);
+        // similarity_rate 不落值：NULL = 未检测（前端按 null 显示「未检测」、隐藏查重报告入口），
+        // 落 0.00 会让从未查重的论文被误判为已检测
         paperInfo.setSubmitTime(LocalDateTime.now());
         paperInfo.setCreateTime(LocalDateTime.now());
         paperInfo.setUpdateTime(LocalDateTime.now());
@@ -523,7 +525,8 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
         existingPaper.setFilePath(fileInfoMapper.selectById(fileId).getStoragePath());
         existingPaper.setPaperStatus(DictConstants.PaperStatus.PENDING); // 重置状态
         existingPaper.setWordCount(fileInfoMapper.selectById(fileId).getWordCount());//论文字数
-        existingPaper.setSimilarityRate(BigDecimal.ZERO); // 重置相似度
+        // 重置相似度为 NULL（= 未检测）：updateById 按非空策略跳过 null 字段，必须显式置空
+        existingPaper.setSimilarityRate(null);
         existingPaper.setSubmitTime(LocalDateTime.now());
         existingPaper.setUpdateTime(LocalDateTime.now());
 
@@ -531,6 +534,9 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
         if (result <= 0) {
             throw new RuntimeException("更新论文信息失败");
         }
+        paperInfoMapper.update(null, new LambdaUpdateWrapper<PaperInfo>()
+                .eq(PaperInfo::getId, existingPaper.getId())
+                .set(PaperInfo::getSimilarityRate, null));
 
         return existingPaper;
     }
