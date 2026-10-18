@@ -103,6 +103,10 @@ public class OperationLogAspect {
 
             logEntity.setUserId(userId);
             logEntity.setUserName(username);
+            // 异步 lambda 只能捕获 effectively final 变量——username 在匿名入口
+            // 被回填重新赋值过，这里定稿快照供下方 runAsync 引用（cae58b7 曾因
+            // 直接捕获 username 导致全量编译失败，本地增量 compile 未暴露）
+            final String logUsername = username;
             // 用户类型取 token 里的 roleCode，与前端 STUDENT/TEACHER/ADMIN 字典一致；
             // 不写则走库默认值 '未知用户'，操作日志页「用户类型」列会显示为空
             logEntity.setUserType(extractRoleCode(token));
@@ -151,7 +155,7 @@ public class OperationLogAspect {
                 try {
                     sysOperationLogMapper.insert(logEntity);
                     log.info("操作日志记录成功: 用户={}, 操作={}, 耗时={}ms",
-                            username, operationLog.type(), executeTime);
+                            logUsername, operationLog.type(), executeTime);
                 } catch (Exception e) {
                     log.error("保存操作日志到数据库失败: {}", e.getMessage(), e);
                 }
