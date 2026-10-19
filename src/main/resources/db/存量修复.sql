@@ -1703,6 +1703,34 @@ ALTER TABLE `review_workflow`
   MODIFY COLUMN `is_deleted` int NOT NULL DEFAULT '0' COMMENT '软删除标记（0-未删除，1-已删除）';
 
 -- ============================================================================
+-- 段 1.21：教师确认/拒绝通知模板文案改为学生视角
+--   （2026-10-19，收件人与文案视角错位）
+--
+-- 背景：TeacherAssignmentServiceImpl.sendConfirmationNoticeToStudent 在教师确认/
+--   拒绝分配后，把 TEACHER_CONFIRM_NOTICE / TEACHER_REJECT_NOTICE 发给学生
+--   （收件人=论文学生，这是有意设计）。但种子数据里这两个模板的正文是教师视角
+--   （"尊敬的{teacherName}老师：您已成功确认接收……请及时开展后续指导工作"），
+--   导致学生收到一条称呼别人、以老师口吻写的消息。正确的学生视角模板
+--   STUDENT_CONFIRM_RESULT（种子 id=4）反而无任何调用方，属死模板（本段不动它，
+--   保留备查）。修复只改 2/3 两条模板的名称、标题、正文（学生视角），变量集不变：
+--   确认用 studentName/paperTitle/teacherName/confirmTime，拒绝追加 rejectReason/rejectTime。
+--   模板渲染实时读库，本段执行即生效，无需重启后端。
+-- 幂等性：UPDATE 按编码覆写，重复执行无副作用。
+-- ============================================================================
+
+UPDATE `message_template` SET
+  `template_name` = '教师确认结果通知',
+  `title_template` = '你的论文指导老师已确认',
+  `content_template` = '亲爱的{studentName}同学：\n\n你的论文《{paperTitle}》的指导老师{teacherName}已确认接收指导任务，后续将由{teacherName}老师为你提供指导。\n\n确认时间：{confirmTime}'
+WHERE `template_code` = 'TEACHER_CONFIRM_NOTICE';
+
+UPDATE `message_template` SET
+  `template_name` = '教师拒绝结果通知',
+  `title_template` = '你的论文指导任务被拒绝',
+  `content_template` = '亲爱的{studentName}同学：\n\n很抱歉，你的论文《{paperTitle}》的指导老师{teacherName}未能接收指导任务。\n\n拒绝原因：{rejectReason}\n\n系统将为你重新分配其他指导老师，请耐心等待。\n\n拒绝时间：{rejectTime}'
+WHERE `template_code` = 'TEACHER_REJECT_NOTICE';
+
+-- ============================================================================
 -- 段 2：similarity_threshold 系列表的 is_deleted 历史 NULL 归零
 --
 -- 背景：category_similarity_threshold.is_deleted 在 init.sql 里一度是 DEFAULT NULL，

@@ -1054,8 +1054,8 @@ SELECT (SELECT COUNT(*) FROM `knowledge_article`  WHERE `is_deleted` = 0) AS art
 
 INSERT INTO `message_template` (`id`, `template_code`, `template_name`, `template_type`, `title_template`, `content_template`, `is_active`, `create_time`, `update_time`) VALUES 
 (1,'TEACHER_ASSIGNMENT_NOTICE','教师分配通知','assignment','新的论文指导任务待确认','尊敬的{teacherName}老师：\n\n您有一个新的论文指导任务需要确认。\n\n论文标题：{paperTitle}\n论文ID：{paperId}\n\n请于 {deadline} 前在系统中确认是否接收此指导任务。如超时未确认，系统将自动重新分配。\n\n感谢您的配合！',1,'2025-11-22 15:31:00','2025-11-22 15:31:00'),
-(2,'TEACHER_CONFIRM_NOTICE','教师确认通知','confirm','论文指导任务已确认','尊敬的{teacherName}老师：\n\n您已成功确认接收论文《{paperTitle}》的指导任务。\n\n请及时开展后续指导工作。',1,'2025-11-22 15:31:00','2025-11-22 15:31:00'),
-(3,'TEACHER_REJECT_NOTICE','教师拒绝通知','reject','论文指导任务已拒绝','尊敬的{teacherName}老师：\n\n您已拒绝接收论文《{paperTitle}》的指导任务。\n\n拒绝原因：{rejectReason}',1,'2025-11-22 15:31:00','2025-11-22 15:31:00'),
+(2,'TEACHER_CONFIRM_NOTICE','教师确认结果通知','confirm','你的论文指导老师已确认','亲爱的{studentName}同学：\n\n你的论文《{paperTitle}》的指导老师{teacherName}已确认接收指导任务，后续将由{teacherName}老师为你提供指导。\n\n确认时间：{confirmTime}',1,'2025-11-22 15:31:00','2025-11-22 15:31:00'),
+(3,'TEACHER_REJECT_NOTICE','教师拒绝结果通知','reject','你的论文指导任务被拒绝','亲爱的{studentName}同学：\n\n很抱歉，你的论文《{paperTitle}》的指导老师{teacherName}未能接收指导任务。\n\n拒绝原因：{rejectReason}\n\n系统将为你重新分配其他指导老师，请耐心等待。\n\n拒绝时间：{rejectTime}',1,'2025-11-22 15:31:00','2025-11-22 15:31:00'),
 (4,'STUDENT_CONFIRM_RESULT','学生确认结果通知','confirm','论文指导老师确认结果','同学：\n\n您的论文《{paperTitle}》的指导老师{teacherName}已{confirmed}接收指导任务。\n\n{rejectReason}',1,'2025-11-22 15:31:00','2025-11-22 15:31:00'),
 (5,'TIMEOUT_REJECT_NOTICE','超时拒绝通知','reject','论文指导任务超时自动拒绝','亲爱的{studentName}同学：\n\n您的论文《{paperTitle}》的指导老师{teacherName}在指定时间内未确认接收指导任务，系统已自动拒绝并释放该分配。\n\n超时时间：{timeoutTime}\n\n系统将为您重新分配其他指导老师，请耐心等待。',1,'2025-11-22 16:42:02','2025-11-22 16:42:02'),
 (6,'SYSTEM_NOTICE','系统通知','system','{title}','{content}\n时间：{sendTime}',1,'2025-11-22 18:27:37','2025-11-22 21:49:04'),
