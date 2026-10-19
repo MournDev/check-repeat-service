@@ -599,6 +599,9 @@ public class MessageServiceImpl implements MessageService {
                 }
                 message.setPaperTitle(paper.getPaperTitle());
                 message.setStudentName(nameMap.get(paper.getStudentId()));
+                // status 对齐论文分配状态（pending/confirmed/rejected），
+                // 前端据此显示「待确认/已接收/已拒绝」标签并控制操作按钮
+                message.setStatus(paper.getAllocationStatus());
             }
         } catch (Exception e) {
             log.warn("回填论文消息展示字段失败（不影响列表返回）: {}", e.getMessage());
