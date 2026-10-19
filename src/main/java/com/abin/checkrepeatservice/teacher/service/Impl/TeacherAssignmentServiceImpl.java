@@ -11,6 +11,7 @@ import com.abin.checkrepeatservice.pojo.entity.SysUser;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
 import com.abin.checkrepeatservice.student.service.CheckTaskService;
 import com.abin.checkrepeatservice.teacher.service.TeacherAssignmentService;
+import com.abin.checkrepeatservice.user.service.AdvisorAssignService;
 import com.abin.checkrepeatservice.user.service.MessageService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
@@ -42,6 +43,9 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
 
     @Resource
     private NotificationService notificationService;
+
+    @Resource
+    private AdvisorAssignService advisorAssignService;
 
     @Override
     public Result<Boolean> confirmAssignment(Long paperId, Long teacherId) {
@@ -148,6 +152,21 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
 
             // 5. 记录拒绝操作
             //createConfirmationRecord(paperId, teacherId, DictConstants.AllocationStatus.REJECTED);
+
+            // 6. 自动重新分配（排除刚拒绝的教师，避免分回同一人形成「拒绝→重分→再拒绝」循环）。
+            //    超时拒绝的模板文案已承诺"系统将为您重新分配其他指导老师"，这里补齐实际行为。
+            //    重分配失败不影响拒绝结果：论文留在待分配池（teacher_id 为空），由管理员手动分配。
+            try {
+                Result<Boolean> reassignResult = advisorAssignService.autoAssignAdvisor(paperId, teacherId);
+                if (reassignResult.isSuccess()) {
+                    log.info("拒绝后自动重新分配成功 - 论文ID: {}, 结果: {}", paperId, reassignResult.getMessage());
+                } else {
+                    log.warn("拒绝后自动重新分配失败，论文留在待分配池 - 论文ID: {}, 原因: {}",
+                            paperId, reassignResult.getMessage());
+                }
+            } catch (Exception reassignEx) {
+                log.error("拒绝后自动重新分配异常 - 论文ID: {}", paperId, reassignEx);
+            }
 
             log.info("{} - 论文ID: {}, 老师ID: {}", action, paperId, teacherId);
             return Result.success(byTimeout ? "超时自动拒绝成功" : "拒绝接收成功", true);

@@ -77,7 +77,13 @@ public class AdvisorAssignServiceImpl implements AdvisorAssignService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Result<Boolean> autoAssignAdvisor(Long paperId) {
-        log.info("开始自动分配指导老师 - 论文ID: {}", paperId);
+        return autoAssignAdvisor(paperId, null);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Result<Boolean> autoAssignAdvisor(Long paperId, Long excludeTeacherId) {
+        log.info("开始自动分配指导老师 - 论文ID: {}, 排除教师: {}", paperId, excludeTeacherId);
 
         try {
             // 1. 查询论文基本信息
@@ -106,8 +112,8 @@ public class AdvisorAssignServiceImpl implements AdvisorAssignService {
             for (int i = 0; i < retryCount; i++) {
                 log.info("第 {} 轮尝试分配指导老师 - 论文ID: {}", i + 1, paperId);
 
-                // 查询符合条件的老师
-                List<PaperAdvisorTaskVO> eligibleAdvisors = queryEligibleAdvisors(studentMajorId);
+                // 查询符合条件的老师（排除指定教师，如刚拒绝分配的那位）
+                List<PaperAdvisorTaskVO> eligibleAdvisors = queryEligibleAdvisors(studentMajorId, excludeTeacherId);
                 if (eligibleAdvisors.isEmpty()) {
                     log.warn("第 {} 轮未找到符合条件的老师 - 论文ID: {}", i + 1, paperId);
                     continue;
@@ -203,8 +209,9 @@ public class AdvisorAssignServiceImpl implements AdvisorAssignService {
         createAllocationRecord(paperId, paperInfo.getStudentId(), teacherId,
                 DictConstants.AllocationType.MANUAL, reason, getCurrentOperatorId());
 
-        // 发送通知
-        //sendAssignmentNotifications(paperId, paperInfo.getPaperTitle(), paperInfo.getStudentId(), teacherId);
+        // 发送通知（教师待确认 + 学生分配结果）。前端教师端「待确认」唯一入口是消息中心，
+        // 不发通知教师将完全无感知；此前此处被注释导致手动分配后师生均收不到站内信。
+        sendAssignmentNotifications(paperId, paperInfo.getPaperTitle(), paperInfo.getStudentId(), teacherId);
 
         log.info("手动分配指导老师成功 - 论文ID: {}, 老师ID: {}, 老师姓名: {}",
                 paperId, teacherId, advisor.getRealName());
@@ -249,12 +256,13 @@ public class AdvisorAssignServiceImpl implements AdvisorAssignService {
     /**
      * 查询符合条件的指导老师
      */
-    private List<PaperAdvisorTaskVO> queryEligibleAdvisors(Long studentMajorId) {
+    private List<PaperAdvisorTaskVO> queryEligibleAdvisors(Long studentMajorId, Long excludeTeacherId) {
         List<SysUser> teachers = sysUserMapper.selectList(
                 new LambdaQueryWrapper<SysUser>()
                         .eq(SysUser::getRoleId, 2001L)  // 修复：使用Long类型而不是字符串
                         .lt(SysUser::getCurrentAdvisorCount, maxTaskCount)
                         .eq(SysUser::getIsDeleted, 0)
+                        .ne(excludeTeacherId != null, SysUser::getId, excludeTeacherId)
         );
 
         return teachers.stream().map(teacher -> {

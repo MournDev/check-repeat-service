@@ -22,6 +22,17 @@ public interface AdvisorAssignService {
     Result<Boolean> autoAssignAdvisor(Long paperSubmitId);
 
     /**
+     * 1b. 自动分配指导老师（重载：支持排除指定教师）
+     * 场景：教师拒绝/超时被拒后的自动重新分配，必须排除刚拒绝的教师，
+     * 否则可能立刻又分回同一人，形成「拒绝→重分→再拒绝」循环。
+     *
+     * @param paperId 论文ID（需为“待分配”状态）
+     * @param excludeTeacherId 需要排除的教师ID（可为 null 表示不排除）
+     * @return 分配结果
+     */
+    Result<Boolean> autoAssignAdvisor(Long paperId, Long excludeTeacherId);
+
+    /**
      * 2. 手动分配指导老师（管理员操作）
      * 逻辑：支持管理员指定指导老师，需额外校验“指定教师是否有该专业指导权限+未达上限”
      * @param paperId 论文ID
