@@ -3,6 +3,7 @@ package com.abin.checkrepeatservice.teacher.service.Impl;
 import cn.hutool.core.util.IdUtil;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
+import com.abin.checkrepeatservice.common.jwt.PreviewSignedUrlService;
 import com.abin.checkrepeatservice.common.service.FileService;
 import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
 import com.abin.checkrepeatservice.monitor.service.BusinessMetricsService;
@@ -80,6 +81,10 @@ public class PendingReviewServiceImpl implements PendingReviewService {
     
     @Resource
     private SystemMessageMapper systemMessageMapper;
+
+    // kkFileView 服务端回调取文件用的签名令牌签发器（preview-fetch 端点专用）
+    @Resource
+    private PreviewSignedUrlService previewSignedUrlService;
     
     @Value("${minio.bucket.main:check-repeat-service}")
     private String mainBucket;
@@ -971,13 +976,18 @@ public class PendingReviewServiceImpl implements PendingReviewService {
                 previewUrlDTO.setFileName(fileInfo.getOriginalFilename());
                 previewUrlDTO.setFileType(getFileExtension(fileInfo.getOriginalFilename()));
                 
-                // 构建文件访问URL（包含文件名，符合KKFileView要求）
-                String fileUrl = String.format("http://%s:%s%s/api/file/download/%s/%s",
+                // 构建 kkFileView 回源地址（包含文件名，符合KKFileView要求）。
+                // 必须走签名取文件端点 preview-fetch：/api/file/download/** 在
+                // SecurityConfig 里是 authenticated，而 kkFileView 服务端回调
+                // 无法携带用户 JWT，用它必然 401。改由后端签发绑定 fileId、
+                // 10 分钟有效的 HMAC 令牌（pt）授权。
+                String fileUrl = String.format("http://%s:%s%s/api/file/preview-fetch/%s/%s?pt=%s",
                         serverHost,
                         serverPort,
                         appContext,
                         paperInfo.getFileId(),
-                        java.net.URLEncoder.encode(fileInfo.getOriginalFilename(), StandardCharsets.UTF_8));
+                        java.net.URLEncoder.encode(fileInfo.getOriginalFilename(), StandardCharsets.UTF_8),
+                        previewSignedUrlService.sign(paperInfo.getFileId()));
                 
                 // Base64编码URL（URL安全）
                 String encodedUrl = Base64.getUrlEncoder().encodeToString(fileUrl.getBytes(StandardCharsets.UTF_8));
