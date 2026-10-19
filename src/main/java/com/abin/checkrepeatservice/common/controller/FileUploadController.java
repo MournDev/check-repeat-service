@@ -225,6 +225,24 @@ public class FileUploadController {
     }
 
     /**
+     * 报告预览签名取文件接口（仅 kkFileView 服务端回调使用，SecurityConfig 单独 permitAll）。
+     * 与 preview-fetch 同构：凭据是绑定 reportId、10 分钟有效的 HMAC 令牌 pt；
+     * 鉴权入口 smartPreviewReport 仍要求登录，故不构成新的匿名 IDOR 面。
+     */
+    @GetMapping("/preview-fetch-report/{reportId}/{fileName}")
+    public ResponseEntity<Resource> previewReportFetch(
+            @PathVariable Long reportId,
+            @PathVariable(required = false) String fileName,
+            @RequestParam("pt") String previewToken) {
+
+        if (!previewSignedUrlService.verify("report:" + reportId, previewToken)) {
+            log.warn("报告预览签名校验失败 - reportId: {}", reportId);
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
+        }
+        return filePreviewService.serveReport(reportId, fileName);
+    }
+
+    /**
      * 以 inline 方式流式返回本地文件（下载与签名预览共用）
      */
     private ResponseEntity<Resource> serveInlineFile(FileInfo fileInfo, String fileName) {

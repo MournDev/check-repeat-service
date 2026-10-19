@@ -33,6 +33,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
@@ -997,8 +998,14 @@ public class PendingReviewServiceImpl implements PendingReviewService {
                         callbackFileName,
                         previewSignedUrlService.sign(paperInfo.getFileId()));
                 
-                // Base64编码URL（URL安全）
-                String encodedUrl = Base64.getUrlEncoder().encodeToString(fileUrl.getBytes(StandardCharsets.UTF_8));
+                // Base64编码URL。必须用标准 Base64：kkFileView 的 TrustHostFilter
+                // 用 Base64Utils.decodeFromString（标准解码器）解析该参数，
+                // URL-safe 编码的 '-'/'_' 会被判为非法字符并导致 500；
+                // 标准 Base64 又含 '+'/'/'/'='，故再 percent 编码一次放进查询串
+                // （等价于 kkFileView 示例中的 encodeURIComponent(base64Encode(url))）。
+                String encodedUrl = URLEncoder.encode(
+                        Base64.getEncoder().encodeToString(fileUrl.getBytes(StandardCharsets.UTF_8)),
+                        StandardCharsets.UTF_8);
                 
                 // 构建KKFileView预览URL
                 String previewUrl = String.format("%s/onlinePreview?url=%s", kkfileviewUrl, encodedUrl);

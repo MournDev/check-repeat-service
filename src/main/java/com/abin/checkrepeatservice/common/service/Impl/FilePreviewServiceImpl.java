@@ -140,8 +140,8 @@ public class FilePreviewServiceImpl implements FilePreviewService {
      */
     private ResponseEntity<byte[]> proxyToKKFileViewForUrl(String url) {
         try {
-            // 1. Base64编码URL（URL安全）
-            String encodedUrl = Base64.getUrlEncoder().encodeToString(url.getBytes(StandardCharsets.UTF_8));
+            // 1. Base64编码URL（标准 Base64 + percent 编码，见 encodePreviewUrlParam）
+            String encodedUrl = encodePreviewUrlParam(url);
 
             // 2. 构建KKFileView预览URL
             String kkFileViewPreviewUrl = String.format("%s/onlinePreview?url=%s",
@@ -263,10 +263,13 @@ public class FilePreviewServiceImpl implements FilePreviewService {
                 return directPreviewReport(reportPath, fileName);
             }
 
-            // Office文档类型：使用KKFileView
+            // Office 类型报告：交给 kkFileView 转换。回源地址必须是用
+            // kkFileView 容器可达的 HTTP 端点（不能是 file://宿主路径，见
+            // proxyReportToKKFileView 注释）；当前报告均由 pdfReportGenerator
+            // 统一生成为 PDF，走不到这里，保留分支以支持后续其它报告类型
             if (isOfficeFile(fileExtension)) {
                 log.info("Office报告文档使用KKFileView预览 - paperId: {}", paperId);
-                return proxyReportToKKFileView(reportPath, fileName);
+                return proxyReportToKKFileView(checkReport.getId(), fileName);
             }
 
             // 其他类型：尝试直接预览
@@ -306,17 +309,54 @@ public class FilePreviewServiceImpl implements FilePreviewService {
     }
 
     /**
-     * 代理报告到KKFileView预览
+     * 按报告ID流式返回报告文件（仅 kkFileView 服务端回调使用，签名在 Controller 校验）
      */
-    private ResponseEntity<?> proxyReportToKKFileView(String reportPath, String fileName) {
+    @Override
+    public ResponseEntity<Resource> serveReport(Long reportId, String fileName) {
+        CheckReport checkReport = checkReportMapper.selectById(reportId);
+        if (checkReport == null || Integer.valueOf(1).equals(checkReport.getIsDeleted())
+                || checkReport.getReportPath() == null) {
+            log.warn("报告不存在或已删除 - reportId: {}", reportId);
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+        }
+        String reportPath = checkReport.getReportPath();
+        File file = new File(reportPath);
+        if (!file.exists()) {
+            log.error("报告文件不存在 - reportId: {}, path: {}", reportId, reportPath);
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+        }
+        log.info("签名取报告文件 - reportId: {}", reportId);
+        String actualFileName = (fileName != null && !fileName.trim().isEmpty()) ? fileName : file.getName();
+        return directPreviewReport(reportPath, actualFileName);
+    }
+
+    /**
+     * 代理报告到 KKFileView 预览
+     *
+     * <p>回源地址必须是 kkFileView 容器能访问到的 HTTP 端点：原实现传 {@code file://宿主路径}，
+     * 但 kkFileView 与后端是两个独立容器，读不到对方的文件系统。这里复用文件预览的思路——
+     * 后端签发绑定 reportId、10 分钟有效的 HMAC 令牌，让 kkFileView 回调
+     * preview-fetch-report 端点取字节。</p>
+     */
+    private ResponseEntity<?> proxyReportToKKFileView(Long reportId, String fileName) {
         try {
-            // 构建文件访问URL
-            String fileUrl = "file://" + reportPath;
+            // 文件名段只保留 ASCII 安全字符，理由同 proxyToKKFileView（kkFileView 会再编码一次）
+            String fileExtension = getFileExtension(fileName).toLowerCase();
+            String callbackFileName = (fileName != null && fileName.matches("[A-Za-z0-9._-]+"))
+                    ? fileName
+                    : (fileExtension.isEmpty() ? "preview" : "preview." + fileExtension);
+            String fileUrl = String.format("http://%s:%s%s/api/file/preview-fetch-report/%s/%s?pt=%s",
+                    serverHost,
+                    serverPort,
+                    appContext,
+                    reportId,
+                    callbackFileName,
+                    previewSignedUrlService.sign("report:" + reportId));
 
-            // Base64编码（URL安全）
-            String encodedUrl = Base64.getUrlEncoder().encodeToString(fileUrl.getBytes(StandardCharsets.UTF_8));
+            log.info("构建KKFileView报告URL: {}", fileUrl);
 
-            // 构建KKFileView预览URL
+            String encodedUrl = encodePreviewUrlParam(fileUrl);
+
             String kkFileViewPreviewUrl = String.format("%s/onlinePreview?url=%s",
                     kkfileviewUrl, encodedUrl);
 
@@ -342,7 +382,7 @@ public class FilePreviewServiceImpl implements FilePreviewService {
             headers.setLocation(URI.create(kkFileViewPreviewUrl));
             return new ResponseEntity<>(headers, HttpStatus.FOUND);
         } catch (Exception e) {
-            log.error("代理报告到KKFileView失败 - path: {}", reportPath, e);
+            log.error("代理报告到KKFileView失败 - reportId: {}", reportId, e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("预览失败: " + e.getMessage());
         }
@@ -373,8 +413,8 @@ public class FilePreviewServiceImpl implements FilePreviewService {
 
             log.info("构建KKFileView文件URL: {}", fileUrl);
 
-            // 2. Base64编码（URL安全）
-            String encodedUrl = Base64.getUrlEncoder().encodeToString(fileUrl.getBytes());
+            // 2. Base64编码（标准 Base64 + percent 编码，见 encodePreviewUrlParam）
+            String encodedUrl = encodePreviewUrlParam(fileUrl);
 
             // 3. 构建KKFileView预览URL
             String kkFileViewPreviewUrl = String.format("%s/onlinePreview?url=%s",
@@ -453,6 +493,25 @@ public class FilePreviewServiceImpl implements FilePreviewService {
 
     private boolean isOfficeFile(String extension) {
         return Arrays.asList("doc", "docx", "xls", "xlsx", "ppt", "pptx").contains(extension);
+    }
+
+    /**
+     * 构建 kkFileView 的 url 查询参数值。
+     *
+     * <p>两个约束缺一不可：</p>
+     * <ol>
+     *   <li>必须用<b>标准</b> Base64：kkFileView 的 TrustHostFilter 用 Spring 的
+     *       {@code Base64Utils.decodeFromString} 解析该参数（标准解码器），
+     *       URL-safe 编码产生的 {@code -}/{@code _} 会抛
+     *       {@code Illegal base64 character 5f}，表现为 kkFileView 返回 500；</li>
+     *   <li>标准 Base64 含 {@code +}/{@code /}/{@code =}，直接放进查询串会被服务端
+     *       按表单规则解析（{@code +} 被当空格），因此还要再 percent 编码一次，
+     *       等价于 kkFileView 文档示例里的 {@code encodeURIComponent(base64Encode(url))}。</li>
+     * </ol>
+     */
+    private String encodePreviewUrlParam(String rawUrl) {
+        String base64 = Base64.getEncoder().encodeToString(rawUrl.getBytes(StandardCharsets.UTF_8));
+        return URLEncoder.encode(base64, StandardCharsets.UTF_8);
     }
 
     /**

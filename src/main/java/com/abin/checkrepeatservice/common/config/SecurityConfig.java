@@ -137,6 +137,10 @@ public class SecurityConfig {
                         // 令牌绑定单个 fileId 且 10 分钟有效（PreviewSignedUrlService），
                         // 必须在 /api/file/** 的 authenticated 规则之前
                         .requestMatchers("/api/file/preview-fetch/**").permitAll()
+                        // 报告预览的同类回调端点：报告文件在宿主文件系统上（非 MinIO），
+                        // 同样由后端签发绑定 reportId 的 HMAC 令牌（键名 report:<id>，
+                        // 与文件令牌命名空间隔离），仅 kkFileView 服务端回调可访问
+                        .requestMatchers("/api/file/preview-fetch-report/**").permitAll()
                         .requestMatchers("/api/file/**", "/api/papers/**").authenticated()
                         // P5 报告验真：对齐行业报告验真惯例，凭报告编号匿名验证报告真伪，
                         // 只回元数据（标题打码/指标/时间），不回报告文件与正文；接口内有 IP 限流

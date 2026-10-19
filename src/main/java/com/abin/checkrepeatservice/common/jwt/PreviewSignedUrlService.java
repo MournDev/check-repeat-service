@@ -15,11 +15,12 @@ import java.util.HexFormat;
  *
  * <p>背景：{@code /api/file/**} 收紧为必须登录后，Office 预览依赖 kkFileView 服务端
  * 回调下载接口，该回调无法携带用户 JWT；直接放行下载接口又会退回 IDOR。
- * 方案：用户通过鉴权的 smartPreview 入口后，由后端签发<b>绑定单个文件、10 分钟有效</b>
- * 的 HMAC 令牌，kkFileView 用该令牌访问专用的 preview-fetch 接口。
- * 令牌不可枚举、不可跨文件使用、过期即失效。</p>
+ * 方案：用户通过鉴权的 smartPreview 入口后，由后端签发<b>绑定单个资源（论文文件 / 查重报告）、10 分钟有效</b>
+ * 的 HMAC 令牌，kkFileView 用该令牌访问专用的 preview-fetch / preview-fetch-report 接口。
+ * 令牌不可枚举、不可跨资源使用、过期即失效。</p>
  *
- * <p>令牌格式：{@code <到期毫秒时间戳>.<HMAC-SHA256hex(secret, fileId + "." + exp)>}</p>
+ * <p>令牌格式：{@code <到期毫秒时间戳>.<HMAC-SHA256hex(secret, resourceKey + "." + exp)>}，
+ * resourceKey 对文件取 fileId 字符串，对报告取 {@code report:<reportId>}</p>
  */
 @Component
 @Slf4j
@@ -41,15 +42,35 @@ public class PreviewSignedUrlService {
         if (fileId == null) {
             throw new IllegalArgumentException("fileId 不能为空");
         }
+        return sign(String.valueOf(fileId));
+    }
+
+    /**
+     * 为任意可预览资源签发令牌。
+     *
+     * <p>resourceKey 必须带资源类型命名空间（如 {@code report:123}），
+     * 否则报告令牌与文件令牌会因 ID 数值相同而互相通用。</p>
+     */
+    public String sign(String resourceKey) {
+        if (resourceKey == null || resourceKey.isEmpty()) {
+            throw new IllegalArgumentException("资源 key 不能为空");
+        }
         long exp = System.currentTimeMillis() + TTL_MILLIS;
-        return exp + "." + hmac(fileId + "." + exp);
+        return exp + "." + hmac(resourceKey + "." + exp);
     }
 
     /**
      * 校验令牌：文件ID 绑定、未过期、签名一致（常量时间比较防时序侧信道）
      */
     public boolean verify(Long fileId, String token) {
-        if (fileId == null || token == null) {
+        return verify(fileId == null ? null : String.valueOf(fileId), token);
+    }
+
+    /**
+     * 校验令牌：资源 key 绑定、未过期、签名一致（常量时间比较防时序侧信道）
+     */
+    public boolean verify(String resourceKey, String token) {
+        if (resourceKey == null || token == null) {
             return false;
         }
         int dot = token.indexOf('.');
@@ -59,10 +80,10 @@ public class PreviewSignedUrlService {
         try {
             long exp = Long.parseLong(token.substring(0, dot));
             if (System.currentTimeMillis() > exp) {
-                log.warn("预览令牌已过期 - fileId: {}", fileId);
+                log.warn("预览令牌已过期 - 资源: {}", resourceKey);
                 return false;
             }
-            String expected = hmac(fileId + "." + exp);
+            String expected = hmac(resourceKey + "." + exp);
             return MessageDigest.isEqual(
                     expected.getBytes(StandardCharsets.UTF_8),
                     token.substring(dot + 1).getBytes(StandardCharsets.UTF_8));

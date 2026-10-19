@@ -24,4 +24,9 @@ public interface FilePreviewService {
      * 智能预览报告
      */
     ResponseEntity<?> smartPreviewReport(String paperId);
+
+    /**
+     * 按报告ID流式返回报告文件（仅 kkFileView 服务端回调使用）
+     */
+    ResponseEntity<Resource> serveReport(Long reportId, String fileName);
 }
