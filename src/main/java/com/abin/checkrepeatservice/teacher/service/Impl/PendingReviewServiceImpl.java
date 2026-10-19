@@ -981,12 +981,20 @@ public class PendingReviewServiceImpl implements PendingReviewService {
                 // SecurityConfig 里是 authenticated，而 kkFileView 服务端回调
                 // 无法携带用户 JWT，用它必然 401。改由后端签发绑定 fileId、
                 // 10 分钟有效的 HMAC 令牌（pt）授权。
+                // 文件名段只保留 ASCII 安全字符：kkFileView 会对该 URL 再做一次
+                // 百分号编码，预先编码中文名会形成 %25xx 双重编码，被
+                // StrictHttpFirewall 以 400 拒绝。扩展名用于选择转换器。
+                String originalFilename = fileInfo.getOriginalFilename();
+                String fileExtension = getFileExtension(originalFilename).toLowerCase();
+                String callbackFileName = (originalFilename != null && originalFilename.matches("[A-Za-z0-9._-]+"))
+                        ? originalFilename
+                        : (fileExtension.isEmpty() ? "preview" : "preview." + fileExtension);
                 String fileUrl = String.format("http://%s:%s%s/api/file/preview-fetch/%s/%s?pt=%s",
                         serverHost,
                         serverPort,
                         appContext,
                         paperInfo.getFileId(),
-                        java.net.URLEncoder.encode(fileInfo.getOriginalFilename(), StandardCharsets.UTF_8),
+                        callbackFileName,
                         previewSignedUrlService.sign(paperInfo.getFileId()));
                 
                 // Base64编码URL（URL安全）

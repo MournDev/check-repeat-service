@@ -354,13 +354,21 @@ public class FilePreviewServiceImpl implements FilePreviewService {
     private ResponseEntity<?> proxyToKKFileView(Long fileId, FileInfo fileInfo) {
         try {
             // 1. 构建文件访问URL（包含文件名 + 10 分钟有效签名，kkFileView 回调无法携带 JWT）
-            String encodedFileName = URLEncoder.encode(fileInfo.getOriginalFilename(), StandardCharsets.UTF_8);
+            //    文件名段只保留 ASCII 安全字符：kkFileView 会对该 URL 再做一次百分号编码，
+            //    若这里预先编码中文名，会形成 %25xx 双重编码，被 Spring Security 的
+            //    StrictHttpFirewall 以 400 拒绝（请求根本到不了本接口）。
+            //    非 ASCII 名退回 preview.<扩展名>，扩展名用于 kkFileView 选择转换器。
+            String originalFilename = fileInfo.getOriginalFilename();
+            String fileExtension = getFileExtension(originalFilename).toLowerCase();
+            String callbackFileName = (originalFilename != null && originalFilename.matches("[A-Za-z0-9._-]+"))
+                    ? originalFilename
+                    : (fileExtension.isEmpty() ? "preview" : "preview." + fileExtension);
             String fileUrl = String.format("http://%s:%s%s/api/file/preview-fetch/%s/%s?pt=%s",
                     serverHost,
                     serverPort,
                     appContext,
                     fileId,
-                    encodedFileName,
+                    callbackFileName,
                     previewSignedUrlService.sign(fileId));
 
             log.info("构建KKFileView文件URL: {}", fileUrl);
