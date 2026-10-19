@@ -1,14 +1,7 @@
 package com.abin.checkrepeatservice.common.service;
 
-import com.abin.checkrepeatservice.common.Result;
-import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.mapper.FileInfoMapper;
-import com.abin.checkrepeatservice.pojo.entity.CheckReport;
-import com.abin.checkrepeatservice.pojo.entity.CheckTask;
 import com.abin.checkrepeatservice.pojo.entity.FileInfo;
-import com.abin.checkrepeatservice.student.mapper.CheckReportMapper;
-import com.abin.checkrepeatservice.student.mapper.CheckTaskMapper;
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.tika.Tika;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,8 +13,6 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
@@ -36,9 +27,6 @@ public class FileService {
 
     @Value("${file.upload.base-path}")
     private String uploadPath;
-
-    @Value("${kkfileview.base-url}")
-    private String kkfileviewUrl;
     
     /**
      * 初始化上传路径，确保目录存在
@@ -82,12 +70,6 @@ public class FileService {
 
     @Autowired
     private FileInfoMapper fileInfoMapper;
-
-    @Autowired
-    private CheckTaskMapper checkTaskMapper;
-
-    @Autowired
-    private CheckReportMapper checkReportMapper;
 
     // 用于异步处理的线程池
     private final ExecutorService executorService = Executors.newFixedThreadPool(3);
@@ -453,41 +435,5 @@ public class FileService {
             log.error("删除文件失败 - 文件 ID: {}", fileId, e);
             return false;
         }
-    }
-
-    public Result<String> getReportPreviewUrl(String paperId) {
-        LambdaQueryWrapper<CheckTask> queryWrapper = new LambdaQueryWrapper<>();
-        queryWrapper.eq(CheckTask::getPaperId, paperId)
-                .eq(CheckTask::getIsDeleted, 0)
-                .orderByDesc(CheckTask::getCreateTime)
-                .last("LIMIT 1");
-        CheckTask checkTask = checkTaskMapper.selectOne(queryWrapper);
-        if (checkTask == null) {
-            return Result.error(ResultCode.RESOURCE_NOT_FOUND);
-        }
-        if (!checkTask.getCheckStatus().equals("completed")) {
-            return Result.error(ResultCode.SYSTEM_ERROR, "查重尚未完成");
-        }
-        Long reportId = checkTask.getReportId();
-        CheckReport checkReport = checkReportMapper.selectById(reportId);
-        if (checkReport == null) {
-            return Result.error(ResultCode.SYSTEM_ERROR);
-        }
-        String reportPath = checkReport.getReportPath();
-        File reportFile = new File(reportPath);
-        if (!reportFile.exists()) {
-            return Result.error(ResultCode.RESOURCE_NOT_FOUND, "报告文件不存在");
-        }
-        log.info("报告文件路径: {}", reportPath);
-        try {
-            String encodedPath = URLEncoder.encode(reportPath, StandardCharsets.UTF_8);
-            String previewUrl = kkfileviewUrl + "/onlinePreview?url=" + encodedPath;
-            log.info("生成的预览URL: {}", previewUrl);
-            return Result.success(previewUrl);
-        } catch (Exception e) {
-            log.error("生成预览URL失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "生成预览URL失败");
-        }
-
     }
 }
