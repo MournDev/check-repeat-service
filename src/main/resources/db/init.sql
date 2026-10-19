@@ -1425,7 +1425,7 @@ CREATE TABLE `review_workflow` (
   `create_time` datetime DEFAULT NULL COMMENT '创建时间',
   `update_by` bigint DEFAULT NULL COMMENT '更新人ID',
   `update_time` datetime DEFAULT NULL COMMENT '更新时间',
-  `is_deleted` int DEFAULT NULL COMMENT '软删除标记（0-未删除，1-已删除）',
+  `is_deleted` int NOT NULL DEFAULT '0' COMMENT '软删除标记（0-未删除，1-已删除）',
   `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
   `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
   PRIMARY KEY (`id`)
@@ -1999,7 +1999,7 @@ CREATE TABLE `system_message` (
   `priority` tinyint DEFAULT '1' COMMENT '优先级：1-普通，2-重要，3-紧急',
   `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
   `update_by` bigint DEFAULT NULL COMMENT '?????D',
-  `is_deleted` tinyint DEFAULT NULL COMMENT '软删除标记',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除标记：0-未删除，1-已删除',
   `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
   `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
   `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

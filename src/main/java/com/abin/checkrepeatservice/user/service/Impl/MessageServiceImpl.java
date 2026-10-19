@@ -8,8 +8,10 @@ import com.abin.checkrepeatservice.common.websocket.WebSocketSender;
 import com.abin.checkrepeatservice.common.utils.TemplateRenderUtils;
 import com.abin.checkrepeatservice.mapper.SysUserMapper;
 import com.abin.checkrepeatservice.pojo.entity.MessageTemplate;
+import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
 import com.abin.checkrepeatservice.pojo.entity.SysUser;
 import com.abin.checkrepeatservice.pojo.entity.SystemMessage;
+import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
 import com.abin.checkrepeatservice.user.dto.MessageSendDTO;
 import com.abin.checkrepeatservice.user.mapper.MessageTemplateMapper;
 import com.abin.checkrepeatservice.user.mapper.SystemMessageMapper;
@@ -25,6 +27,8 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
 @Service
 @Slf4j
@@ -38,6 +42,9 @@ public class MessageServiceImpl implements MessageService {
 
     @Resource
     private SysUserMapper sysUserMapper;
+
+    @Resource
+    private PaperInfoMapper paperInfoMapper;
 
     @Resource
     private WebSocketSender webSocketSender;
@@ -95,7 +102,10 @@ public class MessageServiceImpl implements MessageService {
             // 分页查询
             Page<SystemMessage> page = new Page<>(pageNum, pageSize);
             Page<SystemMessage> resultPage = systemMessageMapper.selectPage(page, wrapper);
-            
+
+            // 回填论文类消息的展示字段（论文标题/学生姓名），前端卡片直接读取
+            fillPaperDisplayFields(resultPage.getRecords());
+
             // 转换为PageResultVO格式
             PageResultVO<SystemMessage> pageResult = new PageResultVO<>(
                     (int) resultPage.getCurrent(),
@@ -551,6 +561,47 @@ public class MessageServiceImpl implements MessageService {
         } catch (Exception e) {
             log.error("批量删除消息失败 - 消息数量: {}, 用户ID: {}", messageIds.size(), userId, e);
             return Result.error(ResultCode.SYSTEM_ERROR, "批量删除消息失败: " + "系统异常，请稍后重试");
+        }
+    }
+
+    /**
+     * 回填论文类消息（related_type=paper）的展示字段：论文标题、学生姓名。
+     * 消息表本身不冗余这两列，前端卡片直接读取消息对象上的 paperTitle/studentName，
+     * 缺失时会显示「未知论文/未知学生」。查询失败只影响展示，不打断列表返回。
+     */
+    private void fillPaperDisplayFields(List<SystemMessage> records) {
+        try {
+            List<Long> paperIds = records.stream()
+                    .filter(m -> DictConstants.RelatedType.PAPER.equals(m.getRelatedType())
+                            && m.getRelatedId() != null)
+                    .map(SystemMessage::getRelatedId)
+                    .distinct()
+                    .toList();
+            if (paperIds.isEmpty()) {
+                return;
+            }
+            Map<Long, PaperInfo> paperMap = paperInfoMapper.selectBatchIds(paperIds).stream()
+                    .collect(Collectors.toMap(PaperInfo::getId, p -> p));
+            List<Long> studentIds = paperMap.values().stream()
+                    .map(PaperInfo::getStudentId)
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .toList();
+            Map<Long, String> nameMap = studentIds.isEmpty() ? Map.of()
+                    : sysUserMapper.selectBatchIds(studentIds).stream()
+                        .collect(Collectors.toMap(SysUser::getId,
+                                u -> StringUtils.hasText(u.getRealName()) ? u.getRealName()
+                                        : String.valueOf(u.getId())));
+            for (SystemMessage message : records) {
+                PaperInfo paper = paperMap.get(message.getRelatedId());
+                if (paper == null) {
+                    continue;
+                }
+                message.setPaperTitle(paper.getPaperTitle());
+                message.setStudentName(nameMap.get(paper.getStudentId()));
+            }
+        } catch (Exception e) {
+            log.warn("回填论文消息展示字段失败（不影响列表返回）: {}", e.getMessage());
         }
     }
 

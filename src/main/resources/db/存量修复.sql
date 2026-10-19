@@ -1678,6 +1678,31 @@ INSERT INTO `sys_operation_type` (`id`, `type`, `name`, `description`, `module`,
 ON DUPLICATE KEY UPDATE `type` = VALUES(`type`), `name` = VALUES(`name`), `description` = VALUES(`description`), `module` = VALUES(`module`), `permission_level` = VALUES(`permission_level`), `status` = VALUES(`status`);
 
 -- ============================================================================
+-- 段 1.20：system_message / review_workflow 的 is_deleted 历史 NULL 归零
+--   （2026-10-19，段 2 同款坑第二、三次复发）
+--
+-- 背景：system_message.is_deleted 与 review_workflow.is_deleted 在 init.sql 里是
+--   DEFAULT NULL（全库其余 74 张表都是 DEFAULT '0'），与 category_similarity_threshold
+--   当年踩的是同一个坑：BaseEntity.isDeleted 只标 @TableLogic、无默认值也无
+--   fill 自动填充，插入时 MyBatis-Plus 省略该列 → 行带着 NULL 落库；而 MP 所有查询
+--   都拼 `is_deleted = 0`，NULL = 0 永不成立，行被静默过滤，无任何报错。
+--   实测症状：导师分配/论文提交后站内信正常落库，但师生消息中心永远「暂无消息」，
+--   GET /api/message/list 恒返回空列表（2026-10-19 教师看不到「待确认」分配通知）。
+--   init.sql 两处默认值已同步修正为 NOT NULL DEFAULT '0'，本段负责捞回存量 NULL 行。
+-- 部署顺序：先跑本段（纯数据 + 列默认值修正，无需重启后端，跑完实时生效）。
+-- 幂等性：UPDATE 只动 NULL 行，重复执行无副作用；MODIFY 为幂等 DDL。
+-- 执行后自检：见段 5.15。
+-- ============================================================================
+
+UPDATE `system_message` SET `is_deleted` = 0 WHERE `is_deleted` IS NULL;
+ALTER TABLE `system_message`
+  MODIFY COLUMN `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除标记：0-未删除，1-已删除';
+
+UPDATE `review_workflow` SET `is_deleted` = 0 WHERE `is_deleted` IS NULL;
+ALTER TABLE `review_workflow`
+  MODIFY COLUMN `is_deleted` int NOT NULL DEFAULT '0' COMMENT '软删除标记（0-未删除，1-已删除）';
+
+-- ============================================================================
 -- 段 2：similarity_threshold 系列表的 is_deleted 历史 NULL 归零
 --
 -- 背景：category_similarity_threshold.is_deleted 在 init.sql 里一度是 DEFAULT NULL，
@@ -2132,6 +2157,19 @@ SELECT COUNT(*) AS audit_comment_cols FROM information_schema.COLUMNS
  WHERE TABLE_SCHEMA = DATABASE()
    AND TABLE_NAME = 'paper_info'
    AND COLUMN_NAME = 'audit_comment';
+
+-- 5.15 段 1.20 站内信/审核工作流 is_deleted 归零执行后：
+--   期望：msg_null_rows=0 / wf_null_rows=0 / msg_col=0 / wf_col=0
+--   （col 两列数 information_schema 里 IS_NULLABLE='YES' 的 is_deleted，修正后应为 0；
+--     若消息中心仍为空，再查 expire_time 和 receiver_id）
+SELECT (SELECT COUNT(*) FROM system_message WHERE is_deleted IS NULL)               AS msg_null_rows,
+       (SELECT COUNT(*) FROM review_workflow WHERE is_deleted IS NULL)              AS wf_null_rows,
+       (SELECT COUNT(*) FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'system_message'
+           AND COLUMN_NAME = 'is_deleted' AND IS_NULLABLE = 'YES')                  AS msg_col,
+       (SELECT COUNT(*) FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'review_workflow'
+           AND COLUMN_NAME = 'is_deleted' AND IS_NULLABLE = 'YES')                  AS wf_col;
 
 
 -- ============================================================================

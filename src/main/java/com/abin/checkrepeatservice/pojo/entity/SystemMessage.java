@@ -62,6 +62,18 @@ public class SystemMessage extends BaseEntity {
     private String relatedType;
 
     /**
+     * 关联论文标题（related_type=paper 时列表展示用，不入库）
+     */
+    @TableField(value = "paper_title", exist = false)
+    private String paperTitle;
+
+    /**
+     * 关联学生姓名（related_type=paper 时列表展示用，不入库）
+     */
+    @TableField(value = "student_name", exist = false)
+    private String studentName;
+
+    /**
      * 内容类型（TEXT-文本, FILE-文件, LINK-链接）
      */
     @TableField(value = "content_type", exist = false)
