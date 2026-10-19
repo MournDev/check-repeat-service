@@ -53,8 +53,14 @@ services:
       MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-http://minio:9000}
       MINIO_ACCESSKEY: ${MINIO_ROOT_USER:-admin}
       MINIO_SECRETKEY: ${MINIO_ROOT_PASSWORD}
-      # KKFileView 在线预览（缺失时 yml 会回退到 http://localhost:8080，即后端自身，预览必然 404）
-      KKFILEVIEW_BASE_URL: ${KKFILEVIEW_BASE_URL:-http://kkfileview:8012}
+      # KKFileView 在线预览。这里配的是「302 跳转地址」，即浏览器最终要打开的地址，
+      # 必须是浏览器可达的同源 HTTPS 路径，不能填容器网络别名 kkfileview：
+      # 浏览器解析不了 docker 服务名，HTTPS 页面也不允许发起 HTTP 子请求。
+      #   https://check-repeat-system.xyz/kkfileview
+      # 与 deploy/nginx-gateway.conf 的 location /kkfileview/ 前缀、kkFileView 自身
+      # 的 base.url 三处必须一致（详见该 nginx 配置里的说明）。
+      # 注意：后端到 kkFileView 的存活探测复用同一地址，容器内需能解析并回访该域名。
+      KKFILEVIEW_BASE_URL: ${KKFILEVIEW_BASE_URL:-https://check-repeat-system.xyz/kkfileview}
       # JWT
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       # 报告验真哈希盐（上线后不可更换）。

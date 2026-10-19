@@ -10,8 +10,11 @@ server:
       min-spare: 20
 
 # 预览服务
+# base-url 是 smartPreview 对 office 文档 302 的跳转目标（浏览器最终打开），
+# 必须浏览器可达且与网关 location /kkfileview/ 前缀一致；
+# 回退值不能是 localhost:8080（那是后端自身，预览必然 404）。
 kkfileview:
-  base-url: ${KKFILEVIEW_BASE_URL:http://localhost:8080}
+  base-url: ${KKFILEVIEW_BASE_URL:https://check-repeat-system.xyz/kkfileview}
 
 # 对象存储
 minio:
