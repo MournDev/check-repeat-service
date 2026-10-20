@@ -147,7 +147,9 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
                     String.format("单次审核最多选择%s篇论文，当前选择%s篇", batchMaxCount, paperIds.size()));
         }
         // 校验审核状态
-        if (!Arrays.asList(3, 4).contains(reviewStatus)) {
+        if (reviewStatus == null
+                || (reviewStatus != DictConstants.ReviewStatus.PASS
+                && reviewStatus != DictConstants.ReviewStatus.REJECT)) {
             return Result.error(ResultCode.PARAM_ERROR, "审核状态无效（仅支持3-通过、4-不通过）");
         }
         // 清洗审核意见（防XSS）
@@ -228,7 +230,7 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
                 updatePaper.setId(paperId);
                 String oldStatus = paperInfo.getPaperStatus();
                 String statusReason;
-                if (reviewStatus.equals(3)) { // 3-审核通过
+                if (reviewStatus == DictConstants.ReviewStatus.PASS) { // 3-审核通过
                     if (hasMultiLevelWorkflow) {
                         updatePaper.setPaperStatus(DictConstants.PaperStatus.AUDITING);
                         updatePaper.setWorkflowStep(1);
@@ -247,16 +249,16 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
                 successCount++;
 
                 // 业务指标埋点：按「篇」计（本接口是批量审核），3=审核通过 4=审核不通过
-                if (reviewStatus.equals(3)) {
+                if (reviewStatus == DictConstants.ReviewStatus.PASS) {
                     businessMetricsService.record(BusinessMetricsService.Event.PAPER_REVIEW,
                             BusinessMetricsService.Outcome.PASS);
-                } else if (reviewStatus.equals(4)) {
+                } else if (reviewStatus == DictConstants.ReviewStatus.REJECT) {
                     businessMetricsService.record(BusinessMetricsService.Event.PAPER_REVIEW,
                             BusinessMetricsService.Outcome.REJECT);
                 }
 
                 log.info("论文审核成功：论文 ID={}，审核结果={}，审核记录 ID={}",
-                        paperId, reviewStatus.equals(DictConstants.PaperStatus.COMPLETED) ? "通过" : "不通过", reviewRecord.getId());
+                        paperId, reviewStatus == DictConstants.ReviewStatus.PASS ? "通过" : "不通过", reviewRecord.getId());
                 
                 // 3.5 记录论文状态变更日志（AUDITING → COMPLETED/REJECTED 或进入多级初审）
                 recordPaperStatusLog(paperId, oldStatus, updatePaper.getPaperStatus(), statusReason);
@@ -283,14 +285,22 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
         Integer currentPage = queryReq.getCurrentPage();
         Integer pageSize = queryReq.getPageSize();
 
-        // 1. 构建分页查询条件（已审核状态：paper_status=3或4）
+        // 1. 构建分页查询条件（已审核：初审通过 completed / 初审不通过 rejected）
+        // reviewStatus 为可选筛选：3 → completed，4 → rejected
         Page<PaperInfo> paperPage = new Page<>(currentPage, pageSize);
         LambdaQueryWrapper<PaperInfo> paperWrapper = new LambdaQueryWrapper<>();
         paperWrapper.eq(PaperInfo::getTeacherId, currentTeacherId)
-                .in(PaperInfo::getPaperStatus,
-                        DictConstants.PaperStatus.COMPLETED,
-                        DictConstants.PaperStatus.REJECTED) // 3-通过，4-不通过
                 .eq(PaperInfo::getIsDeleted, 0);
+        Integer reviewStatusFilter = queryReq.getReviewStatus();
+        if (reviewStatusFilter != null && reviewStatusFilter == DictConstants.ReviewStatus.PASS) {
+            paperWrapper.eq(PaperInfo::getPaperStatus, DictConstants.PaperStatus.COMPLETED);
+        } else if (reviewStatusFilter != null && reviewStatusFilter == DictConstants.ReviewStatus.REJECT) {
+            paperWrapper.eq(PaperInfo::getPaperStatus, DictConstants.PaperStatus.REJECTED);
+        } else {
+            paperWrapper.in(PaperInfo::getPaperStatus,
+                    DictConstants.PaperStatus.COMPLETED,
+                    DictConstants.PaperStatus.REJECTED);
+        }
 
         // 2. 模糊查询条件（与待审核列表一致）
         // S11 安全修复：inSql 字符串拼接存在 SQL 注入，改用 apply {0} 参数绑定
@@ -557,7 +567,10 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
             if (review != null) {
                 ReviewResultDTO.ReviewOperateInfoDTO reviewOperateInfo = new ReviewResultDTO.ReviewOperateInfoDTO();
                 reviewOperateInfo.setReviewStatus(review.getReviewStatus());
-                reviewOperateInfo.setReviewStatusDesc(review.getReviewStatus().equals(3) ? "审核通过" : "审核不通过");
+                reviewOperateInfo.setReviewStatusDesc(
+                        review.getReviewStatus() != null
+                                && review.getReviewStatus() == DictConstants.ReviewStatus.PASS
+                                ? "审核通过" : "审核不通过");
                 reviewOperateInfo.setReviewOpinion(review.getReviewOpinion());
                 // 查询审核教师姓名（取自批量预载 Map）
                 SysUser teacher = review.getTeacherId() == null ? null : reviewerMap.get(review.getTeacherId());

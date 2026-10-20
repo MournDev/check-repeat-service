@@ -102,6 +102,17 @@ public class DictConstants {
         public static final String ARCHIVED = "archived";
     }
 
+    /**
+     * 审核结果字典值（review_record.review_status / do-review.reviewStatus）。
+     *
+     * 只允许 3（通过）/ 4（不通过）两个值。旧的 1（通过）/ 2（不通过）/ 3（需要修改）
+     * 是 PendingReviewService 遗留约定，与新审核链路语义冲突，禁止再写入新记录。
+     */
+    public static class ReviewStatus {
+        public static final int PASS = 3;   // 审核通过
+        public static final int REJECT = 4; // 审核不通过（退回修改）
+    }
+
     // 论文类型的取值域不在这里：见 common/enums/PaperTypeEnum。
     // 原先这里有个 PaperType 嵌套类（graduation/course/other），全项目零引用，
     // 留着就是一份会和枚举漂移的第二值域 —— 已删除。

@@ -495,7 +495,11 @@ public class StudentReviewServiceImpl extends ServiceImpl<PaperInfoMapper, Paper
             ReviewRecord review = reviewMap.get(paper.getId());
             if (review != null) {
                 StudentReviewDetailDTO.ReviewResultDTO reviewResult = new StudentReviewDetailDTO.ReviewResultDTO();
-                reviewResult.setReviewStatusDesc(review.getReviewStatus().equals(DictConstants.PaperStatus.COMPLETED) ? "审核通过" : "审核不通过");
+                // 审核结果字典：3=通过 4=不通过（原代码拿 Integer 与 "completed" 比较，恒为不通过）
+                Integer reviewStatus = review.getReviewStatus();
+                reviewResult.setReviewStatusDesc(
+                        reviewStatus != null && reviewStatus == DictConstants.ReviewStatus.PASS
+                                ? "审核通过" : "审核不通过");
                 reviewResult.setReviewTime(review.getReviewTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
                 // 审核意见（已清洗XSS，直接返回）
                 reviewResult.setReviewOpinion(review.getReviewOpinion());

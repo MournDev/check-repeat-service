@@ -72,6 +72,7 @@ public class TeacherReviewController {
      * 3. 教师查询已审核论文列表（分页）
      * @param studentName 学生姓名（可选）
      * @param paperTitle 论文标题（可选）
+     * @param reviewStatus 审核结果（可选，3-审核通过，4-审核不通过）
      * @param currentPage 当前页码（可选）
      * @param pageSize 每页条数（可选）
      */
@@ -79,11 +80,13 @@ public class TeacherReviewController {
     public Result<Page<ReviewResultDTO>> getReviewedList(
             @RequestParam(value = "studentName", required = false) String studentName,
             @RequestParam(value = "paperTitle", required = false) String paperTitle,
+            @RequestParam(value = "reviewStatus", required = false) Integer reviewStatus,
             @RequestParam(value = "currentPage", required = false, defaultValue = "1") Integer currentPage,
             @RequestParam(value = "pageSize", required = false, defaultValue = "10") Integer pageSize) {
         ReviewQueryReq queryReq = new ReviewQueryReq();
         queryReq.setStudentName(studentName);
         queryReq.setPaperTitle(paperTitle);
+        queryReq.setReviewStatus(reviewStatus);
         queryReq.setCurrentPage(currentPage);
         queryReq.setPageSize(pageSize);
         return teacherReviewService.getReviewedList(queryReq);

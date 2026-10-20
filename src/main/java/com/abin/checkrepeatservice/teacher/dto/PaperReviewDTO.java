@@ -16,7 +16,8 @@ public class PaperReviewDTO {
     private List<String> paperIds;
     
     /**
-     * 审核状态：1-通过，2-不通过，3-需要修改
+     * 审核状态：3-审核通过，4-审核不通过（退回修改）。
+     * 旧的 1-通过 / 2-不通过 / 3-需要修改 约定已废弃，服务端不再接受。
      */
     private Integer reviewStatus;
     

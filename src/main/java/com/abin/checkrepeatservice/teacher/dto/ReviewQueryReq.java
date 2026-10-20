@@ -20,6 +20,12 @@ public class ReviewQueryReq {
     private String paperTitle; // 前端传参：paperTitle=查重
 
     /**
+     * 审核结果（可选）：3-审核通过，4-审核不通过。
+     * 仅用于已审核列表筛选，待审核列表忽略该参数。
+     */
+    private Integer reviewStatus;
+
+    /**
      * 当前页码（默认1）
      */
     @Min(value = 1, message = "页码不能小于1")
