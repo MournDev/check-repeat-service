@@ -103,12 +103,47 @@ public class FilePreviewServiceImpl implements FilePreviewService {
         }
     }
 
+    /**
+     * 探测文件类型。
+     *
+     * <p>{@link Files#probeContentType} 依赖宿主机的 /etc/mime.types，精简镜像里
+     * 常年返回 null —— PDF 因此丢掉 application/pdf，浏览器内置 PDF 阅读器会直接
+     * 拒绝加载（表现为「该文件可能已被移至别处、修改或删除。」）。故按扩展名兜底，
+     * 与 FileUploadController 里的同名方法保持一致。</p>
+     */
     private String getContentType(File file, String originalFilename) {
         try {
-            return Files.probeContentType(file.toPath());
+            String contentType = Files.probeContentType(file.toPath());
+            if (contentType != null) {
+                return contentType;
+            }
         } catch (IOException e) {
-            return "application/octet-stream";
+            log.warn("无法探测文件类型: {}", e.getMessage());
         }
+
+        String extension = getFileExtension(originalFilename).toLowerCase();
+        Map<String, String> mimeTypes = Map.ofEntries(
+                Map.entry("pdf", "application/pdf"),
+                Map.entry("doc", "application/msword"),
+                Map.entry("docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+                Map.entry("xls", "application/vnd.ms-excel"),
+                Map.entry("xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+                Map.entry("ppt", "application/vnd.ms-powerpoint"),
+                Map.entry("pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"),
+                Map.entry("txt", "text/plain"),
+                Map.entry("html", "text/html"),
+                Map.entry("htm", "text/html"),
+                Map.entry("xml", "application/xml"),
+                Map.entry("json", "application/json"),
+                Map.entry("jpg", "image/jpeg"),
+                Map.entry("jpeg", "image/jpeg"),
+                Map.entry("png", "image/png"),
+                Map.entry("gif", "image/gif"),
+                Map.entry("bmp", "image/bmp"),
+                Map.entry("webp", "image/webp"),
+                Map.entry("svg", "image/svg+xml"));
+
+        return mimeTypes.getOrDefault(extension, "application/octet-stream");
     }
 
     @Autowired
