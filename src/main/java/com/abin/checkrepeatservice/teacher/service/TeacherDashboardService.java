@@ -40,7 +40,9 @@ public interface TeacherDashboardService {
      * @param teacherId 教师ID
      * @param reviewDTO 审核参数
      * @return 操作结果
+     * @deprecated 已收敛到 {@link TeacherReviewService#doReview}，保留仅为兼容历史客户端
      */
+    @Deprecated
     Result<String> batchReviewPapers(Long teacherId, BatchReviewDTO reviewDTO);
 
     /**
@@ -50,7 +52,9 @@ public interface TeacherDashboardService {
      * @param reviewResult 审核结果
      * @param reviewComment 审核意见
      * @return 操作结果
+     * @deprecated 已收敛到 {@link TeacherReviewService#doReview}，保留仅为兼容历史客户端
      */
+    @Deprecated
     Result<String> reviewPaper(Long teacherId, Long paperId, String reviewResult, String reviewComment);
 
     /**

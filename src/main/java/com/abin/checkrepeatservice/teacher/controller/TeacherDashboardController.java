@@ -130,7 +130,10 @@ public class TeacherDashboardController {
     /**
      * 4. 论文审核接口
      * POST /api/teacher/papers/review
+     *
+     * @deprecated 已收敛到 /api/teacher/reviews/do-review，保留仅为兼容历史客户端
      */
+    @Deprecated
     @PostMapping("/papers/review")
     @Operation(summary = "批量论文审核", description = "提交论文审核结果")
     @OperationLog(type = "teacher_batch_review", description = "教师批量审核论文", recordResult = true)
@@ -148,7 +151,10 @@ public class TeacherDashboardController {
     /**
      * 5. 论文审核操作接口（保持原有单个审核接口）
      * POST /api/teacher/papers/{paperId}/review
+     *
+     * @deprecated 已收敛到 /api/teacher/reviews/do-review，保留仅为兼容历史客户端
      */
+    @Deprecated
     @PostMapping("/papers/{paperId}/review")
     @Operation(summary = "审核论文", description = "对指定论文进行审核操作（通过/驳回）")
     @OperationLog(type = "teacher_paper_review", description = "教师审核论文", recordResult = true)

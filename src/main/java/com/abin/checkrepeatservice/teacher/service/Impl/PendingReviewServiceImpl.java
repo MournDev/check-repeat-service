@@ -2,6 +2,8 @@ package com.abin.checkrepeatservice.teacher.service.Impl;
 
 import cn.hutool.core.util.IdUtil;
 import com.abin.checkrepeatservice.common.Result;
+import com.abin.checkrepeatservice.common.component.PaperStageGate;
+import com.abin.checkrepeatservice.common.constant.DictConstants;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.common.jwt.PreviewSignedUrlService;
 import com.abin.checkrepeatservice.common.service.FileService;
@@ -55,6 +57,9 @@ public class PendingReviewServiceImpl implements PendingReviewService {
 
     @Resource
     private PendingReviewMapper pendingReviewMapper;
+
+    @Resource
+    private PaperStageGate paperStageGate;
 
     @Resource
     private BusinessMetricsService businessMetricsService;
@@ -257,6 +262,21 @@ public class PendingReviewServiceImpl implements PendingReviewService {
             log.info("开始论文审核: teacherId={}, paperIds={}, reviewStatus={}", 
                     teacherId, reviewDTO.getPaperIds(), reviewDTO.getReviewStatus());
 
+            // 审核结果只允许 3（通过）/ 4（不通过），旧的 1/2/3 约定已废弃
+            Integer reviewStatus = reviewDTO.getReviewStatus();
+            if (reviewStatus == null
+                    || (reviewStatus != DictConstants.ReviewStatus.PASS
+                    && reviewStatus != DictConstants.ReviewStatus.REJECT)) {
+                return Result.error(ResultCode.PARAM_ERROR, "审核状态无效（仅支持3-通过、4-不通过）");
+            }
+            if (reviewDTO.getPaperIds() == null || reviewDTO.getPaperIds().isEmpty()) {
+                return Result.error(ResultCode.PARAM_ERROR, "论文ID列表不能为空");
+            }
+            String targetStatus = reviewStatus == DictConstants.ReviewStatus.PASS
+                    ? DictConstants.PaperStatus.COMPLETED
+                    : DictConstants.PaperStatus.REJECTED;
+            Long currentTeacherId = Long.parseLong(teacherId);
+
             ReviewResultDetailVO result = new ReviewResultDetailVO();
             List<ReviewResultDetailVO.ReviewDetailVO> details = new ArrayList<>();
             int successCount = 0;
@@ -264,25 +284,22 @@ public class PendingReviewServiceImpl implements PendingReviewService {
 
             for (String paperId : reviewDTO.getPaperIds()) {
                 try {
-                    // 更新论文状态
-                    PaperInfo paperInfo = new PaperInfo();
-                    paperInfo.setId(Long.parseLong(paperId));
-                    
-                    // 根据审核状态设置论文状态
-                    switch (reviewDTO.getReviewStatus()) {
-                        case 1: // 通过
-                            paperInfo.setPaperStatus("completed");
-                            break;
-                        case 2: // 不通过
-                            paperInfo.setPaperStatus("rejected");
-                            break;
-                        case 3: // 需要修改
-                            paperInfo.setPaperStatus("need_revision");
-                            break;
-                        default:
-                            throw new IllegalArgumentException("无效的审核状态");
+                    // 1. 校验论文存在、归属与状态流转合法性，避免旧代码直接写库
+                    PaperInfo existing = pendingReviewMapper.selectById(Long.parseLong(paperId));
+                    if (existing == null || Integer.valueOf(1).equals(existing.getIsDeleted())) {
+                        throw new IllegalArgumentException("论文不存在或已删除");
                     }
-                    
+                    if (!currentTeacherId.equals(existing.getTeacherId())) {
+                        throw new IllegalArgumentException("无权限审核他人指导的论文");
+                    }
+                    // 只允许 auditing → completed/rejected，历史数字状态码先归一化再判断
+                    paperStageGate.assertTransition(
+                            paperStageGate.normalizeLegacy(existing.getPaperStatus()), targetStatus);
+
+                    // 2. 更新论文状态
+                    PaperInfo paperInfo = new PaperInfo();
+                    paperInfo.setId(existing.getId());
+                    paperInfo.setPaperStatus(targetStatus);
                     paperInfo.setUpdateTime(LocalDateTime.now());
                     pendingReviewMapper.updateById(paperInfo);
 
@@ -293,17 +310,13 @@ public class PendingReviewServiceImpl implements PendingReviewService {
                     details.add(detail);
                     successCount++;
 
-                    // 业务指标埋点：按「篇」计（本接口是批量审核），
-                    // reviewStatus 1=通过 2=驳回；3(需要修改) 既非通过也非驳回，不计数
-                    Integer reviewStatus = reviewDTO.getReviewStatus();
-                    if (reviewStatus != null) {
-                        if (reviewStatus == 1) {
-                            businessMetricsService.record(BusinessMetricsService.Event.PAPER_REVIEW,
-                                    BusinessMetricsService.Outcome.PASS);
-                        } else if (reviewStatus == 2) {
-                            businessMetricsService.record(BusinessMetricsService.Event.PAPER_REVIEW,
-                                    BusinessMetricsService.Outcome.REJECT);
-                        }
+                    // 业务指标埋点：按「篇」计（本接口是批量审核），3=通过 4=不通过
+                    if (reviewStatus == DictConstants.ReviewStatus.PASS) {
+                        businessMetricsService.record(BusinessMetricsService.Event.PAPER_REVIEW,
+                                BusinessMetricsService.Outcome.PASS);
+                    } else if (reviewStatus == DictConstants.ReviewStatus.REJECT) {
+                        businessMetricsService.record(BusinessMetricsService.Event.PAPER_REVIEW,
+                                BusinessMetricsService.Outcome.REJECT);
                     }
 
                     log.info("论文{}审核成功", paperId);
@@ -1097,12 +1110,16 @@ public class PendingReviewServiceImpl implements PendingReviewService {
                         historyRecord.setReviewTime(record.getReviewTime());
                         historyRecord.setVersion("V" + (reviewRecords.indexOf(record) + 1)); // 简单版本号
                         
-                        // 设置状态描述
-                        switch (record.getReviewStatus()) {
-                            case 1: historyRecord.setReviewStatusDesc("审核通过"); break;
-                            case 2: historyRecord.setReviewStatusDesc("审核不通过"); break;
-                            case 3: historyRecord.setReviewStatusDesc("修改后通过"); break;
-                            default: historyRecord.setReviewStatusDesc("未知状态");
+                        // 设置状态描述：3=通过 4=不通过；1/2 为历史遗留值，仅做兼容展示
+                        Integer status = record.getReviewStatus();
+                        if (status == null) {
+                            historyRecord.setReviewStatusDesc("未知状态");
+                        } else if (status == DictConstants.ReviewStatus.PASS || status == 1) {
+                            historyRecord.setReviewStatusDesc("审核通过");
+                        } else if (status == DictConstants.ReviewStatus.REJECT || status == 2) {
+                            historyRecord.setReviewStatusDesc("审核不通过");
+                        } else {
+                            historyRecord.setReviewStatusDesc("未知状态");
                         }
                         
                         return historyRecord;
@@ -1203,13 +1220,15 @@ public class PendingReviewServiceImpl implements PendingReviewService {
             TeacherReviewStatisticsDTO.Statistics stats = new TeacherReviewStatisticsDTO.Statistics();
             stats.setTotalReviewed((int) reviewPage.getTotal());
             
-            // 按状态统计
+            // 按状态统计：3=通过 4=不通过；1/2 为历史遗留值一并计入，旧「需要修改(3)」已不再写入
             Map<Integer, Long> statusCount = reviewPage.getRecords().stream()
                     .collect(Collectors.groupingBy(ReviewRecord::getReviewStatus, Collectors.counting()));
-            
-            stats.setApproved(statusCount.getOrDefault(1, 0L).intValue());
-            stats.setRejected(statusCount.getOrDefault(2, 0L).intValue());
-            stats.setRevised(statusCount.getOrDefault(3, 0L).intValue());
+
+            stats.setApproved(statusCount.getOrDefault(DictConstants.ReviewStatus.PASS, 0L).intValue()
+                    + statusCount.getOrDefault(1, 0L).intValue());
+            stats.setRejected(statusCount.getOrDefault(DictConstants.ReviewStatus.REJECT, 0L).intValue()
+                    + statusCount.getOrDefault(2, 0L).intValue());
+            stats.setRevised(0);
             
             statisticsDTO.setStatistics(stats);
             
