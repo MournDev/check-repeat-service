@@ -31,6 +31,15 @@ public interface CheckTaskService {
     Result<CheckTaskResultDTO> getCheckTaskDetail(Long paperId);
 
     /**
+     * 教师端获取查重任务详情（按任务ID查询，并校验论文归属）
+     *
+     * @param teacherId 当前教师ID
+     * @param taskId 查重任务ID
+     * @return 查重任务详情
+     */
+    Result<CheckTaskResultDTO> getTeacherCheckTaskDetail(Long teacherId, Long taskId);
+
+    /**
      * 取消待执行的查重任务
      *
      * @param taskId 待取消的任务ID

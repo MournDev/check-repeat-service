@@ -1,6 +1,7 @@
 package com.abin.checkrepeatservice.teacher.controller;
 
 import com.abin.checkrepeatservice.common.Result;
+import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
 import com.abin.checkrepeatservice.student.dto.CheckTaskResultDTO;
 import com.abin.checkrepeatservice.student.service.CheckTaskService;
 import jakarta.annotation.Resource;
@@ -38,6 +39,6 @@ public class TeacherCheckTaskController {
      */
     @GetMapping("/{taskId}")
     public Result<CheckTaskResultDTO> getCheckTaskDetail(@PathVariable Long taskId) {
-        return checkTaskService.getCheckTaskDetail(taskId);
+        return checkTaskService.getTeacherCheckTaskDetail(UserBusinessInfoUtils.getCurrentUserId(), taskId);
     }
 }

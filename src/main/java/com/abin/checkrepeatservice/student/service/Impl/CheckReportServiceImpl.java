@@ -145,9 +145,9 @@ public class CheckReportServiceImpl extends ServiceImpl<CheckReportMapper, Check
         PaperInfo paperInfo = paperInfoMapper.selectById(checkTask.getPaperId());
         SysUser currentUser = UserBusinessInfoUtils.getCurrentSysUser();
         boolean isStudentOwner = paperInfo.getStudentId().equals(currentUser.getId());
-        boolean isTeacherOwner = paperInfo.getTeacherId().equals(currentUser.getId());
+        boolean isTeacherOwner = Objects.equals(paperInfo.getTeacherId(), currentUser.getId());
         boolean isAdmin = UserBusinessInfoUtils.isAdmin();
-        if (!isStudentOwner  && !isAdmin) {
+        if (!isStudentOwner && !isTeacherOwner && !isAdmin) {
             return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权限预览该报告");
         }
 
@@ -170,7 +170,8 @@ public class CheckReportServiceImpl extends ServiceImpl<CheckReportMapper, Check
         CheckTask checkTask = checkTaskMapper.selectById(checkReport.getTaskId());
         PaperInfo paperInfo = paperInfoMapper.selectById(checkTask.getPaperId());
         SysUser currentUser = UserBusinessInfoUtils.getCurrentSysUser();
-        boolean hasPermission = paperInfo.getStudentId().equals(currentUser.getId())
+        boolean hasPermission = Objects.equals(paperInfo.getStudentId(), currentUser.getId())
+                || Objects.equals(paperInfo.getTeacherId(), currentUser.getId())
                 || UserBusinessInfoUtils.isAdmin();
         if (!hasPermission) {
             throw new BusinessException(ResultCode.PERMISSION_NO_ACCESS, "无权限下载该报告");

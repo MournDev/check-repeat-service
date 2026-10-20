@@ -14,6 +14,7 @@ import com.abin.checkrepeatservice.student.mapper.CheckTaskMapper;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
 import com.abin.checkrepeatservice.teacher.dto.GuidanceProgressVO;
 import com.abin.checkrepeatservice.teacher.dto.PaperCheckSignoffReq;
+import com.abin.checkrepeatservice.teacher.dto.PaperCheckSignoffVO;
 import com.abin.checkrepeatservice.teacher.mapper.PaperCheckSignoffMapper;
 import com.abin.checkrepeatservice.teacher.service.CheckReportSignoffService;
 import com.abin.checkrepeatservice.user.service.Impl.NotificationFacadeService;
@@ -146,6 +147,48 @@ public class CheckReportSignoffServiceImpl implements CheckReportSignoffService 
                 signoff.getId(), req.getPaperId(), latestTask.getId(), req.getQualified(), currentUserId);
 
         return Result.success("查重报告签核成功", String.valueOf(signoff.getId()));
+    }
+
+    @Override
+    public Result<PaperCheckSignoffVO> getSignoff(Long paperId) {
+        Long currentUserId = UserBusinessInfoUtils.getCurrentUserId();
+
+        // 1. 论文存在性 + 归属校验：只有指导教师本人可查看本论文签核记录
+        PaperInfo paper = paperInfoMapper.selectById(paperId);
+        if (paper == null) {
+            return Result.error(ResultCode.RESOURCE_NOT_FOUND, "论文不存在或已删除");
+        }
+        if (!Objects.equals(paper.getTeacherId(), currentUserId)) {
+            return Result.error(ResultCode.PERMISSION_NO_ACCESS, "仅论文指导教师可查看签核记录");
+        }
+
+        // 2. 取最新一条签核记录；同一论文重检后会有多条，按签核时间倒序、ID 倒序兜底
+        PaperCheckSignoff signoff = paperCheckSignoffMapper.selectOne(
+                new LambdaQueryWrapper<PaperCheckSignoff>()
+                        .eq(PaperCheckSignoff::getPaperId, paperId)
+                        .orderByDesc(PaperCheckSignoff::getSignTime)
+                        .orderByDesc(PaperCheckSignoff::getId)
+                        .last("LIMIT 1"));
+        if (signoff == null) {
+            return Result.success("该论文尚未签核", null);
+        }
+
+        PaperCheckSignoffVO vo = new PaperCheckSignoffVO();
+        vo.setPaperId(signoff.getPaperId());
+        vo.setTaskId(signoff.getTaskId());
+        vo.setReportId(signoff.getReportId());
+        vo.setAdvisorId(signoff.getAdvisorId());
+        vo.setQualified(signoff.getQualified());
+        vo.setGuidanceScore(signoff.getGuidanceScore());
+        vo.setComment(signoff.getComment());
+        vo.setSignTime(signoff.getSignTime());
+
+        SysUser advisor = signoff.getAdvisorId() == null ? null
+                : sysUserMapper.selectById(signoff.getAdvisorId());
+        vo.setAdvisorName(advisor == null ? "未知教师"
+                : (StringUtils.hasText(advisor.getRealName()) ? advisor.getRealName() : advisor.getUsername()));
+
+        return Result.success("查询成功", vo);
     }
 
     @Override

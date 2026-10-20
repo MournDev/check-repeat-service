@@ -4,6 +4,7 @@ import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.annotation.OperationLog;
 import com.abin.checkrepeatservice.teacher.dto.GuidanceProgressVO;
 import com.abin.checkrepeatservice.teacher.dto.PaperCheckSignoffReq;
+import com.abin.checkrepeatservice.teacher.dto.PaperCheckSignoffVO;
 import com.abin.checkrepeatservice.teacher.service.CheckReportSignoffService;
 import jakarta.annotation.Resource;
 import jakarta.validation.Valid;
@@ -35,6 +36,14 @@ public class TeacherCheckController {
         // 路径参数优先：覆盖请求体里的 paperId，避免前端 URL 与 body 传不一致对象时签错论文
         req.setPaperId(paperId);
         return checkReportSignoffService.sign(req);
+    }
+
+    /**
+     * 查询论文最新一次签核记录（未签核时 data 为 null）
+     */
+    @GetMapping("/papers/{paperId}/check-signoff")
+    public Result<PaperCheckSignoffVO> getSignoff(@PathVariable("paperId") Long paperId) {
+        return checkReportSignoffService.getSignoff(paperId);
     }
 
     /**

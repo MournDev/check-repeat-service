@@ -281,6 +281,27 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
     }
 
     @Override
+    public Result<CheckTaskResultDTO> getTeacherCheckTaskDetail(Long teacherId, Long taskId) {
+        // 1. 按任务ID查询（教师端路径参数是 taskId，不能复用按 paperId 查询的学生端逻辑）
+        CheckTask checkTask = getById(taskId);
+        if (checkTask == null || Integer.valueOf(1).equals(checkTask.getIsDeleted())) {
+            return Result.error(ResultCode.RESOURCE_NOT_FOUND, "查重任务不存在或已删除");
+        }
+
+        // 2. 权限校验：仅该论文的指导教师可查看
+        PaperInfo paperInfo = paperInfoMapper.selectById(checkTask.getPaperId());
+        if (paperInfo == null) {
+            return Result.error(ResultCode.RESOURCE_NOT_FOUND, "论文不存在或已删除");
+        }
+        if (!Objects.equals(paperInfo.getTeacherId(), teacherId)) {
+            return Result.error(ResultCode.PERMISSION_NO_ACCESS, "仅指导教师可查看该查重任务");
+        }
+
+        // 3. 转换为DTO（含完整报告信息）
+        return Result.success("查重任务详情查询成功", convertToTaskResultDTO(checkTask, true));
+    }
+
+    @Override
     @Transactional(rollbackFor = Exception.class)
     public Result<String> cancelCheckTask(Long taskId) {
         // 1. 查询任务信息
