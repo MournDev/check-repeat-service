@@ -12,14 +12,20 @@ import com.abin.checkrepeatservice.pojo.entity.*;
 import com.abin.checkrepeatservice.student.mapper.CheckReportMapper;
 import com.abin.checkrepeatservice.student.mapper.CheckTaskMapper;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
+import com.abin.checkrepeatservice.teacher.dto.ContactStudentDTO;
+import com.abin.checkrepeatservice.teacher.dto.PaperReviewHistoryDTO;
 import com.abin.checkrepeatservice.teacher.dto.ReviewOperateReq;
 import com.abin.checkrepeatservice.teacher.dto.ReviewQueryReq;
 import com.abin.checkrepeatservice.teacher.dto.ReviewResultDTO;
 import com.abin.checkrepeatservice.teacher.mapper.ReviewRecordMapper;
 import com.abin.checkrepeatservice.teacher.service.TeacherReviewService;
+import com.abin.checkrepeatservice.teacher.vo.PendingStatsVO;
+import com.abin.checkrepeatservice.teacher.vo.TodayReviewedVO;
 import com.abin.checkrepeatservice.common.utils.ReviewAttachUtils;
 import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
 import com.abin.checkrepeatservice.user.mapper.PaperStatusLogMapper;
+import com.abin.checkrepeatservice.user.service.InstantMessageService;
+import com.abin.checkrepeatservice.user.service.MessageService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -38,11 +44,14 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -73,6 +82,12 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
 
     @Resource
     private BusinessMetricsService businessMetricsService;
+
+    @Resource
+    private MessageService messageService;
+
+    @Resource
+    private InstantMessageService instantMessageService;
 
     /**
      * P2 接线：多级初审工作流配置（单行配置表）。导师初审通过后按此决定
@@ -610,6 +625,242 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
 
             return dto;
         }).collect(Collectors.toList());
+    }
+
+    @Override
+    public Result<PendingStatsVO> getPendingStats() {
+        try {
+            Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
+            PendingStatsVO stats = new PendingStatsVO();
+
+            LambdaQueryWrapper<PaperInfo> pendingWrapper = new LambdaQueryWrapper<>();
+            pendingWrapper.eq(PaperInfo::getTeacherId, teacherId)
+                    .eq(PaperInfo::getPaperStatus, DictConstants.PaperStatus.AUDITING)
+                    .eq(PaperInfo::getIsDeleted, 0);
+            stats.setTotalPending(paperInfoMapper.selectCount(pendingWrapper).intValue());
+            stats.setUrgentPending(0);
+
+            List<PaperInfo> pendingPapers = paperInfoMapper.selectList(pendingWrapper);
+            if (pendingPapers.isEmpty()) {
+                stats.setAvgWaitingTime(BigDecimal.ZERO);
+            } else {
+                long totalWaitingDays = pendingPapers.stream()
+                        .map(PaperInfo::getSubmitTime)
+                        .filter(Objects::nonNull)
+                        .mapToLong(submitTime -> ChronoUnit.DAYS.between(
+                                submitTime.toLocalDate(), LocalDateTime.now().toLocalDate()))
+                        .sum();
+                stats.setAvgWaitingTime(BigDecimal.valueOf(totalWaitingDays)
+                        .divide(BigDecimal.valueOf(pendingPapers.size()), 1, RoundingMode.HALF_UP));
+            }
+
+            stats.setTodayReviewed(countTodayReviewed(teacherId).intValue());
+            stats.setOverdueCount(0);
+            stats.setUrgentCount(0);
+
+            return Result.success("获取统计信息成功", stats);
+        } catch (Exception e) {
+            log.error("获取待审核统计信息失败", e);
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取统计信息失败: 系统异常，请稍后重试");
+        }
+    }
+
+    @Override
+    public Result<TodayReviewedVO> getTodayReviewedCount() {
+        try {
+            Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
+            TodayReviewedVO todayStats = new TodayReviewedVO();
+            todayStats.setCount(countTodayReviewed(teacherId).intValue());
+
+            List<TodayReviewedVO.HourlyCountVO> hourlyStats = new ArrayList<>();
+            LocalDateTime dayStart = LocalDateTime.now().withHour(0).withMinute(0).withSecond(0).withNano(0);
+            for (int hour = 0; hour < 24; hour += 3) {
+                LocalDateTime hourStart = dayStart.plusHours(hour);
+                LocalDateTime hourEnd = hourStart.plusHours(3);
+
+                LambdaQueryWrapper<PaperInfo> hourWrapper = new LambdaQueryWrapper<>();
+                hourWrapper.eq(PaperInfo::getTeacherId, teacherId)
+                        .ne(PaperInfo::getPaperStatus, DictConstants.PaperStatus.AUDITING)
+                        .between(PaperInfo::getUpdateTime, hourStart, hourEnd)
+                        .eq(PaperInfo::getIsDeleted, 0);
+
+                TodayReviewedVO.HourlyCountVO hourlyStat = new TodayReviewedVO.HourlyCountVO();
+                hourlyStat.setHour(hour);
+                hourlyStat.setCount(paperInfoMapper.selectCount(hourWrapper).intValue());
+                hourlyStats.add(hourlyStat);
+            }
+            todayStats.setDetails(hourlyStats);
+
+            return Result.success("获取今日审核统计成功", todayStats);
+        } catch (Exception e) {
+            log.error("获取今日审核统计失败", e);
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取今日审核统计失败: 系统异常，请稍后重试");
+        }
+    }
+
+    @Override
+    public Result<Map<String, Object>> contactStudent(ContactStudentDTO contactDTO) {
+        Map<String, Object> result = new HashMap<>();
+        try {
+            if (contactDTO.getMessageType() == null || contactDTO.getMessage() == null
+                    || contactDTO.getMessage().isBlank()) {
+                return Result.error(ResultCode.PARAM_ERROR, "消息类型和内容不能为空");
+            }
+
+            // 前端审核记录列表不返回 studentId，缺省时按 paperId 反查并校验归属
+            if (contactDTO.getStudentId() == null || contactDTO.getStudentId().isBlank()) {
+                if (contactDTO.getPaperId() == null || contactDTO.getPaperId().isBlank()) {
+                    return Result.error(ResultCode.PARAM_ERROR, "缺少学生ID或论文ID");
+                }
+                Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
+                PaperInfo paper = paperInfoMapper.selectById(Long.parseLong(contactDTO.getPaperId()));
+                if (paper == null) {
+                    return Result.error(ResultCode.PARAM_ERROR, "论文不存在");
+                }
+                if (!paper.getTeacherId().equals(teacherId)) {
+                    return Result.error(ResultCode.PARAM_ERROR, "无权限联系该学生");
+                }
+                contactDTO.setStudentId(paper.getStudentId().toString());
+            }
+
+            switch (contactDTO.getMessageType().toLowerCase()) {
+                case "chat":
+                    return sendInstantMessage(contactDTO, result);
+                case "email":
+                    return sendEmailMessage(contactDTO, result);
+                case "system":
+                    return sendSystemMessage(contactDTO, result);
+                default:
+                    return Result.error(ResultCode.PARAM_ERROR, "不支持的消息类型: " + contactDTO.getMessageType());
+            }
+        } catch (Exception e) {
+            log.error("联系学生失败", e);
+            return Result.error(ResultCode.SYSTEM_ERROR, "联系学生失败: 系统异常，请稍后重试");
+        }
+    }
+
+    private Long countTodayReviewed(Long teacherId) {
+        LocalDateTime todayStart = LocalDateTime.now().withHour(0).withMinute(0).withSecond(0).withNano(0);
+        LocalDateTime todayEnd = LocalDateTime.now().withHour(23).withMinute(59).withSecond(59);
+
+        LambdaQueryWrapper<PaperInfo> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(PaperInfo::getTeacherId, teacherId)
+                .ne(PaperInfo::getPaperStatus, DictConstants.PaperStatus.AUDITING)
+                .between(PaperInfo::getUpdateTime, todayStart, todayEnd)
+                .eq(PaperInfo::getIsDeleted, 0);
+        return paperInfoMapper.selectCount(wrapper);
+    }
+
+    private Result<Map<String, Object>> sendInstantMessage(ContactStudentDTO contactDTO, Map<String, Object> result) {
+        Long currentUserId = UserBusinessInfoUtils.getCurrentUserId();
+        InstantMessage message = new InstantMessage();
+        message.setSenderId(currentUserId);
+        message.setReceiverId(Long.parseLong(contactDTO.getStudentId()));
+        message.setContent(contactDTO.getMessage());
+        message.setMessageType("PRIVATE");
+        message.setContentType("TEXT");
+        message.setStatus("SENT");
+        message.setRelatedType("PAPER");
+        message.setRelatedId(contactDTO.getPaperId() != null ? Long.parseLong(contactDTO.getPaperId()) : null);
+
+        Result<Boolean> sendResult = instantMessageService.sendMessage(message);
+        if (sendResult.isSuccess() && Boolean.TRUE.equals(sendResult.getData())) {
+            result.put("messageId", message.getId());
+            result.put("sendTime", LocalDateTime.now().toString());
+            return Result.success("即时消息发送成功", result);
+        }
+        return Result.error(ResultCode.SYSTEM_ERROR, "即时消息发送失败: " + sendResult.getMessage());
+    }
+
+    private Result<Map<String, Object>> sendSystemMessage(ContactStudentDTO contactDTO, Map<String, Object> result) {
+        Long currentUserId = UserBusinessInfoUtils.getCurrentUserId();
+        SystemMessage message = new SystemMessage();
+        message.setSenderId(currentUserId);
+        message.setReceiverId(Long.parseLong(contactDTO.getStudentId()));
+        message.setTitle("论文指导反馈");
+        message.setContent(contactDTO.getMessage());
+        message.setMessageType("GUIDANCE");
+        message.setPriority(1);
+        message.setRelatedType("PAPER");
+        message.setRelatedId(contactDTO.getPaperId() != null ? Long.parseLong(contactDTO.getPaperId()) : null);
+        message.setCreateTime(LocalDateTime.now());
+        message.setUpdateTime(LocalDateTime.now());
+        message.setIsRead(0);
+
+        Result<Boolean> sendResult = messageService.sendMessage(message);
+        if (sendResult.isSuccess() && Boolean.TRUE.equals(sendResult.getData())) {
+            result.put("messageId", "sys_" + System.currentTimeMillis());
+            result.put("sendTime", LocalDateTime.now().toString());
+            return Result.success("系统消息发送成功", result);
+        }
+        return Result.error(ResultCode.SYSTEM_ERROR, "系统消息发送失败: " + sendResult.getMessage());
+    }
+
+    private Result<Map<String, Object>> sendEmailMessage(ContactStudentDTO contactDTO, Map<String, Object> result) {
+        // 邮件服务尚未接入，保留与旧实现一致的占位返回
+        log.info("准备发送邮件: studentId={}, message={}", contactDTO.getStudentId(), contactDTO.getMessage());
+        result.put("messageId", "email_" + System.currentTimeMillis());
+        result.put("sendTime", LocalDateTime.now().toString());
+        return Result.success("邮件消息发送成功", result);
+    }
+
+    @Override
+    public Result<PaperReviewHistoryDTO> getPaperReviewHistory(Long paperId) {
+        try {
+            Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
+            PaperInfo paperInfo = paperInfoMapper.selectById(paperId);
+            if (paperInfo == null || Integer.valueOf(1).equals(paperInfo.getIsDeleted())) {
+                return Result.error(ResultCode.PARAM_ERROR, "论文不存在");
+            }
+            if (!paperInfo.getTeacherId().equals(teacherId)) {
+                return Result.error(ResultCode.PARAM_ERROR, "无权限访问此论文");
+            }
+
+            LambdaQueryWrapper<ReviewRecord> queryWrapper = new LambdaQueryWrapper<>();
+            queryWrapper.eq(ReviewRecord::getPaperId, paperId)
+                    .eq(ReviewRecord::getIsDeleted, 0)
+                    .orderByDesc(ReviewRecord::getReviewTime);
+            List<ReviewRecord> reviewRecords = list(queryWrapper);
+
+            PaperReviewHistoryDTO historyDTO = new PaperReviewHistoryDTO();
+            historyDTO.setPaperId(paperId.toString());
+            historyDTO.setPaperTitle(paperInfo.getPaperTitle());
+
+            List<PaperReviewHistoryDTO.ReviewHistoryRecord> historyRecords = reviewRecords.stream()
+                    .map(record -> {
+                        PaperReviewHistoryDTO.ReviewHistoryRecord historyRecord = new PaperReviewHistoryDTO.ReviewHistoryRecord();
+                        historyRecord.setReviewId(record.getId().toString());
+
+                        SysUser reviewer = sysUserMapper.selectById(record.getTeacherId());
+                        historyRecord.setReviewerName(reviewer != null ? reviewer.getRealName() : "未知教师");
+                        historyRecord.setReviewStatus(record.getReviewStatus());
+                        historyRecord.setReviewOpinion(record.getReviewOpinion());
+                        historyRecord.setReviewTime(record.getReviewTime());
+                        historyRecord.setVersion("V" + (reviewRecords.indexOf(record) + 1));
+                        historyRecord.setReviewStatusDesc(getReviewStatusDesc(record.getReviewStatus()));
+                        return historyRecord;
+                    })
+                    .collect(Collectors.toList());
+            historyDTO.setHistory(historyRecords);
+
+            return Result.success("获取审核历史成功", historyDTO);
+        } catch (Exception e) {
+            log.error("获取论文审核历史失败: paperId={}", paperId, e);
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取审核历史失败: 系统异常，请稍后重试");
+        }
+    }
+
+    private String getReviewStatusDesc(Integer status) {
+        if (status == null) {
+            return "未知状态";
+        }
+        if (status == DictConstants.ReviewStatus.PASS || status == 1) {
+            return "审核通过";
+        }
+        if (status == DictConstants.ReviewStatus.REJECT || status == 2) {
+            return "审核不通过";
+        }
+        return "未知状态";
     }
 
 //    /**

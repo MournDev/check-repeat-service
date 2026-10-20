@@ -8,6 +8,7 @@ import com.abin.checkrepeatservice.pojo.entity.FileInfo;
 import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
 import com.abin.checkrepeatservice.pojo.entity.SysUser;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
+import com.abin.checkrepeatservice.teacher.dto.PaperContentDTO;
 import com.abin.checkrepeatservice.user.service.SysUserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -17,6 +18,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * 教师论文预览控制器
@@ -167,6 +171,78 @@ public class TeacherPaperPreviewController {
             log.error("获取论文预览信息失败 - 论文ID: {}", paperId, e);
             return Result.error(500, "获取预览信息失败: " + "系统异常，请稍后重试");
         }
+    }
+
+    /**
+     * 获取论文内容（预览弹窗使用的元信息）
+     * @param paperId 论文ID
+     * @return 论文内容
+     */
+    @GetMapping("/{paperId}/content")
+    @Operation(summary = "获取论文内容", description = "获取论文标题、摘要、字数、文件信息等预览元数据")
+    public Result<PaperContentDTO> getPaperContent(
+            @Parameter(description = "论文ID") @PathVariable Long paperId) {
+
+        Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
+        PaperInfo paperInfo = paperInfoMapper.selectById(paperId);
+        if (paperInfo == null || Integer.valueOf(1).equals(paperInfo.getIsDeleted())) {
+            return Result.error(404, "论文不存在");
+        }
+        if (!paperInfo.getTeacherId().equals(teacherId)) {
+            return Result.error(403, "无权限访问此论文");
+        }
+
+        PaperContentDTO contentDTO = new PaperContentDTO();
+        contentDTO.setPaperId(paperId.toString());
+        contentDTO.setTitle(paperInfo.getPaperTitle());
+        contentDTO.setAbstractText(paperInfo.getPaperAbstract());
+        contentDTO.setWordCount(paperInfo.getWordCount());
+
+        if (paperInfo.getFileId() != null) {
+            try {
+                FileInfo fileInfo = fileService.getById(paperInfo.getFileId());
+                if (fileInfo != null) {
+                    contentDTO.setFileSize(fileInfo.getFileSizeDesc());
+                    contentDTO.setFileType(getFileExtension(fileInfo.getOriginalFilename()));
+                    if (contentDTO.getWordCount() == null) {
+                        contentDTO.setWordCount(fileInfo.getWordCount());
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("获取论文文件信息失败: paperId={}, error={}", paperId, e.getMessage());
+            }
+        }
+
+        return Result.success("获取成功", contentDTO);
+    }
+
+    /**
+     * 获取论文预览地址
+     * @param paperId 论文ID
+     * @return 预览地址（direct / kkfileview）
+     */
+    @GetMapping("/{paperId}/preview-url")
+    @Operation(summary = "获取论文预览地址", description = "返回 iframe 可直接加载的预览地址")
+    public Result<Map<String, String>> getPaperPreviewUrl(
+            @Parameter(description = "论文ID") @PathVariable Long paperId) {
+
+        Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
+        PaperInfo paperInfo = paperInfoMapper.selectById(paperId);
+        if (paperInfo == null || Integer.valueOf(1).equals(paperInfo.getIsDeleted())) {
+            return Result.error(404, "论文不存在");
+        }
+        if (!paperInfo.getTeacherId().equals(teacherId)) {
+            return Result.error(403, "无权限访问此论文");
+        }
+        if (paperInfo.getFileId() == null) {
+            return Result.error(400, "论文文件不存在");
+        }
+
+        Map<String, String> previewInfo = filePreviewService.getPreviewInfo(paperInfo.getFileId());
+        Map<String, String> data = new HashMap<>(previewInfo);
+        data.put("paperId", paperId.toString());
+        data.put("previewUrl", previewInfo.get("url"));
+        return Result.success("获取预览URL成功", data);
     }
 
     /**

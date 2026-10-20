@@ -1,10 +1,14 @@
 package com.abin.checkrepeatservice.teacher.controller;
 
 import com.abin.checkrepeatservice.common.Result;
+import com.abin.checkrepeatservice.teacher.dto.ContactStudentDTO;
+import com.abin.checkrepeatservice.teacher.dto.PaperReviewHistoryDTO;
 import com.abin.checkrepeatservice.teacher.dto.ReviewOperateReq;
 import com.abin.checkrepeatservice.teacher.dto.ReviewQueryReq;
 import com.abin.checkrepeatservice.teacher.dto.ReviewResultDTO;
 import com.abin.checkrepeatservice.teacher.service.TeacherReviewService;
+import com.abin.checkrepeatservice.teacher.vo.PendingStatsVO;
+import com.abin.checkrepeatservice.teacher.vo.TodayReviewedVO;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import jakarta.annotation.Resource;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -122,5 +126,37 @@ public class TeacherReviewController {
     public Result<String> reInitiateReview(
             @RequestParam("paperId") Long paperId) {
         return teacherReviewService.reInitiateReview(paperId);
+    }
+
+    /**
+     * 7. 教师待审核统计（总数 / 平均等待时长 / 今日已审核）
+     */
+    @GetMapping("/pending-stats")
+    public Result<PendingStatsVO> getPendingStats() {
+        return teacherReviewService.getPendingStats();
+    }
+
+    /**
+     * 8. 教师今日审核统计（含 3 小时粒度分布）
+     */
+    @GetMapping("/today-reviewed")
+    public Result<TodayReviewedVO> getTodayReviewedCount() {
+        return teacherReviewService.getTodayReviewedCount();
+    }
+
+    /**
+     * 9. 联系学生（即时消息 / 系统消息 / 邮件）
+     */
+    @PostMapping("/contact-student")
+    public Result<Map<String, Object>> contactStudent(@RequestBody ContactStudentDTO contactDTO) {
+        return teacherReviewService.contactStudent(contactDTO);
+    }
+
+    /**
+     * 10. 论文审核历史
+     */
+    @GetMapping("/history/{paperId}")
+    public Result<PaperReviewHistoryDTO> getPaperReviewHistory(@PathVariable("paperId") Long paperId) {
+        return teacherReviewService.getPaperReviewHistory(paperId);
     }
 }

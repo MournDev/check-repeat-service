@@ -41,7 +41,7 @@ public class PaperReviewHistoryDTO {
         private String reviewerName;
         
         /**
-         * 审核状态（1-通过，2-不通过，3-修改后通过）
+         * 审核状态（3-审核通过，4-审核不通过）
          */
         private Integer reviewStatus;
         

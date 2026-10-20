@@ -2,11 +2,6 @@
 server:
   address: 0.0.0.0
   port: ${SERVER_PORT:8080}
-  # kkFileView 回源地址里的主机名（PendingReviewServiceImpl 读 ${server.host}）。
-  # 非 Spring 标准配置项。必须是同一 docker 网络内可达的后端名：
-  # check-backend 由本 compose 的 container_name 提供，kkFileView 容器可直接解析。
-  # 不能用 localhost —— 那是 kkFileView 容器自己，回源必然失败。
-  host: ${SERVER_HOST:check-backend}
   servlet:
     context-path: /check
   tomcat:

@@ -105,8 +105,8 @@ public class DictConstants {
     /**
      * 审核结果字典值（review_record.review_status / do-review.reviewStatus）。
      *
-     * 只允许 3（通过）/ 4（不通过）两个值。旧的 1（通过）/ 2（不通过）/ 3（需要修改）
-     * 是 PendingReviewService 遗留约定，与新审核链路语义冲突，禁止再写入新记录。
+     * 只允许 3（通过）/ 4（不通过）两个值。历史数据中的 1（通过）/ 2（不通过）/ 3（需要修改）
+     * 来自已下线的旧审核链路，仅做读取兼容，禁止再写入新记录。
      */
     public static class ReviewStatus {
         public static final int PASS = 3;   // 审核通过

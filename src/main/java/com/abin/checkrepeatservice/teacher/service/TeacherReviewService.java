@@ -2,9 +2,13 @@ package com.abin.checkrepeatservice.teacher.service;
 
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.pojo.entity.ReviewRecord;
+import com.abin.checkrepeatservice.teacher.dto.ContactStudentDTO;
+import com.abin.checkrepeatservice.teacher.dto.PaperReviewHistoryDTO;
 import com.abin.checkrepeatservice.teacher.dto.ReviewOperateReq;
 import com.abin.checkrepeatservice.teacher.dto.ReviewQueryReq;
 import com.abin.checkrepeatservice.teacher.dto.ReviewResultDTO;
+import com.abin.checkrepeatservice.teacher.vo.PendingStatsVO;
+import com.abin.checkrepeatservice.teacher.vo.TodayReviewedVO;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.IService;
 import jakarta.servlet.http.HttpServletResponse;
@@ -58,4 +62,30 @@ public interface TeacherReviewService extends IService<ReviewRecord> {
      * @return 重新审核发起结果
      */
     Result<String> reInitiateReview(@RequestParam("paperId") Long paperId);
+
+    /**
+     * 7. 教师待审核统计
+     * @return 待审核总数、平均等待时长、今日已审核数
+     */
+    Result<PendingStatsVO> getPendingStats();
+
+    /**
+     * 8. 教师今日审核统计（含 3 小时粒度分布）
+     * @return 今日审核统计
+     */
+    Result<TodayReviewedVO> getTodayReviewedCount();
+
+    /**
+     * 9. 联系学生（即时消息 / 系统消息 / 邮件）
+     * @param contactDTO 联系参数
+     * @return 发送结果
+     */
+    Result<Map<String, Object>> contactStudent(ContactStudentDTO contactDTO);
+
+    /**
+     * 10. 论文审核历史
+     * @param paperId 论文ID
+     * @return 审核历史
+     */
+    Result<PaperReviewHistoryDTO> getPaperReviewHistory(Long paperId);
 }
