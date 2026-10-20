@@ -243,6 +243,29 @@ public class FileUploadController {
     }
 
     /**
+     * 取预览地址（登录态入口）。返回 {mode, url}：
+     * <ul>
+     *   <li>direct     —— 图片/PDF/文本等直出类文件，url 是带签名令牌的文件流地址；</li>
+     *   <li>kkfileview —— office 文档，url 是浏览器可达的 kkFileView 预览页地址。</li>
+     * </ul>
+     *
+     * <p>前端必须把这个地址直接交给 iframe 加载，不要用 axios 拉成 blob：
+     * kkFileView 返回的是整张 HTML 预览页，包成 blob 后文档基址变成 {@code blob:...}，
+     * 页内 js/css/图片的相对路径全部 404（表现为整页破图）。</p>
+     */
+    @GetMapping("/preview-url/{fileId}")
+    public Result<Map<String, String>> getPreviewUrl(@PathVariable Long fileId) {
+        try {
+            return Result.success(filePreviewService.getPreviewInfo(fileId));
+        } catch (IllegalArgumentException e) {
+            return Result.error(ResultCode.RESOURCE_NOT_FOUND, e.getMessage());
+        } catch (Exception e) {
+            log.error("获取预览地址失败 - fileId: {}", fileId, e);
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取预览地址失败");
+        }
+    }
+
+    /**
      * 以 inline 方式流式返回本地文件（下载与签名预览共用）
      */
     private ResponseEntity<Resource> serveInlineFile(FileInfo fileInfo, String fileName) {

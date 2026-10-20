@@ -244,6 +244,50 @@ public class FilePreviewServiceImpl implements FilePreviewService {
         }
     }
 
+    /**
+     * 取文件预览地址（登录态入口）。前端把返回的 url 直接交给 iframe 加载。
+     *
+     * <p>为什么不直接复用 {@link #smartPreview}：那条路对 office 文档 302 到 kkFileView，
+     * 前端若用 axios 跟着 302 把响应拉成 blob 再塞进 iframe，文档基址会变成
+     * {@code blob:...}，kkFileView 预览页里的 js/css/图片等相对资源全部 404
+     * （表现为整页破图）。改成这里只返回地址、由浏览器自己请求，页面就以真实地址
+     * 为基址渲染，相对资源随之恢复正常。</p>
+     */
+    @Override
+    public Map<String, String> getPreviewInfo(Long fileId) {
+        FileInfo fileInfo = fileService.getById(fileId);
+        if (fileInfo == null) {
+            throw new IllegalArgumentException("文件不存在");
+        }
+
+        String fileExtension = getFileExtension(fileInfo.getOriginalFilename()).toLowerCase();
+
+        // office 文档：交给 kkFileView 转换，返回其浏览器可达的预览页地址
+        if (isOfficeFile(fileExtension)) {
+            return Map.of("mode", "kkfileview", "url", buildKKFileViewUrl(fileId, fileInfo));
+        }
+
+        // 图片 / PDF / 文本等由后端直出，签名取文件地址浏览器可直接打开（不带 JWT 也放行）
+        return Map.of("mode", "direct", "url", buildSignedFetchUrl(fileId, fileInfo));
+    }
+
+    /**
+     * 直出类文件的预览地址：走匿名可达的签名取文件端点。
+     *
+     * <p>与 kkFileView 回源地址不同，这里的请求方是浏览器、不会二次编码，
+     * 因此可以带原始文件名（只做常规百分号编码）。</p>
+     */
+    private String buildSignedFetchUrl(Long fileId, FileInfo fileInfo) {
+        String originalFilename = fileInfo.getOriginalFilename() == null
+                ? "preview"
+                : fileInfo.getOriginalFilename();
+        return String.format("%s/api/file/preview-fetch/%s/%s?pt=%s",
+                appContext,
+                fileId,
+                URLEncoder.encode(originalFilename, StandardCharsets.UTF_8),
+                previewSignedUrlService.sign(fileId));
+    }
+
     @Override
     public ResponseEntity<?> smartPreviewReport(String paperId) {
         try {
@@ -428,36 +472,10 @@ public class FilePreviewServiceImpl implements FilePreviewService {
      */
     private ResponseEntity<?> proxyToKKFileView(Long fileId, FileInfo fileInfo) {
         try {
-            // 1. 构建文件访问URL（包含文件名 + 10 分钟有效签名，kkFileView 回调无法携带 JWT）
-            //    文件名段只保留 ASCII 安全字符：kkFileView 会对该 URL 再做一次百分号编码，
-            //    若这里预先编码中文名，会形成 %25xx 双重编码，被 Spring Security 的
-            //    StrictHttpFirewall 以 400 拒绝（请求根本到不了本接口）。
-            //    非 ASCII 名退回 preview.<扩展名>，扩展名用于 kkFileView 选择转换器。
-            String originalFilename = fileInfo.getOriginalFilename();
-            String fileExtension = getFileExtension(originalFilename).toLowerCase();
-            String callbackFileName = (originalFilename != null && originalFilename.matches("[A-Za-z0-9._-]+"))
-                    ? originalFilename
-                    : (fileExtension.isEmpty() ? "preview" : "preview." + fileExtension);
-            String fileUrl = String.format("http://%s:%s%s/api/file/preview-fetch/%s/%s?pt=%s",
-                    serverHost,
-                    serverPort,
-                    appContext,
-                    fileId,
-                    callbackFileName,
-                    previewSignedUrlService.sign(fileId));
+            // 1. 构建 kkFileView 预览页地址（含绑定 fileId、10 分钟有效的回源签名）
+            String kkFileViewPreviewUrl = buildKKFileViewUrl(fileId, fileInfo);
 
-            log.info("构建KKFileView文件URL: {}", fileUrl);
-
-            // 2. Base64编码（标准 Base64 + percent 编码，见 encodePreviewUrlParam）
-            String encodedUrl = encodePreviewUrlParam(fileUrl);
-
-            // 3. 构建KKFileView预览URL
-            String kkFileViewPreviewUrl = String.format("%s/onlinePreview?url=%s",
-                    kkfileviewUrl, encodedUrl);
-
-            log.info("KKFileView预览URL: {}", kkFileViewPreviewUrl);
-
-            // 4. 测试KKFileView服务是否可用
+            // 2. 测试KKFileView服务是否可用
             try {
                 ResponseEntity<String> testResponse = restTemplate.getForEntity(
                         kkfileviewUrl + "/index", String.class);
@@ -477,6 +495,44 @@ public class FilePreviewServiceImpl implements FilePreviewService {
             log.error("代理到KKFileView失败 - fileId: {}", fileId, e);
             return fallbackToDownload(fileInfo);
         }
+    }
+
+    /**
+     * 构建 kkFileView 预览页地址（浏览器最终要打开的地址）。
+     */
+    private String buildKKFileViewUrl(Long fileId, FileInfo fileInfo) {
+        String fileUrl = String.format("http://%s:%s%s/api/file/preview-fetch/%s/%s?pt=%s",
+                serverHost,
+                serverPort,
+                appContext,
+                fileId,
+                safePreviewFileName(fileInfo.getOriginalFilename()),
+                previewSignedUrlService.sign(fileId));
+
+        log.info("构建KKFileView文件URL: {}", fileUrl);
+
+        // Base64 编码（标准 Base64 + percent 编码，见 encodePreviewUrlParam）
+        String encodedUrl = encodePreviewUrlParam(fileUrl);
+        String kkFileViewPreviewUrl = String.format("%s/onlinePreview?url=%s",
+                kkfileviewUrl, encodedUrl);
+
+        log.info("KKFileView预览URL: {}", kkFileViewPreviewUrl);
+        return kkFileViewPreviewUrl;
+    }
+
+    /**
+     * kkFileView 回源路径里的文件名段：只保留 ASCII 安全字符。
+     *
+     * <p>kkFileView 会对该 URL 再做一次百分号编码，若这里预先编码中文名，会形成
+     * %25xx 双重编码，被 Spring Security 的 StrictHttpFirewall 以 400 拒绝
+     * （请求根本到不了后端）。非 ASCII 名退回 preview.&lt;扩展名&gt;，
+     * 扩展名用于 kkFileView 选择转换器。</p>
+     */
+    private String safePreviewFileName(String originalFilename) {
+        String fileExtension = getFileExtension(originalFilename).toLowerCase();
+        return (originalFilename != null && originalFilename.matches("[A-Za-z0-9._-]+"))
+                ? originalFilename
+                : (fileExtension.isEmpty() ? "preview" : "preview." + fileExtension);
     }
 
     /**
