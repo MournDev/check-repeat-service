@@ -4,7 +4,6 @@ import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.annotation.OperationLog;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
-import com.abin.checkrepeatservice.teacher.dto.BatchReviewDTO;
 import com.abin.checkrepeatservice.teacher.dto.SendMessageDTO;
 import com.abin.checkrepeatservice.teacher.service.TeacherDashboardService;
 import com.abin.checkrepeatservice.teacher.service.TeacherStudentManagementService;
@@ -124,51 +123,6 @@ public class TeacherDashboardController {
         } catch (Exception e) {
             log.error("获取学生状态统计失败", e);
             return Result.error(ResultCode.SYSTEM_ERROR, "获取学生状态统计失败: " + "系统异常，请稍后重试");
-        }
-    }
-
-    /**
-     * 4. 论文审核接口
-     * POST /api/teacher/papers/review
-     *
-     * @deprecated 已收敛到 /api/teacher/reviews/do-review，保留仅为兼容历史客户端
-     */
-    @Deprecated
-    @PostMapping("/papers/review")
-    @Operation(summary = "批量论文审核", description = "提交论文审核结果")
-    @OperationLog(type = "teacher_batch_review", description = "教师批量审核论文", recordResult = true)
-    public Result<String> batchReviewPapers(@RequestBody BatchReviewDTO reviewDTO) {
-        try {
-            Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
-            log.info("教师{}批量审核论文: paperIds={}, status={}", teacherId, reviewDTO.getPaperIds(), reviewDTO.getReviewStatus());
-            return teacherDashboardService.batchReviewPapers(teacherId, reviewDTO);
-        } catch (Exception e) {
-            log.error("批量论文审核失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "批量论文审核失败: " + "系统异常，请稍后重试");
-        }
-    }
-
-    /**
-     * 5. 论文审核操作接口（保持原有单个审核接口）
-     * POST /api/teacher/papers/{paperId}/review
-     *
-     * @deprecated 已收敛到 /api/teacher/reviews/do-review，保留仅为兼容历史客户端
-     */
-    @Deprecated
-    @PostMapping("/papers/{paperId}/review")
-    @Operation(summary = "审核论文", description = "对指定论文进行审核操作（通过/驳回）")
-    @OperationLog(type = "teacher_paper_review", description = "教师审核论文", recordResult = true)
-    public Result<String> reviewPaper(
-            @Parameter(description = "论文ID") @PathVariable Long paperId,
-            @Parameter(description = "审核结果") @RequestParam String reviewResult,
-            @Parameter(description = "审核意见") @RequestParam(required = false) String reviewComment) {
-        try {
-            Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
-            log.info("教师{}对论文{}进行审核: result={}, comment={}", teacherId, paperId, reviewResult, reviewComment);
-            return teacherDashboardService.reviewPaper(teacherId, paperId, reviewResult, reviewComment);
-        } catch (Exception e) {
-            log.error("论文审核操作失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "论文审核失败: " + "系统异常，请稍后重试");
         }
     }
 

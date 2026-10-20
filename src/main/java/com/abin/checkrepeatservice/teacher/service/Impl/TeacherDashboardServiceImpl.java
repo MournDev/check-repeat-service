@@ -1,18 +1,14 @@
 package com.abin.checkrepeatservice.teacher.service.Impl;
 
 import com.abin.checkrepeatservice.common.Result;
-import com.abin.checkrepeatservice.common.constant.DictConstants;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.admin.vo.PaperExportExcelVO;
 import com.alibaba.excel.EasyExcel;
 import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
 import com.abin.checkrepeatservice.pojo.entity.SysUser;
-import com.abin.checkrepeatservice.teacher.dto.BatchReviewDTO;
-import com.abin.checkrepeatservice.teacher.dto.ReviewOperateReq;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
 import com.abin.checkrepeatservice.teacher.mapper.TeacherDashboardMapper;
 import com.abin.checkrepeatservice.teacher.service.TeacherDashboardService;
-import com.abin.checkrepeatservice.teacher.service.TeacherReviewService;
 import com.abin.checkrepeatservice.user.service.SysUserService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -43,9 +39,6 @@ public class TeacherDashboardServiceImpl implements TeacherDashboardService {
     
     @Resource
     private SysUserService sysUserService;
-
-    @Resource
-    private TeacherReviewService teacherReviewService;
 
     @Override
     public Result<Map<String, Object>> getDashboardStats(Long teacherId) {
@@ -184,83 +177,6 @@ public class TeacherDashboardServiceImpl implements TeacherDashboardService {
             log.error("获取学生状态统计失败: teacherId={}", teacherId, e);
             return Result.error(ResultCode.SYSTEM_ERROR, "获取学生状态统计失败: " + "系统异常，请稍后重试");
         }
-    }
-
-    /**
-     * @deprecated 旧审核入口，已收敛到 {@link TeacherReviewService#doReview}。
-     * 保留 URL 仅为兼容历史客户端，新代码请调用 /api/teacher/reviews/do-review。
-     * 不再直接写 paper_info，审核记录、状态门、签核校验由统一审核链路负责。
-     */
-    @Deprecated
-    @Override
-    public Result<String> batchReviewPapers(Long teacherId, BatchReviewDTO reviewDTO) {
-        if (reviewDTO.getPaperIds() == null || reviewDTO.getPaperIds().isEmpty()) {
-            return Result.error(ResultCode.PARAM_ERROR, "论文ID列表不能为空");
-        }
-        Integer reviewStatus = resolveReviewStatus(reviewDTO.getReviewStatus());
-        if (reviewStatus == null) {
-            return Result.error(ResultCode.PARAM_ERROR, "审核状态参数无效，应为APPROVED或REJECTED");
-        }
-
-        ReviewOperateReq operateReq = new ReviewOperateReq();
-        operateReq.setPaperIds(reviewDTO.getPaperIds());
-        operateReq.setReviewStatus(reviewStatus);
-        operateReq.setReviewOpinion(reviewDTO.getReviewOpinion());
-
-        log.info("教师{}通过旧批量审核入口提交审核: paperIds={}, reviewStatus={}",
-                teacherId, reviewDTO.getPaperIds(), reviewStatus);
-        Result<Map<String, Object>> result = teacherReviewService.doReview(operateReq);
-        if (!result.isSuccess()) {
-            return Result.error(result.getErrorCode(), result.getMessage());
-        }
-
-        Map<String, Object> data = result.getData();
-        Object successCount = data == null ? 0 : data.getOrDefault("successCount", 0);
-        Object failCount = data == null ? 0 : data.getOrDefault("failCount", 0);
-        return Result.success(String.format("批量审核完成: 成功%s篇, 失败%s篇", successCount, failCount));
-    }
-
-    /**
-     * @deprecated 旧审核入口，已收敛到 {@link TeacherReviewService#doReview}。
-     * 保留 URL 仅为兼容历史客户端，新代码请调用 /api/teacher/reviews/do-review。
-     */
-    @Deprecated
-    @Override
-    public Result<String> reviewPaper(Long teacherId, Long paperId, String reviewResult, String reviewComment) {
-        Integer reviewStatus = resolveReviewStatus(reviewResult);
-        if (reviewStatus == null) {
-            return Result.error(ResultCode.PARAM_ERROR, "审核结果参数无效，应为pass或reject");
-        }
-
-        ReviewOperateReq operateReq = new ReviewOperateReq();
-        operateReq.setPaperIds(Collections.singletonList(paperId));
-        operateReq.setReviewStatus(reviewStatus);
-        operateReq.setReviewOpinion(reviewComment);
-
-        log.info("教师{}通过旧单篇审核入口提交审核: paperId={}, reviewResult={}", teacherId, paperId, reviewResult);
-        Result<Map<String, Object>> result = teacherReviewService.doReview(operateReq);
-        if (!result.isSuccess()) {
-            return Result.error(result.getErrorCode(), result.getMessage());
-        }
-        return Result.success("论文审核成功");
-    }
-
-    /**
-     * 旧审核入口的字符串结果 → 统一审核结果字典（3-通过，4-不通过）。
-     * 兼容单篇的 pass/reject 与批量的 APPROVED/REJECTED。
-     */
-    private Integer resolveReviewStatus(String reviewResult) {
-        if (reviewResult == null) {
-            return null;
-        }
-        String value = reviewResult.trim();
-        if ("APPROVED".equalsIgnoreCase(value) || "PASS".equalsIgnoreCase(value)) {
-            return DictConstants.ReviewStatus.PASS;
-        }
-        if ("REJECTED".equalsIgnoreCase(value) || "REJECT".equalsIgnoreCase(value)) {
-            return DictConstants.ReviewStatus.REJECT;
-        }
-        return null;
     }
 
     @Override

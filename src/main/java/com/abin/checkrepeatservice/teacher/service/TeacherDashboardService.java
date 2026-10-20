@@ -1,7 +1,6 @@
 package com.abin.checkrepeatservice.teacher.service;
 
 import com.abin.checkrepeatservice.common.Result;
-import com.abin.checkrepeatservice.teacher.dto.BatchReviewDTO;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 
 import java.util.Map;
@@ -34,28 +33,6 @@ public interface TeacherDashboardService {
      * @return 学生状态统计数据
      */
     Result<Map<String, Object>> getStudentStats(Long teacherId);
-
-    /**
-     * 批量审核论文
-     * @param teacherId 教师ID
-     * @param reviewDTO 审核参数
-     * @return 操作结果
-     * @deprecated 已收敛到 {@link TeacherReviewService#doReview}，保留仅为兼容历史客户端
-     */
-    @Deprecated
-    Result<String> batchReviewPapers(Long teacherId, BatchReviewDTO reviewDTO);
-
-    /**
-     * 审核论文
-     * @param teacherId 教师ID
-     * @param paperId 论文ID
-     * @param reviewResult 审核结果
-     * @param reviewComment 审核意见
-     * @return 操作结果
-     * @deprecated 已收敛到 {@link TeacherReviewService#doReview}，保留仅为兼容历史客户端
-     */
-    @Deprecated
-    Result<String> reviewPaper(Long teacherId, Long paperId, String reviewResult, String reviewComment);
 
     /**
      * 下载论文文件
