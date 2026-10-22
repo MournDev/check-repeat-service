@@ -51,6 +51,8 @@ public class AutoAssignmentProgressDTO implements Serializable {
      */
     @Data
     public static class AssignmentDetail {
+        /** 论文ID（结果应用/回放时定位论文） */
+        private String paperId;
         private String studentName;
         private String studentId;
         private String teacherName;
