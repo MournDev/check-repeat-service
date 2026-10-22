@@ -83,6 +83,10 @@ public class AdminReviewAssignServiceImpl implements AdminReviewAssignService {
     @Resource
     private PaperStageGate paperStageGate;
 
+    // 治理项：数据范围统一裁决（评阅分配与列表按角色范围收窄）
+    @Resource
+    private com.abin.checkrepeatservice.common.datascope.DataScopeResolver dataScopeResolver;
+
     @Resource
     private PaperStatusLogService paperStatusLogService;
 
@@ -117,6 +121,9 @@ public class AdminReviewAssignServiceImpl implements AdminReviewAssignService {
         PaperInfo paper = paperInfoMapper.selectById(req.getPaperId());
         if (paper == null) {
             throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "论文不存在或已删除");
+        }
+        if (!dataScopeResolver.canAccessPaper(paper)) {
+            throw new BusinessException(ResultCode.PERMISSION_NO_ACCESS, "无权为该论文分配评阅任务", null);
         }
         String paperStatus = paper.getPaperStatus();
         if (!DictConstants.PaperStatus.COMPLETED.equals(paperStatus)
@@ -267,6 +274,8 @@ public class AdminReviewAssignServiceImpl implements AdminReviewAssignService {
         if (status != null) {
             wrapper.eq(ReviewAssignment::getStatus, status);
         }
+        // 治理项：评阅任务按论文所属范围收窄（paper_id 为内部列名）
+        dataScopeResolver.applyPaperIdScope(wrapper, "paper_id");
 
         Page<ReviewAssignment> result = reviewAssignmentMapper.selectPage(new Page<>(page, size), wrapper);
         Page<ReviewAssignVO> voPage = new Page<>(result.getCurrent(), result.getSize(), result.getTotal());

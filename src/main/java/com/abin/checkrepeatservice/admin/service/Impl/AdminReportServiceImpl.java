@@ -61,6 +61,10 @@ public class AdminReportServiceImpl implements AdminReportService {
     @Resource
     private PdfReportGenerator pdfReportGenerator;
 
+    // 治理项：数据范围统一裁决（报告列表/统计/详情/导出按角色范围收窄）
+    @Resource
+    private com.abin.checkrepeatservice.common.datascope.DataScopeResolver dataScopeResolver;
+
     /** 文件名中的非法字符（避免报告编号污染文件名/ZIP条目） */
     private static final String ILLEGAL_FILENAME_CHARS = "[\\\\/:*?\"<>|\\r\\n]";
 
@@ -77,7 +81,7 @@ public class AdminReportServiceImpl implements AdminReportService {
             Page<AdminReportListItemVO> pageParam = new Page<>(page, size);
             // 分页拦截器会就地填充 pageParam 的 total 与 records
             adminReportMapper.selectReportPage(pageParam, paperTitle, studentName,
-                    checkStatus, minSimilarity, maxSimilarity);
+                    checkStatus, minSimilarity, maxSimilarity, dataScopeResolver.currentFilter());
             return Result.success("报告列表查询成功", pageParam);
         } catch (Exception e) {
             log.error("查询报告列表失败: {}", e.getMessage(), e);
@@ -94,7 +98,8 @@ public class AdminReportServiceImpl implements AdminReportService {
             BigDecimal maxSimilarity) {
         try {
             AdminReportStatsVO stats = adminReportMapper.selectReportStats(
-                    paperTitle, studentName, checkStatus, minSimilarity, maxSimilarity);
+                    paperTitle, studentName, checkStatus, minSimilarity, maxSimilarity,
+                    dataScopeResolver.currentFilter());
             return Result.success("报告统计查询成功", stats);
         } catch (Exception e) {
             log.error("查询报告统计失败: {}", e.getMessage(), e);
@@ -121,6 +126,9 @@ public class AdminReportServiceImpl implements AdminReportService {
         PaperInfo paper = paperInfoMapper.selectById(task.getPaperId());
         if (paper == null) {
             return Result.error(ResultCode.RESOURCE_NOT_FOUND, "报告关联的论文不存在");
+        }
+        if (!dataScopeResolver.canAccessPaper(paper)) {
+            return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权查看该报告");
         }
 
         // 基础信息直接取自实体，保证即使论文原文文件缺失也能展示报告元数据
@@ -285,6 +293,11 @@ public class AdminReportServiceImpl implements AdminReportService {
         if (task == null) {
             throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "报告关联的查重任务不存在", null);
         }
+        // 治理项：按 ID 直达的导出入口同样校验数据范围
+        PaperInfo exportPaper = paperInfoMapper.selectById(task.getPaperId());
+        if (!dataScopeResolver.canAccessPaper(exportPaper)) {
+            throw new BusinessException(ResultCode.PERMISSION_NO_ACCESS, "无权导出该报告", null);
+        }
 
         // 先生成内容再写响应头，避免生成失败时留下残缺的响应
         byte[] pdf = renderPdf(report, task);
@@ -321,6 +334,12 @@ public class AdminReportServiceImpl implements AdminReportService {
                 CheckTask task = checkTaskMapper.selectById(report.getTaskId());
                 if (task == null) {
                     log.warn("报告关联任务不存在，跳过导出: reportId={}", reportId);
+                    continue;
+                }
+                // 治理项：越权报告逐份跳过，不影响其余报告导出
+                PaperInfo exportPaper = paperInfoMapper.selectById(task.getPaperId());
+                if (!dataScopeResolver.canAccessPaper(exportPaper)) {
+                    log.warn("报告超出当前数据范围，跳过导出: reportId={}", reportId);
                     continue;
                 }
                 byte[] pdf = renderPdf(report, task);

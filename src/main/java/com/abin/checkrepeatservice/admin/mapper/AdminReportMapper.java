@@ -2,6 +2,7 @@ package com.abin.checkrepeatservice.admin.mapper;
 
 import com.abin.checkrepeatservice.admin.vo.AdminReportListItemVO;
 import com.abin.checkrepeatservice.admin.vo.AdminReportStatsVO;
+import com.abin.checkrepeatservice.common.datascope.DataScopeSqlFilter;
 import com.abin.checkrepeatservice.pojo.entity.CheckReport;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
@@ -28,7 +29,8 @@ public interface AdminReportMapper extends BaseMapper<CheckReport> {
             @Param("studentName") String studentName,
             @Param("checkStatus") String checkStatus,
             @Param("minSimilarity") BigDecimal minSimilarity,
-            @Param("maxSimilarity") BigDecimal maxSimilarity);
+            @Param("maxSimilarity") BigDecimal maxSimilarity,
+            @Param("scope") DataScopeSqlFilter scope);
 
     /**
      * 统计报告指标（与列表同一组筛选条件，保证统计与列表口径一致）
@@ -38,5 +40,6 @@ public interface AdminReportMapper extends BaseMapper<CheckReport> {
             @Param("studentName") String studentName,
             @Param("checkStatus") String checkStatus,
             @Param("minSimilarity") BigDecimal minSimilarity,
-            @Param("maxSimilarity") BigDecimal maxSimilarity);
+            @Param("maxSimilarity") BigDecimal maxSimilarity,
+            @Param("scope") DataScopeSqlFilter scope);
 }

@@ -78,6 +78,10 @@ public class ThesisArchiveServiceImpl implements ThesisArchiveService {
     @Resource
     private PaperStatusLogService paperStatusLogService;
 
+    // 治理项：归档列表/详情/归档操作按角色数据范围收窄
+    @Resource
+    private com.abin.checkrepeatservice.common.datascope.DataScopeResolver dataScopeResolver;
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Result<String> finalizePaper(Long paperId) {
@@ -85,6 +89,9 @@ public class ThesisArchiveServiceImpl implements ThesisArchiveService {
         PaperInfo paper = paperInfoMapper.selectById(paperId);
         if (paper == null || Integer.valueOf(1).equals(paper.getIsDeleted())) {
             return Result.error(ResultCode.RESOURCE_NOT_FOUND, "论文不存在或已删除");
+        }
+        if (!dataScopeResolver.canAccessPaper(paper)) {
+            return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权定稿该论文");
         }
         // 定稿是指导教师对本人指导论文的确认动作；管理员可用于兜底
         if (!UserBusinessInfoUtils.isAdmin() && !Objects.equals(operatorId, paper.getTeacherId())) {
@@ -121,6 +128,9 @@ public class ThesisArchiveServiceImpl implements ThesisArchiveService {
         PaperInfo paper = paperInfoMapper.selectById(paperId);
         if (paper == null || Integer.valueOf(1).equals(paper.getIsDeleted())) {
             return Result.error(ResultCode.RESOURCE_NOT_FOUND, "论文不存在或已删除");
+        }
+        if (!dataScopeResolver.canAccessPaper(paper)) {
+            return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权归档该论文");
         }
 
         String fromStatus = paperStageGate.normalizeLegacy(paper.getPaperStatus());
@@ -191,6 +201,8 @@ public class ThesisArchiveServiceImpl implements ThesisArchiveService {
         if (majorId != null) {
             wrapper.eq(ThesisArchive::getMajorId, majorId);
         }
+        // 治理项：归档记录按快照中的学院/专业/导师/学生范围收窄
+        dataScopeResolver.applyArchiveScope(wrapper);
         wrapper.orderByDesc(ThesisArchive::getArchiveTime);
 
         Page<ThesisArchive> page = thesisArchiveMapper.selectPage(
@@ -206,6 +218,9 @@ public class ThesisArchiveServiceImpl implements ThesisArchiveService {
         ThesisArchive archive = thesisArchiveMapper.selectById(id);
         if (archive == null) {
             return Result.error(ResultCode.RESOURCE_NOT_FOUND, "归档记录不存在");
+        }
+        if (!dataScopeResolver.canAccessArchive(archive)) {
+            return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权查看该归档记录");
         }
         return Result.success(toVO(archive));
     }

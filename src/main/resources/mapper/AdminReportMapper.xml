@@ -29,6 +29,22 @@
         <if test="maxSimilarity != null">
             AND t.check_rate &lt;= #{maxSimilarity}
         </if>
+        <!-- 数据范围（治理项）：scope 为空或 NONE 时不加限制 -->
+        <if test="scope != null and scope.denyAll">
+            AND 1 = 0
+        </if>
+        <if test="scope != null and scope.collegeId != null">
+            AND p.college_id = #{scope.collegeId}
+        </if>
+        <if test="scope != null and scope.majorId != null">
+            AND p.major_id = #{scope.majorId}
+        </if>
+        <if test="scope != null and scope.teacherId != null">
+            AND p.teacher_id = #{scope.teacherId}
+        </if>
+        <if test="scope != null and scope.studentId != null">
+            AND p.student_id = #{scope.studentId}
+        </if>
     </sql>
 
     <!-- 报告列表（分页由 PaginationInnerInterceptor 处理） -->
