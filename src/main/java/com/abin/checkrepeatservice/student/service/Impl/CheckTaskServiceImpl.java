@@ -163,7 +163,8 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
     protected Result<CheckResultVO> createCheckTaskInternal(Long paperId, PaperInfo paperInfo) {
         // P5 学院月度额度：任务真正落库前校验并扣减学院当月额度。
         // 重试路径复用已存在任务（重新入队），不走本新建入口，不会重复扣减。
-        collegeQuotaService.checkAndConsume(paperInfo.getCollegeId());
+        // M4.1：记录本次是否实际扣减，失败返还时据此幂等退回
+        boolean quotaConsumed = collegeQuotaService.checkAndConsume(paperInfo.getCollegeId());
 
         // 1. 创建 PENDING 状态的任务（不立即改为 CHECKING）
         CheckTask checkTask = new CheckTask();
@@ -171,6 +172,7 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
         checkTask.setFileId(paperInfo.getFileId());
         checkTask.setTaskNo(generateTaskNo());
         checkTask.setCheckStatus(DictConstants.CheckStatus.PENDING); // 保持待处理状态
+        checkTask.setQuotaCharged(quotaConsumed ? 1 : 0);
         // M3.1 版本—报告绑定：快照论文版本 + 最新一次提交记录
         checkTask.setPaperVersion(paperInfo.getVersion());
         checkTask.setSubmitId(resolveLatestSubmitId(paperId));
@@ -522,18 +524,24 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
                 failReason.length() > 500 ? failReason.substring(0, 500) : failReason
             );
         
-            // 【关键改进 4】失败时回滚论文状态
+            // 【关键改进 4】失败时回滚论文状态（M4.1：有指导教师回"已分配"，未分配回"待分配"）
+            String restoreStatus = paperInfo.getTeacherId() != null
+                    ? DictConstants.PaperStatus.ASSIGNED
+                    : DictConstants.PaperStatus.PENDING;
             PaperInfo updatePaper = new PaperInfo();
             updatePaper.setId(paperInfo.getId());
-            updatePaper.setPaperStatus(DictConstants.PaperStatus.ASSIGNED);
+            updatePaper.setPaperStatus(restoreStatus);
             updatePaper.setCheckTime(null);
             paperInfoMapper.updateById(updatePaper);
     
             // 记录论文状态变更日志
             recordPaperStatusLog(paperInfo.getId(), 
                 DictConstants.PaperStatus.CHECKING, 
-                DictConstants.PaperStatus.ASSIGNED, 
-                "查重任务执行失败，恢复至已分配状态");
+                restoreStatus, 
+                "查重任务执行失败，恢复至" + (DictConstants.PaperStatus.ASSIGNED.equals(restoreStatus) ? "已分配" : "待分配") + "状态");
+
+            // M4.1：失败返还创建时扣减的学院月度额度（幂等，放在状态回滚之后）
+            collegeQuotaService.refundForFailedTask(taskId);
                     
             log.warn("查重任务失败，已恢复论文状态 - 任务 ID: {}, 论文 ID: {}", taskId, paperId);
         }

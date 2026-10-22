@@ -153,8 +153,10 @@ public class BatchCheckTaskServiceImpl {
 
         // P5 学院月度额度：新建任务落库前校验并扣减学院当月额度。
         // 重试路径复用已存在任务，不经过本批量新建入口，不会重复扣减。
+        boolean quotaConsumed;
         try {
-            collegeQuotaService.checkAndConsume(paperInfo.getCollegeId());
+            // M4.1：记录本次是否实际扣减，失败返还时据此幂等退回
+            quotaConsumed = collegeQuotaService.checkAndConsume(paperInfo.getCollegeId());
         } catch (BusinessException e) {
             // 额度不足（40916）按单篇失败返回，不中断批量中其他论文
             return BatchCheckResultDTO.TaskResult.builder()
@@ -166,7 +168,7 @@ public class BatchCheckTaskServiceImpl {
 
         // 2. 创建任务
         try {
-            CheckTask checkTask = createCheckTask(paperId, paperInfo, studentId);
+            CheckTask checkTask = createCheckTask(paperId, paperInfo, studentId, quotaConsumed);
             
             // 3. 发布事件（异步执行）
             eventPublisher.publishEvent(new CheckTaskCreatedEvent(this, checkTask.getId(), paperId));
@@ -199,12 +201,15 @@ public class BatchCheckTaskServiceImpl {
      * 创建查重任务
      */
     @Transactional(rollbackFor = Exception.class)
-    protected CheckTask createCheckTask(Long paperId, PaperInfo paperInfo, Long studentId) {
+    protected CheckTask createCheckTask(Long paperId, PaperInfo paperInfo, Long studentId,
+                                        boolean quotaConsumed) {
         CheckTask checkTask = new CheckTask();
         checkTask.setPaperId(paperId);
         checkTask.setFileId(paperInfo.getFileId());
         checkTask.setTaskNo(generateTaskNo());
         checkTask.setCheckStatus("PENDING");
+        // M4.1：记录本次是否实际扣减学院月度额度，失败返还时据此幂等退回
+        checkTask.setQuotaCharged(quotaConsumed ? 1 : 0);
         // M3.1 版本—报告绑定：快照论文版本 + 最新一次提交记录
         checkTask.setPaperVersion(paperInfo.getVersion());
         checkTask.setSubmitId(resolveLatestSubmitId(paperId));

@@ -21,8 +21,22 @@ public interface CollegeQuotaService {
      *  - 当月 (college_id, 当前月) 无额度记录：不限额，直接放行；
      *  - 有记录且 used_quota >= total_quota：抛 BusinessException(BUSINESS_QUOTA_EXCEEDED)；
      *  - 否则原子扣减 used_quota + 1。
+     *
+     * @return true-实际扣减了额度（调用方需把 check_task.quota_charged 置 1）；
+     *         false-未归属学院或当月未配置额度，未扣减
      */
-    void checkAndConsume(Long collegeId);
+    boolean checkAndConsume(Long collegeId);
+
+    /**
+     * M4.1 失败任务返还额度（幂等）。
+     *
+     * 仅当 check_task.quota_charged = 1 时原子翻转为 0 并返还对应月份额度，
+     * 重复调用（异常重入、定时任务重复扫描）不会重复返还。
+     * 返还月份取任务创建时间所在月（额度在创建时扣减），跨月失败也退回原月份。
+     *
+     * @param taskId 查重任务ID
+     */
+    void refundForFailedTask(Long taskId);
 
     /**
      * 管理端额度列表（quotaMonth 可选；pageSize=-1 时不分页返回全量），补学院名称

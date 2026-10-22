@@ -112,13 +112,15 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
 
         // P5 学院月度额度：任务真正落库前校验并扣减学院当月额度。
         // 重试路径复用已存在任务，不走本新建入口，不会重复扣减。
-        collegeQuotaService.checkAndConsume(paperInfo.getCollegeId());
+        // M4.1：记录本次是否实际扣减，失败返还时据此幂等退回
+        boolean quotaConsumed = collegeQuotaService.checkAndConsume(paperInfo.getCollegeId());
 
         // 3. 创建任务
         CheckTask checkTask = new CheckTask();
         checkTask.setPaperId(paperId);
         checkTask.setTaskNo(generateTaskNo());
         checkTask.setCheckStatus(CheckTaskStatusEnum.PENDING.getCode());
+        checkTask.setQuotaCharged(quotaConsumed ? 1 : 0);
         // M3.1 版本—报告绑定：快照论文版本 + 最新一次提交记录
         checkTask.setPaperVersion(paperInfo.getVersion());
         checkTask.setSubmitId(resolveLatestSubmitId(paperId));
@@ -217,6 +219,9 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
             return Result.error(ResultCode.PERMISSION_NOT_STATUS, "只有失败的任务才能重试");
         }
         
+        // M4.1：失败时额度已返还（quota_charged 已置 0），重试不再重复扣减，
+        // 保证同一任务最多占用一次额度；重试再次失败时返还逻辑天然幂等。
+
         // 重置任务状态
         task.setCheckStatus(CheckTaskStatusEnum.PENDING.getCode());
         task.setFailReason(null);
@@ -354,6 +359,10 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
             
             // 更新论文状态
             updatePaperStatus(paperInfo, checkResult.getSimilarity());
+            // M4.1：失败返还创建时扣减的学院月度额度（幂等，放在状态更新之后）
+            if (finalStatus == CheckTaskStatusEnum.FAILURE) {
+                collegeQuotaService.refundForFailedTask(taskId);
+            }
             
         } catch (Exception e) {
             log.error("查重任务执行失败：taskId={}", taskId, e);
@@ -361,13 +370,17 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
             String failReason = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
             updateTaskStatus(taskId, CheckTaskStatusEnum.FAILURE, failReason);
             
-            // 恢复论文状态
+            // 恢复论文状态（M4.1：有指导教师回"已分配"，未分配回"待分配"，与流程状态对齐）
             PaperInfo paperInfo = paperInfoMapper.selectById(task.getPaperId());
             if (paperInfo != null) {
-                paperInfo.setPaperStatus(com.abin.checkrepeatservice.common.constant.DictConstants.PaperStatus.PENDING);
+                paperInfo.setPaperStatus(paperInfo.getTeacherId() != null
+                        ? com.abin.checkrepeatservice.common.constant.DictConstants.PaperStatus.ASSIGNED
+                        : com.abin.checkrepeatservice.common.constant.DictConstants.PaperStatus.PENDING);
                 paperInfo.setCheckTime(null);
                 paperInfoMapper.updateById(paperInfo);
             }
+            // M4.1：失败返还创建时扣减的学院月度额度（幂等，放在状态回滚之后）
+            collegeQuotaService.refundForFailedTask(taskId);
         }
     }
     

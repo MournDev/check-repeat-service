@@ -43,6 +43,13 @@ public class CheckTask extends BaseEntity {
     private Long submitId;
 
     /**
+     * 是否已扣减学院月度额度（M4.1）：1-已扣，0-未扣/已返还。
+     * 失败返还时按 1 -> 0 原子翻转，保证同一任务最多返还一次；重试重新扣减并置 1。
+     */
+    @TableField("quota_charged")
+    private Integer quotaCharged;
+
+    /**
      * 对应的论文文件 ID（关联 file_info.id）
      */
     @JsonFormat(shape = JsonFormat.Shape.STRING)

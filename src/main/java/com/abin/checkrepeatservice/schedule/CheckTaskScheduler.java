@@ -33,6 +33,10 @@ public class CheckTaskScheduler {
     @Autowired
     private CheckTaskMapper checkTaskMapper;
 
+    // M4.1：超时失败的任务同样返还已扣额度
+    @Autowired
+    private com.abin.checkrepeatservice.admin.service.CollegeQuotaService collegeQuotaService;
+
     /** 超时任务扫描开关，默认开（S13 起）：把超时任务标记为失败（写库）；application.yml 可覆盖关闭 */
     @Value("${schedule.check-task.timeout-scan-enabled:true}")
     private boolean timeoutScanEnabled;
@@ -60,6 +64,13 @@ public class CheckTaskScheduler {
             String condition = "check_status = '" + CheckTaskStatusEnum.CHECKING.getCode() +
                              "' AND start_time < DATE_SUB(NOW(), INTERVAL 1 HOUR)";
 
+            // M4.1：先记录本轮将被判失败且已扣额度的任务，状态置失败后逐一幂等返还
+            java.util.List<CheckTask> timeoutTasks = checkTaskMapper.selectList(
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<CheckTask>()
+                            .eq(CheckTask::getCheckStatus, CheckTaskStatusEnum.CHECKING.getCode())
+                            .lt(CheckTask::getStartTime, LocalDateTime.now().minusHours(1))
+                            .eq(CheckTask::getQuotaCharged, 1));
+
             int affected = stateMachine.batchTransitionStatus(
                 CheckTaskStatusEnum.FAILURE,
                 "任务执行超时（超过1小时）",
@@ -68,6 +79,10 @@ public class CheckTaskScheduler {
 
             if (affected > 0) {
                 log.warn("发现{}个超时查重任务，已标记为失败", affected);
+            }
+            // M4.1：超时失败与执行异常一致，返还创建时扣减的学院月度额度
+            for (CheckTask timeoutTask : timeoutTasks) {
+                collegeQuotaService.refundForFailedTask(timeoutTask.getId());
             }
 
         } catch (Exception e) {

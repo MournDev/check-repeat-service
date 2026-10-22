@@ -73,6 +73,10 @@ public class CheckTaskEventListener {
     @Resource
     private NotificationService notificationService;
 
+    // M4.1：任务失败时返还创建时扣减的学院月度额度（幂等）
+    @Resource
+    private com.abin.checkrepeatservice.admin.service.CollegeQuotaService collegeQuotaService;
+
     // 架构修复（P0）：比对库入库管道，正文提取成功后写入 MinIO 并回填 content_path
     @Resource
     private com.abin.checkrepeatservice.common.service.PaperLibraryIngestService paperLibraryIngestService;
@@ -241,15 +245,24 @@ public class CheckTaskEventListener {
                 com.abin.checkrepeatservice.common.enums.CheckTaskStatusEnum.FAILURE,
                 failReason.length() > 500 ? failReason.substring(0, 500) : failReason);
 
-            // 回滚论文状态
-            PaperInfo updatePaper = new PaperInfo();
-            updatePaper.setId(paperInfo.getId());
-            updatePaper.setPaperStatus(DictConstants.PaperStatus.ASSIGNED);
-            updatePaper.setCheckTime(null);
-            paperInfoMapper.updateById(updatePaper);
+            // 回滚论文状态（M4.1：有指导教师回"已分配"，未分配回"待分配"，与流程状态对齐）
+            // paperInfo 为 null 时（论文在加载前就被删除）跳过状态回滚，但不能因此漏掉额度返还
+            if (paperInfo != null) {
+                PaperInfo updatePaper = new PaperInfo();
+                updatePaper.setId(paperInfo.getId());
+                updatePaper.setPaperStatus(paperInfo.getTeacherId() != null
+                        ? DictConstants.PaperStatus.ASSIGNED
+                        : DictConstants.PaperStatus.PENDING);
+                updatePaper.setCheckTime(null);
+                paperInfoMapper.updateById(updatePaper);
+            }
+
+            // M4.1：失败返还创建时扣减的学院月度额度（幂等，重复调用不会多退；
+            // 放在状态回滚之后，返还异常不影响任务/论文状态的一致落库）
+            collegeQuotaService.refundForFailedTask(taskId);
 
             // 推送失败消息
-            publishProgress(taskId, paperId, "FAILED", 0, "查重失败：" + e.getMessage(), 0);
+            publishProgress(taskId, paperId, "FAILED", 0, "查重失败：" + failReason, 0);
         }
     }
 

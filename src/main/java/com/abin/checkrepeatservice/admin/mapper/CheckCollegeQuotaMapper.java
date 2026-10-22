@@ -18,4 +18,12 @@ public interface CheckCollegeQuotaMapper extends BaseMapper<CheckCollegeQuota> {
     @Update("UPDATE check_college_quota SET used_quota = used_quota + 1, update_time = NOW() " +
             "WHERE id = #{id} AND is_deleted = 0 AND used_quota < total_quota")
     int incrementUsedQuota(@Param("id") Long id);
+
+    /**
+     * M4.1 原子返还额度：used_quota > 0 时 -1（防并发下减成负数）。
+     * 返回影响行数：1=返还成功，0=无可返还额度或记录已删。
+     */
+    @Update("UPDATE check_college_quota SET used_quota = used_quota - 1, update_time = NOW() " +
+            "WHERE id = #{id} AND is_deleted = 0 AND used_quota > 0")
+    int decrementUsedQuota(@Param("id") Long id);
 }

@@ -9,8 +9,11 @@ import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.common.mapper.CollegeMapper;
 import com.abin.checkrepeatservice.pojo.entity.CheckCollegeQuota;
+import com.abin.checkrepeatservice.pojo.entity.CheckTask;
 import com.abin.checkrepeatservice.pojo.entity.College;
+import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -45,32 +48,81 @@ public class CollegeQuotaServiceImpl implements CollegeQuotaService {
     @Resource
     private CollegeMapper collegeMapper;
 
+    // M4.1 失败返还：需要读取任务的扣减标记与论文所属学院
+    @Resource
+    private com.abin.checkrepeatservice.student.mapper.CheckTaskMapper checkTaskMapper;
+
+    @Resource
+    private com.abin.checkrepeatservice.student.mapper.PaperInfoMapper paperInfoMapper;
+
     @Override
-    public void checkAndConsume(Long collegeId) {
+    public boolean checkAndConsume(Long collegeId) {
         // 论文未归属学院：不做额度管控，直接放行
         if (collegeId == null) {
-            return;
+            return false;
         }
         String currentMonth = LocalDate.now().format(MONTH_FORMATTER);
         CheckCollegeQuota quota = selectByCollegeAndMonth(collegeId, currentMonth);
         // 当月未配置额度 = 不限额，直接放行
         if (quota == null) {
-            return;
+            return false;
         }
         // 原子扣减：UPDATE 条件 used_quota < total_quota，行锁保证并发安全
         int rows = checkCollegeQuotaMapper.incrementUsedQuota(quota.getId());
         if (rows > 0) {
-            return;
+            return true;
         }
         // 影响行数=0：重查判定是"额度用尽"还是"记录已被管理员删除"（删除 = 当月不限额，放行）
         CheckCollegeQuota latest = selectByCollegeAndMonth(collegeId, currentMonth);
         if (latest == null) {
             log.info("学院月度额度记录已被删除，本次放行: collegeId={}, quotaMonth={}", collegeId, currentMonth);
-            return;
+            return false;
         }
         log.warn("学院月度查重额度不足: collegeId={}, 已用 {}/{}", collegeId, latest.getUsedQuota(), latest.getTotalQuota());
         throw new BusinessException(ResultCode.BUSINESS_QUOTA_EXCEEDED,
                 "本学院当月查重额度已用完（已用 " + latest.getUsedQuota() + "/" + latest.getTotalQuota() + "）");
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void refundForFailedTask(Long taskId) {
+        if (taskId == null) {
+            return;
+        }
+        CheckTask task = checkTaskMapper.selectById(taskId);
+        if (task == null || task.getQuotaCharged() == null || task.getQuotaCharged() != 1) {
+            return;
+        }
+        // 幂等闸门：先把 quota_charged 由 1 原子翻转为 0，只有抢到的调用方执行返还，
+        // 避免异常重入 / 定时任务重复扫描导致同一任务多次返还
+        int flipped = checkTaskMapper.update(null, new LambdaUpdateWrapper<CheckTask>()
+                .eq(CheckTask::getId, taskId)
+                .eq(CheckTask::getQuotaCharged, 1)
+                .set(CheckTask::getQuotaCharged, 0));
+        if (flipped == 0) {
+            return;
+        }
+        PaperInfo paper = paperInfoMapper.selectById(task.getPaperId());
+        if (paper == null || paper.getCollegeId() == null) {
+            return;
+        }
+        // 额度在任务创建时扣减，返还也必须回到创建月（跨月失败不侵占本月额度）
+        String quotaMonth = task.getCreateTime() != null
+                ? task.getCreateTime().format(MONTH_FORMATTER)
+                : LocalDate.now().format(MONTH_FORMATTER);
+        CheckCollegeQuota quota = selectByCollegeAndMonth(paper.getCollegeId(), quotaMonth);
+        if (quota == null) {
+            // 额度记录已被删除：当月已不限额，无需返还
+            return;
+        }
+        int refunded = checkCollegeQuotaMapper.decrementUsedQuota(quota.getId());
+        if (refunded > 0) {
+            log.info("查重任务失败，已返还学院月度额度: taskId={}, collegeId={}, quotaMonth={}",
+                    taskId, paper.getCollegeId(), quotaMonth);
+        } else {
+            log.warn("查重任务失败，额度返还跳过（已用额度为 0 或记录已删）: taskId={}, collegeId={}, quotaMonth={}",
+                    taskId, paper.getCollegeId(), quotaMonth);
+        }
     }
 
     @Override

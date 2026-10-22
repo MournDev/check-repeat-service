@@ -1785,6 +1785,32 @@ EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
 -- ============================================================================
+-- 段 1.23：check_task 补 quota_charged（M4.1 额度与流程联动）
+--
+-- 背景：学院月度额度在任务创建时扣减，但任务失败后此前不会返还，失败任务白占额度。
+--   仅凭 used_quota 无法判断某个任务是否真的扣过额度（未配额度的学院不扣），
+--   因此用本列记录"该任务是否实际扣减过"，失败返还时按 1 -> 0 原子翻转，
+--   保证同一任务最多返还一次；重试时重新扣减并置 1，避免重复/漏返还。
+-- 部署顺序：必须「先跑本段，再部署后端 jar」（实体已映射新列）。
+-- 幂等性：information_schema 探测列是否存在，重复执行输出"已存在，跳过"。
+-- 执行后自检：见段 5.17。
+-- ============================================================================
+
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.columns
+   WHERE table_schema = DATABASE()
+     AND table_name = 'check_task'
+     AND column_name = 'quota_charged'
+);
+SET @ddl = IF(@col_exists = 0,
+  'ALTER TABLE `check_task` '
+  'ADD COLUMN `quota_charged` tinyint NOT NULL DEFAULT 0 COMMENT ''是否已扣减学院月度额度（1-已扣，0-未扣/已返还）'' AFTER `submit_id`',
+  'SELECT ''check_task.quota_charged 已存在，跳过'' AS msg');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- ============================================================================
 -- 段 2：similarity_threshold 系列表的 is_deleted 历史 NULL 归零
 --
 -- 背景：category_similarity_threshold.is_deleted 在 init.sql 里一度是 DEFAULT NULL，
@@ -2261,6 +2287,12 @@ SELECT (SELECT COUNT(*) FROM information_schema.COLUMNS
        (SELECT COUNT(DISTINCT INDEX_NAME) FROM information_schema.STATISTICS
          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'check_task'
            AND INDEX_NAME = 'idx_ct_paper_submit')                                 AS ct_paper_submit_idx;
+
+-- 5.17 段 1.23 check_task 额度扣减标记执行后：
+--   期望：ct_quota_charged_col=1
+SELECT (SELECT COUNT(*) FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'check_task'
+           AND COLUMN_NAME = 'quota_charged')                                      AS ct_quota_charged_col;
 
 
 -- ============================================================================
