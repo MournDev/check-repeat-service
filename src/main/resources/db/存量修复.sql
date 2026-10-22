@@ -1613,7 +1613,7 @@ DEALLOCATE PREPARE stmt;
 --   GET /api/admin/operation-logs/module-usage 返回单行 {moduleName:"未知", count:58}。
 -- 部署顺序：先跑本段（无需重启/重部署，纯数据补充，实时生效）。
 -- 幂等性：uk_type 唯一键 ON DUPLICATE KEY UPDATE，重复执行仅更新不新增。
--- 执行后自检：SELECT COUNT(*) FROM sys_operation_type;  期望 197。
+-- 执行后自检：SELECT COUNT(*) FROM sys_operation_type;  期望 200（P4 归档再补 198~200）。
 -- ============================================================================
 
 INSERT INTO `sys_operation_type` (`id`, `type`, `name`, `description`, `module`, `permission_level`, `status`, `create_time`, `update_time`) VALUES
@@ -1674,7 +1674,10 @@ INSERT INTO `sys_operation_type` (`id`, `type`, `name`, `description`, `module`,
 (194,'teacher_paper_review','教师审核论文','教师审核论文','教师管理','MEDIUM',1,'2026-10-18 00:00:00','2026-10-18 00:00:00'),
 (195,'teacher_reject_assignment','教师拒绝论文分配','教师拒绝论文分配','教师管理','MEDIUM',1,'2026-10-18 00:00:00','2026-10-18 00:00:00'),
 (196,'teacher_review_assign_submit','教师提交评阅结果','教师提交评阅结果','教师管理','MEDIUM',1,'2026-10-18 00:00:00','2026-10-18 00:00:00'),
-(197,'teacher_workflow_vote','教师多级初审投票','教师多级初审投票','教师管理','MEDIUM',1,'2026-10-18 00:00:00','2026-10-18 00:00:00')
+(197,'teacher_workflow_vote','教师多级初审投票','教师多级初审投票','教师管理','MEDIUM',1,'2026-10-18 00:00:00','2026-10-18 00:00:00'),
+(198,'admin_thesis_archive','管理员归档论文','管理员归档论文','论文管理','HIGH',1,'2026-10-22 00:00:00','2026-10-22 00:00:00'),
+(199,'admin_thesis_finalize','管理员定稿论文','管理员定稿论文','论文管理','HIGH',1,'2026-10-22 00:00:00','2026-10-22 00:00:00'),
+(200,'teacher_thesis_finalize','教师定稿确认','教师定稿确认','教师管理','MEDIUM',1,'2026-10-22 00:00:00','2026-10-22 00:00:00')
 ON DUPLICATE KEY UPDATE `type` = VALUES(`type`), `name` = VALUES(`name`), `description` = VALUES(`description`), `module` = VALUES(`module`), `permission_level` = VALUES(`permission_level`), `status` = VALUES(`status`);
 
 -- ============================================================================
@@ -1809,6 +1812,92 @@ SET @ddl = IF(@col_exists = 0,
 PREPARE stmt FROM @ddl;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
+
+-- ============================================================================
+-- 段 1.24：P4 论文归档（thesis_archive + paper_info.library_admitted）
+--
+-- 背景：定稿（finalized）→ 归档（archived）此前只存在于阶段门矩阵，没有任何
+--   归档记录与操作入口，学位授予证据链断裂；同时比对库一直是「被查即入」，
+--   草稿/未定稿论文也会成为他人查重的比对源。本段补：
+--   1) thesis_archive：归档时快照论文/学生/导师/学院/查重报告关键字段，
+--      形成可追溯的学位授予证据；一个论文版本只允许一条归档记录。
+--   2) paper_info.library_admitted：比对库准入标记。存量已入库正文的论文
+--      一次性回填为 1（宽容迁移，避免收紧后比对库瞬间清空）；此后新论文
+--      只有归档时才置 1，LocalCheckEngine 只选 library_admitted=1 的论文。
+-- 部署顺序：必须「先跑本段，再部署后端 jar」（实体已映射新表/新列）。
+-- 幂等性：建表用 CREATE TABLE IF NOT EXISTS，列用 information_schema 探测；
+--   回填只改 library_admitted=0 且已入库的行，重复执行无副作用。
+-- 执行后自检：见段 5.18。
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS `thesis_archive` (
+  `id` bigint NOT NULL COMMENT '归档记录ID（雪花ID）',
+  `archive_no` varchar(50) NOT NULL COMMENT '归档编号（唯一，如 ARC20261022153000123）',
+  `paper_id` bigint NOT NULL COMMENT '论文ID（关联 paper_info.id）',
+  `paper_version` int NOT NULL DEFAULT '1' COMMENT '归档时的论文版本号',
+  `submit_id` bigint DEFAULT NULL COMMENT '归档时对应的提交记录ID（paper_submit.id）',
+  `paper_title` varchar(200) DEFAULT NULL COMMENT '论文标题（快照）',
+  `author` varchar(255) DEFAULT NULL COMMENT '作者（快照）',
+  `student_id` bigint DEFAULT NULL COMMENT '学生ID（快照）',
+  `student_no` varchar(50) DEFAULT NULL COMMENT '学号（快照，取 sys_user.username）',
+  `student_name` varchar(100) DEFAULT NULL COMMENT '学生姓名（快照）',
+  `teacher_id` bigint DEFAULT NULL COMMENT '指导教师ID（快照）',
+  `teacher_name` varchar(100) DEFAULT NULL COMMENT '指导教师姓名（快照）',
+  `college_id` bigint DEFAULT NULL COMMENT '学院ID（快照）',
+  `college_name` varchar(100) DEFAULT NULL COMMENT '学院名称（快照）',
+  `major_id` bigint DEFAULT NULL COMMENT '专业ID（快照）',
+  `major_name` varchar(100) DEFAULT NULL COMMENT '专业名称（快照）',
+  `degree_type` varchar(20) DEFAULT NULL COMMENT '学位类型（快照）',
+  `file_id` bigint DEFAULT NULL COMMENT '归档文件ID（快照）',
+  `file_path` varchar(500) DEFAULT NULL COMMENT '归档文件存储路径（快照）',
+  `file_md5` varchar(100) DEFAULT NULL COMMENT '归档文件MD5（快照）',
+  `check_task_id` bigint DEFAULT NULL COMMENT '归档时采用的已完成查重任务ID',
+  `check_report_id` bigint DEFAULT NULL COMMENT '归档时采用的查重报告ID',
+  `report_no` varchar(50) DEFAULT NULL COMMENT '查重报告编号（快照）',
+  `report_hash` varchar(128) DEFAULT NULL COMMENT '报告验真哈希（check_report.content_hash 快照）',
+  `check_rate` decimal(5,2) DEFAULT NULL COMMENT '查重率/总相似比（快照）',
+  `max_per_source` decimal(5,2) DEFAULT NULL COMMENT '单篇最大相似比（快照）',
+  `citation_rate` decimal(5,2) DEFAULT NULL COMMENT '引用率（快照）',
+  `check_source` varchar(20) DEFAULT NULL COMMENT '查重来源（快照）',
+  `archive_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '归档时间',
+  `archive_by` bigint DEFAULT NULL COMMENT '归档操作人ID',
+  `archive_remark` varchar(500) DEFAULT '' COMMENT '归档备注',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除标记（0-未删除，1-已删除）',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  `create_by` bigint DEFAULT NULL COMMENT '创建人ID',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` bigint DEFAULT NULL COMMENT '更新人ID',
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ta_archive_no` (`archive_no`),
+  UNIQUE KEY `uk_ta_paper_version` (`paper_id`,`paper_version`),
+  KEY `idx_ta_college_time` (`college_id`,`archive_time`),
+  KEY `idx_ta_student` (`student_id`),
+  KEY `idx_ta_delete_by` (`delete_by`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='论文归档表（P4：定稿→归档证据快照）';
+
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.columns
+   WHERE table_schema = DATABASE()
+     AND table_name = 'paper_info'
+     AND column_name = 'library_admitted'
+);
+SET @ddl = IF(@col_exists = 0,
+  'ALTER TABLE `paper_info` '
+  'ADD COLUMN `library_admitted` tinyint NOT NULL DEFAULT 0 COMMENT ''比对库准入标记（1-已准入，0-未准入；新论文归档时置 1）'' AFTER `segmented_path`',
+  'SELECT ''paper_info.library_admitted 已存在，跳过'' AS msg');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- 存量宽容：已入库正文的历史论文视为已准入，避免收紧后比对库瞬间清空。
+-- 新论文（content_path 尚未回填或 library_admitted=0）保持未准入，归档时才准入。
+UPDATE `paper_info`
+   SET `library_admitted` = 1
+ WHERE `library_admitted` = 0
+   AND `content_path` IS NOT NULL
+   AND `content_path` <> '';
 
 -- ============================================================================
 -- 段 2：similarity_threshold 系列表的 is_deleted 历史 NULL 归零
@@ -2293,6 +2382,18 @@ SELECT (SELECT COUNT(*) FROM information_schema.COLUMNS
 SELECT (SELECT COUNT(*) FROM information_schema.COLUMNS
          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'check_task'
            AND COLUMN_NAME = 'quota_charged')                                      AS ct_quota_charged_col;
+
+-- 5.18 段 1.24 P4 归档执行后：
+--   期望：thesis_archive_tbl=1 / pi_library_admitted_col=1；
+--   pi_library_admitted_rows 为存量已入库正文被宽容准入的行数（信息项，无固定期望值）
+SELECT (SELECT COUNT(*) FROM information_schema.TABLES
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'thesis_archive')        AS thesis_archive_tbl,
+       (SELECT COUNT(*) FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'paper_info'
+           AND COLUMN_NAME = 'library_admitted')                                   AS pi_library_admitted_col,
+       (SELECT COUNT(*) FROM `paper_info`
+         WHERE `library_admitted` = 1
+           AND `content_path` IS NOT NULL AND `content_path` <> '')                AS pi_library_admitted_rows;
 
 
 -- ============================================================================

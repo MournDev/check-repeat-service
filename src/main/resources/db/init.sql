@@ -1161,6 +1161,7 @@ CREATE TABLE `paper_info` (
   `parent_paper_id` bigint DEFAULT NULL COMMENT '父版本论文ID',
   `content_path` varchar(255) DEFAULT NULL COMMENT '论文正文在MinIO中的存储路径',
   `segmented_path` varchar(255) DEFAULT NULL COMMENT 'IK分词后文本在MinIO中的存储路径',
+  `library_admitted` tinyint NOT NULL DEFAULT '0' COMMENT '比对库准入标记（1-已准入，0-未准入；新论文归档时置 1）',
   `internal_check_result` text COMMENT '校内查重结果（JSON格式）',
   `third_party_check_result` text COMMENT '第三方查重结果（JSON格式）',
   `audit_comment` text COMMENT '审核意见（初审/退回意见，独立于 check_result 查重结果存储）',
@@ -1176,6 +1177,61 @@ CREATE TABLE `paper_info` (
   KEY `idx_pi_degree` (`degree_type`),
   KEY `idx_pi_parent_paper_id` (`parent_paper_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='论文信息表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `thesis_archive`
+--
+
+DROP TABLE IF EXISTS `thesis_archive`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `thesis_archive` (
+  `id` bigint NOT NULL COMMENT '归档记录ID（雪花ID）',
+  `archive_no` varchar(50) NOT NULL COMMENT '归档编号（唯一，如 ARC20261022153000123）',
+  `paper_id` bigint NOT NULL COMMENT '论文ID（关联 paper_info.id）',
+  `paper_version` int NOT NULL DEFAULT '1' COMMENT '归档时的论文版本号',
+  `submit_id` bigint DEFAULT NULL COMMENT '归档时对应的提交记录ID（paper_submit.id）',
+  `paper_title` varchar(200) DEFAULT NULL COMMENT '论文标题（快照）',
+  `author` varchar(255) DEFAULT NULL COMMENT '作者（快照）',
+  `student_id` bigint DEFAULT NULL COMMENT '学生ID（快照）',
+  `student_no` varchar(50) DEFAULT NULL COMMENT '学号（快照，取 sys_user.username）',
+  `student_name` varchar(100) DEFAULT NULL COMMENT '学生姓名（快照）',
+  `teacher_id` bigint DEFAULT NULL COMMENT '指导教师ID（快照）',
+  `teacher_name` varchar(100) DEFAULT NULL COMMENT '指导教师姓名（快照）',
+  `college_id` bigint DEFAULT NULL COMMENT '学院ID（快照）',
+  `college_name` varchar(100) DEFAULT NULL COMMENT '学院名称（快照）',
+  `major_id` bigint DEFAULT NULL COMMENT '专业ID（快照）',
+  `major_name` varchar(100) DEFAULT NULL COMMENT '专业名称（快照）',
+  `degree_type` varchar(20) DEFAULT NULL COMMENT '学位类型（快照）',
+  `file_id` bigint DEFAULT NULL COMMENT '归档文件ID（快照）',
+  `file_path` varchar(500) DEFAULT NULL COMMENT '归档文件存储路径（快照）',
+  `file_md5` varchar(100) DEFAULT NULL COMMENT '归档文件MD5（快照）',
+  `check_task_id` bigint DEFAULT NULL COMMENT '归档时采用的已完成查重任务ID',
+  `check_report_id` bigint DEFAULT NULL COMMENT '归档时采用的查重报告ID',
+  `report_no` varchar(50) DEFAULT NULL COMMENT '查重报告编号（快照）',
+  `report_hash` varchar(128) DEFAULT NULL COMMENT '报告验真哈希（check_report.content_hash 快照）',
+  `check_rate` decimal(5,2) DEFAULT NULL COMMENT '查重率/总相似比（快照）',
+  `max_per_source` decimal(5,2) DEFAULT NULL COMMENT '单篇最大相似比（快照）',
+  `citation_rate` decimal(5,2) DEFAULT NULL COMMENT '引用率（快照）',
+  `check_source` varchar(20) DEFAULT NULL COMMENT '查重来源（快照）',
+  `archive_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '归档时间',
+  `archive_by` bigint DEFAULT NULL COMMENT '归档操作人ID',
+  `archive_remark` varchar(500) DEFAULT '' COMMENT '归档备注',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除标记（0-未删除，1-已删除）',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  `create_by` bigint DEFAULT NULL COMMENT '创建人ID',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` bigint DEFAULT NULL COMMENT '更新人ID',
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ta_archive_no` (`archive_no`),
+  UNIQUE KEY `uk_ta_paper_version` (`paper_id`,`paper_version`),
+  KEY `idx_ta_college_time` (`college_id`,`archive_time`),
+  KEY `idx_ta_student` (`student_id`),
+  KEY `idx_ta_delete_by` (`delete_by`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='论文归档表（P4：定稿→归档证据快照）';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --

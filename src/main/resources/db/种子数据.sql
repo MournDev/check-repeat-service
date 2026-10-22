@@ -908,7 +908,7 @@ INSERT INTO `sys_operation_type` (`id`, `type`, `name`, `description`, `module`,
 -- 以下 58 条为 2026-10-18 补录：全项目 @OperationLog 共 100 个 type，此前字典仅 139 条
 -- （覆盖 42 个），P1~P5 新增的答辩/评阅/性能配置/知识库/通知等操作 type 全部缺失，
 -- 日志中心「模块使用率」LEFT JOIN 不上后统一落 COALESCE 的「未知」（2026-10-17 实测
--- 返回单行 {moduleName:未知, count:58}）。补录后 log_count_types 自检期望 197。
+-- 返回单行 {moduleName:未知, count:58}）。补录后 log_count_types 自检期望 200（P4 归档再补 198~200）。
 (140,'admin_advisor_eval_export','管理员导出导师评价明细','管理员导出导师评价明细','教师管理','LOW',1,'2026-10-18 00:00:00','2026-10-18 00:00:00'),
 (141,'admin_backup_settings_update','管理员更新备份设置','管理员更新备份设置','系统管理','HIGH',1,'2026-10-18 00:00:00','2026-10-18 00:00:00'),
 (142,'admin_backup_trigger','管理员手动触发数据库备份','管理员手动触发数据库备份','系统管理','HIGH',1,'2026-10-18 00:00:00','2026-10-18 00:00:00'),
@@ -966,7 +966,10 @@ INSERT INTO `sys_operation_type` (`id`, `type`, `name`, `description`, `module`,
 (194,'teacher_paper_review','教师审核论文','教师审核论文','教师管理','MEDIUM',1,'2026-10-18 00:00:00','2026-10-18 00:00:00'),
 (195,'teacher_reject_assignment','教师拒绝论文分配','教师拒绝论文分配','教师管理','MEDIUM',1,'2026-10-18 00:00:00','2026-10-18 00:00:00'),
 (196,'teacher_review_assign_submit','教师提交评阅结果','教师提交评阅结果','教师管理','MEDIUM',1,'2026-10-18 00:00:00','2026-10-18 00:00:00'),
-(197,'teacher_workflow_vote','教师多级初审投票','教师多级初审投票','教师管理','MEDIUM',1,'2026-10-18 00:00:00','2026-10-18 00:00:00')
+(197,'teacher_workflow_vote','教师多级初审投票','教师多级初审投票','教师管理','MEDIUM',1,'2026-10-18 00:00:00','2026-10-18 00:00:00'),
+(198,'admin_thesis_archive','管理员归档论文','管理员归档论文','论文管理','HIGH',1,'2026-10-22 00:00:00','2026-10-22 00:00:00'),
+(199,'admin_thesis_finalize','管理员定稿论文','管理员定稿论文','论文管理','HIGH',1,'2026-10-22 00:00:00','2026-10-22 00:00:00'),
+(200,'teacher_thesis_finalize','教师定稿确认','教师定稿确认','教师管理','MEDIUM',1,'2026-10-22 00:00:00','2026-10-22 00:00:00')
 ON DUPLICATE KEY UPDATE `type` = VALUES(`type`), `name` = VALUES(`name`), `description` = VALUES(`description`), `module` = VALUES(`module`), `permission_level` = VALUES(`permission_level`), `status` = VALUES(`status`);
 
 
@@ -1203,7 +1206,7 @@ SELECT (SELECT COUNT(*) FROM sys_user     WHERE college_id BETWEEN 1668572928000
                                           OR major_id   BETWEEN 1668572928000 AND 1668572928059) AS old_student_info;
 
 -- 8.4 字典与种子行数
-SELECT (SELECT COUNT(*) FROM sys_operation_type) AS operation_types,   -- 197
+SELECT (SELECT COUNT(*) FROM sys_operation_type) AS operation_types,   -- 200
        (SELECT COUNT(*) FROM knowledge_category) AS knowledge_categories, -- 6
        (SELECT COUNT(*) FROM message_template)   AS message_templates;    -- 19
 

@@ -83,9 +83,11 @@ public class AdvisorEvaluationServiceImpl implements AdvisorEvaluationService {
             throw new BusinessException(ResultCode.PERMISSION_NO_ACCESS, "仅论文学生本人可评价导师", null);
         }
 
-        // 2. 可评时机：终期答辩通过后（defense_passed/finalized）开放
+        // 2. 可评时机：终期答辩通过后（defense_passed/finalized/archived）开放
+        //    归档后仍允许补评，避免归档动作把学生的评价入口提前关死
         if (!DictConstants.PaperStatus.DEFENSE_PASSED.equals(paper.getPaperStatus())
-                && !DictConstants.PaperStatus.FINALIZED.equals(paper.getPaperStatus())) {
+                && !DictConstants.PaperStatus.FINALIZED.equals(paper.getPaperStatus())
+                && !DictConstants.PaperStatus.ARCHIVED.equals(paper.getPaperStatus())) {
             throw new BusinessException(ResultCode.BUSINESS_EVAL_NOT_READY);
         }
         // 未分配导师的论文没有评价对象（历史遗留数据可能存在 teacherId 为空的通过论文）
@@ -214,7 +216,8 @@ public class AdvisorEvaluationServiceImpl implements AdvisorEvaluationService {
         } else {
             vo.setSubmitted(false);
             if (!DictConstants.PaperStatus.DEFENSE_PASSED.equals(paper.getPaperStatus())
-                    && !DictConstants.PaperStatus.FINALIZED.equals(paper.getPaperStatus())) {
+                    && !DictConstants.PaperStatus.FINALIZED.equals(paper.getPaperStatus())
+                    && !DictConstants.PaperStatus.ARCHIVED.equals(paper.getPaperStatus())) {
                 vo.setEvaluable(false);
                 vo.setReason("论文尚未通过终期答辩，暂不可评价");
             } else if (paper.getTeacherId() == null) {

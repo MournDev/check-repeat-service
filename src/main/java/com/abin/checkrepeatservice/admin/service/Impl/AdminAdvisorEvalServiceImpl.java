@@ -85,7 +85,8 @@ public class AdminAdvisorEvalServiceImpl implements AdminAdvisorEvalService {
         AdvisorEvalStatsVO vo = new AdvisorEvalStatsVO();
 
         // 1. 完成率：已评份数 / 可评论文数
-        //    无时间段：分子全量评价，分母=当前状态 defense_passed/finalized 且已分配导师（P6a 原口径）；
+        //    无时间段：分子全量评价，分母=当前状态 defense_passed/finalized/archived 且已分配导师
+        //    （P4 归档后论文不再停留在 finalized，分母必须并入 archived，否则完成率会超过 100%）
         //    有时间段：分子按评价提交时间过滤，分母=该时段内 defense_passed 状态日志的论文数
         //    （按"何时通过终期答辩"归口届别；存量无日志论文不参与分段统计，避免跨届混算失真）
         long totalEvaluations = advisorEvaluationMapper.selectCount(applyCreateTimeRange(new LambdaQueryWrapper<>(),
@@ -97,7 +98,9 @@ public class AdminAdvisorEvalServiceImpl implements AdminAdvisorEvalService {
         } else {
             eligiblePapers = paperInfoMapper.selectCount(new LambdaQueryWrapper<PaperInfo>()
                     .in(PaperInfo::getPaperStatus,
-                            DictConstants.PaperStatus.DEFENSE_PASSED, DictConstants.PaperStatus.FINALIZED)
+                            DictConstants.PaperStatus.DEFENSE_PASSED,
+                            DictConstants.PaperStatus.FINALIZED,
+                            DictConstants.PaperStatus.ARCHIVED)
                     .isNotNull(PaperInfo::getTeacherId));
         }
         // @TableLogic 自动附加 is_deleted=0；uk_paper_id 保证一份评价对应一篇论文

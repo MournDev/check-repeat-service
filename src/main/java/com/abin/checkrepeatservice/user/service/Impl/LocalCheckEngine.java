@@ -93,10 +93,12 @@ public class LocalCheckEngine implements CheckEngine {
         //      把全表（含从未入库的论文）扫进来，每篇 readPaperContent(null) 必抛异常，
         //      异常被逐篇吞掉后比对结果恒为 0；
         //    - 排除待查论文自身（正文在比对前已入库，不排除则自我相似度必然 100%）。
-        //    比对库准入（仅定稿/归档稿）待 P4 归档落地后在此追加状态条件。
+        //    P4 归档落地：比对源只取已准入（library_admitted=1）的论文——存量已入库
+        //    正文的历史论文已由迁移脚本宽容回填为 1，新论文归档时才准入。
         LambdaQueryWrapper<PaperInfo> libraryWrapper = new LambdaQueryWrapper<PaperInfo>()
                 .isNotNull(PaperInfo::getContentPath)
-                .ne(PaperInfo::getContentPath, "");
+                .ne(PaperInfo::getContentPath, "")
+                .eq(PaperInfo::getLibraryAdmitted, 1);
         if (excludePaperId != null) {
             libraryWrapper.ne(PaperInfo::getId, excludePaperId);
         }
@@ -203,7 +205,7 @@ public class LocalCheckEngine implements CheckEngine {
         result.setReportUrl("/local/report/" + System.currentTimeMillis());
         // M1.2：空库合法返回 0%，但在额外信息里明确说明原因，避免被误读为引擎成功比对的 0%
         String libraryNote = libraryEmpty
-                ? "比对库暂无可用论文（content_path 未回填），本次相似度按 0% 记，非引擎故障。\n"
+                ? "比对库暂无已准入论文（content_path 未回填或论文尚未归档），本次相似度按 0% 记，非引擎故障。\n"
                 : "";
         result.setExtraInfo(libraryNote + String.format(
                 "最高相似度论文：%s\nSimHash海明距离：%d\n整篇相似度：%.2f%%\n总相似比：%.2f%%\n单篇最大相似比：%.2f%%\n引用率：%.2f%%\n命中句数：%d\n比对论文总数：%d",

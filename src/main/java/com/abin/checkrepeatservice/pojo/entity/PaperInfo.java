@@ -307,6 +307,14 @@ public class PaperInfo extends BaseEntity implements Serializable {
     private String segmentedPath;
 
     /**
+     * 比对库准入标记（P4）：1-已准入，0-未准入。
+     * 存量已入库正文的论文由迁移脚本回填为 1；新论文在归档时才置 1，
+     * LocalCheckEngine 只选 library_admitted=1 的论文作为比对源。
+     */
+    @TableField("library_admitted")
+    private Integer libraryAdmitted;
+
+    /**
      * 论文版本号（初版为 1；审核不通过后每重新提交生成一个修改版时在上一版基础上 +1。
      * 列见 db/init.sql 与 db/存量修复.sql 段 1.17；注意这不是 MyBatis-Plus 乐观锁版本）
      */
