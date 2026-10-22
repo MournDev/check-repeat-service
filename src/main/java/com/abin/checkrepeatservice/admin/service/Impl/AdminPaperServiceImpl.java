@@ -60,6 +60,10 @@ public class AdminPaperServiceImpl implements AdminPaperService {
     @Resource
     private PaperStageGate paperStageGate;
 
+    // 治理项：数据范围统一裁决（管理员角色可按学院/专业/教师/本人收窄）
+    @Resource
+    private com.abin.checkrepeatservice.common.datascope.DataScopeResolver dataScopeResolver;
+
     @Resource
     private PaperStatusLogService paperStatusLogService;
 
@@ -144,6 +148,8 @@ public class AdminPaperServiceImpl implements AdminPaperService {
             
             // 排除已删除的论文
             wrapper.eq(PaperInfo::getIsDeleted, 0);
+            // 数据范围：按当前角色 sys_role.data_scope 收窄（默认 ALL 不改变行为）
+            dataScopeResolver.applyPaperScope(wrapper);
             wrapper.orderByDesc(PaperInfo::getCreateTime);
             
             Page<PaperInfo> resultPage = paperInfoMapper.selectPage(paperPage, wrapper);
@@ -166,6 +172,9 @@ public class AdminPaperServiceImpl implements AdminPaperService {
             if (paperInfo == null || paperInfo.getIsDeleted() == 1) {
                 return Result.error(ResultCode.PARAM_ERROR, "论文不存在");
             }
+            if (!dataScopeResolver.canAccessPaper(paperInfo)) {
+                return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权查看该论文");
+            }
             
             // 补充详细信息
             enhancePaperDetail(paperInfo);
@@ -184,6 +193,9 @@ public class AdminPaperServiceImpl implements AdminPaperService {
             PaperInfo paperInfo = paperInfoMapper.selectById(paperId);
             if (paperInfo == null || paperInfo.getIsDeleted() == 1) {
                 return Result.error(ResultCode.PARAM_ERROR, "论文不存在");
+            }
+            if (!dataScopeResolver.canAccessPaper(paperInfo)) {
+                return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权审核该论文");
             }
 
             // 确定目标状态
@@ -286,6 +298,9 @@ public class AdminPaperServiceImpl implements AdminPaperService {
             if (paperInfo == null || paperInfo.getIsDeleted() == 1) {
                 return Result.error(ResultCode.PARAM_ERROR, "论文不存在");
             }
+            if (!dataScopeResolver.canAccessPaper(paperInfo)) {
+                return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权删除该论文");
+            }
             
             // 软删除
             paperInfo.setIsDeleted(1);
@@ -305,21 +320,48 @@ public class AdminPaperServiceImpl implements AdminPaperService {
         try {
             // S14：原 总数+6 个状态+今日新增共 8 次 selectCount，合并为一条 GROUP BY 聚合
             LocalDateTime todayStart = LocalDateTime.now().withHour(0).withMinute(0).withSecond(0);
-            List<Map<String, Object>> rows =
-                    paperInfoMapper.selectPaperStatusStats(todayStart, null, null);
-
             long totalPapers = 0L;
             long todayPapers = 0L;
             Map<String, Long> countByStatus = new HashMap<>();
-            for (Map<String, Object> row : rows) {
-                long cnt = row.get("cnt") == null ? 0L : ((Number) row.get("cnt")).longValue();
-                totalPapers += cnt;
-                if (row.get("todayCnt") != null) {
-                    todayPapers += ((Number) row.get("todayCnt")).longValue();
+
+            if (com.abin.checkrepeatservice.common.datascope.DataScope.ALL
+                    .equals(dataScopeResolver.resolveScope())) {
+                List<Map<String, Object>> rows =
+                        paperInfoMapper.selectPaperStatusStats(todayStart, null, null);
+                for (Map<String, Object> row : rows) {
+                    long cnt = row.get("cnt") == null ? 0L : ((Number) row.get("cnt")).longValue();
+                    totalPapers += cnt;
+                    if (row.get("todayCnt") != null) {
+                        todayPapers += ((Number) row.get("todayCnt")).longValue();
+                    }
+                    Object status = row.get("status");
+                    if (status != null) {
+                        countByStatus.put(status.toString(), cnt);
+                    }
                 }
-                Object status = row.get("status");
-                if (status != null) {
-                    countByStatus.put(status.toString(), cnt);
+            } else {
+                // 收窄范围（学院/专业/教师/本人）：用统一裁决组件逐状态计数，
+                // 聚合 SQL 不带范围参数，不能复用于非 ALL 角色
+                LambdaQueryWrapper<PaperInfo> totalWrapper = new LambdaQueryWrapper<>();
+                totalWrapper.eq(PaperInfo::getIsDeleted, 0);
+                dataScopeResolver.applyPaperScope(totalWrapper);
+                totalPapers = paperInfoMapper.selectCount(totalWrapper);
+
+                LambdaQueryWrapper<PaperInfo> todayWrapper = new LambdaQueryWrapper<>();
+                todayWrapper.eq(PaperInfo::getIsDeleted, 0)
+                        .ge(PaperInfo::getCreateTime, todayStart);
+                dataScopeResolver.applyPaperScope(todayWrapper);
+                todayPapers = paperInfoMapper.selectCount(todayWrapper);
+
+                for (String status : List.of(DictConstants.PaperStatus.PENDING,
+                        DictConstants.PaperStatus.ASSIGNED, DictConstants.PaperStatus.CHECKING,
+                        DictConstants.PaperStatus.AUDITING, DictConstants.PaperStatus.COMPLETED,
+                        DictConstants.PaperStatus.REJECTED)) {
+                    LambdaQueryWrapper<PaperInfo> statusWrapper = new LambdaQueryWrapper<>();
+                    statusWrapper.eq(PaperInfo::getIsDeleted, 0)
+                            .eq(PaperInfo::getPaperStatus, status);
+                    dataScopeResolver.applyPaperScope(statusWrapper);
+                    countByStatus.put(status, paperInfoMapper.selectCount(statusWrapper));
                 }
             }
 
@@ -454,6 +496,9 @@ public class AdminPaperServiceImpl implements AdminPaperService {
             if (paperInfo == null || paperInfo.getIsDeleted() == 1) {
                 return Result.error(ResultCode.PARAM_ERROR, "论文不存在");
             }
+            if (!dataScopeResolver.canAccessPaper(paperInfo)) {
+                return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权下载该论文");
+            }
             
             // 检查是否有文件
             if (paperInfo.getFileId() == null) {
@@ -485,6 +530,9 @@ public class AdminPaperServiceImpl implements AdminPaperService {
             PaperInfo paperInfo = paperInfoMapper.selectById(paperId);
             if (paperInfo == null || paperInfo.getIsDeleted() == 1) {
                 return Result.error(ResultCode.PARAM_ERROR, "论文不存在");
+            }
+            if (!dataScopeResolver.canAccessPaper(paperInfo)) {
+                return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权对该论文发起查重");
             }
             
             // 更新论文查重标记
@@ -535,6 +583,11 @@ public class AdminPaperServiceImpl implements AdminPaperService {
                     if (paperInfo == null || paperInfo.getIsDeleted() == 1) {
                         failCount++;
                         failReasons.add("论文 ID " + paperId + " 不存在");
+                        continue;
+                    }
+                    if (!dataScopeResolver.canAccessPaper(paperInfo)) {
+                        failCount++;
+                        failReasons.add("论文 ID " + paperId + " 超出当前数据范围");
                         continue;
                     }
                         

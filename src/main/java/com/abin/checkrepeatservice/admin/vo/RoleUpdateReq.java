@@ -1,6 +1,7 @@
 package com.abin.checkrepeatservice.admin.vo;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import lombok.Data;
 
 /**
@@ -15,4 +16,10 @@ public class RoleUpdateReq {
     private String roleCode;
     
     private String description;
+
+    /**
+     * 数据范围（可选，null 表示不修改）：ALL/COLLEGE/MAJOR/TEACHER/SELF
+     */
+    @Pattern(regexp = "^(ALL|COLLEGE|MAJOR|TEACHER|SELF)$", message = "数据范围取值非法")
+    private String dataScope;
 }

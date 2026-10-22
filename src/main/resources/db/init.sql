@@ -1945,6 +1945,7 @@ CREATE TABLE `sys_role` (
   `role_name` varchar(50) NOT NULL COMMENT '角色名称（学生、教师、教务管理员）',
   `role_code` varchar(50) NOT NULL COMMENT '角色编码（STUDENT、TEACHER、ADMIN，唯一）',
   `permissions` varchar(500) NOT NULL COMMENT '权限列表（JSON格式，如["paper:upload","report:view"]）',
+  `data_scope` varchar(20) NOT NULL DEFAULT 'ALL' COMMENT '数据范围（ALL-全部，COLLEGE-本学院，MAJOR-本专业，TEACHER-本人指导学生，SELF-本人）',
   `description` varchar(200) DEFAULT '' COMMENT '角色描述',
   `create_by` bigint NOT NULL COMMENT '创建人ID（关联sys_user.id，初始化时填管理员ID）',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '数据创建时间',

@@ -1900,6 +1900,33 @@ UPDATE `paper_info`
    AND `content_path` <> '';
 
 -- ============================================================================
+-- 段 1.25：sys_role 补 data_scope（角色数据范围）
+--
+-- 背景：当前数据可见范围写死在各个 Service 的查询里（学生=本人、教师=本人指导、
+--   管理员=全部），无法给学院教务/专业负责人等自定义角色做范围隔离，也为后续
+--   多租户预留统一裁决点。本期先建立统一裁决组件 DataScopeResolver，并把管理员
+--   论文列表/详情/统计与分配列表接入；存量角色默认 ALL，行为与改造前一致。
+-- 取值：ALL-全部 / COLLEGE-本学院 / MAJOR-本专业 / TEACHER-本人指导学生 / SELF-本人。
+-- 部署顺序：必须「先跑本段，再部署后端 jar」（SysRole 已映射新列）。
+-- 幂等性：information_schema 探测列是否存在，重复执行输出"已存在，跳过"。
+-- 执行后自检：见段 5.19。
+-- ============================================================================
+
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.columns
+   WHERE table_schema = DATABASE()
+     AND table_name = 'sys_role'
+     AND column_name = 'data_scope'
+);
+SET @ddl = IF(@col_exists = 0,
+  'ALTER TABLE `sys_role` '
+  'ADD COLUMN `data_scope` varchar(20) NOT NULL DEFAULT ''ALL'' COMMENT ''数据范围（ALL-全部，COLLEGE-本学院，MAJOR-本专业，TEACHER-本人指导学生，SELF-本人）'' AFTER `permissions`',
+  'SELECT ''sys_role.data_scope 已存在，跳过'' AS msg');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- ============================================================================
 -- 段 2：similarity_threshold 系列表的 is_deleted 历史 NULL 归零
 --
 -- 背景：category_similarity_threshold.is_deleted 在 init.sql 里一度是 DEFAULT NULL，
@@ -2394,6 +2421,12 @@ SELECT (SELECT COUNT(*) FROM information_schema.TABLES
        (SELECT COUNT(*) FROM `paper_info`
          WHERE `library_admitted` = 1
            AND `content_path` IS NOT NULL AND `content_path` <> '')                AS pi_library_admitted_rows;
+
+-- 5.19 段 1.25 角色数据范围列执行后：
+--   期望：sys_role_data_scope_col=1
+SELECT (SELECT COUNT(*) FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sys_role'
+           AND COLUMN_NAME = 'data_scope')                                          AS sys_role_data_scope_col;
 
 
 -- ============================================================================

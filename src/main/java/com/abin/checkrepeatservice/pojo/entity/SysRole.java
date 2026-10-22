@@ -27,6 +27,12 @@ public class SysRole extends BaseEntity {
     private String permissions;
 
     /**
+     * 数据范围（M-治理）：ALL-全部 / COLLEGE-本学院 / MAJOR-本专业 /
+     * TEACHER-本人指导学生 / SELF-本人。存量角色默认 ALL，保持改造前行为。
+     */
+    private String dataScope;
+
+    /**
      * 角色描述
      */
     private String description;

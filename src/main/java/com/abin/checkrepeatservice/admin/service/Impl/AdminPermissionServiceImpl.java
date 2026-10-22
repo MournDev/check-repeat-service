@@ -74,6 +74,9 @@ public class AdminPermissionServiceImpl implements AdminPermissionService {
             newRole.setRoleName(createReq.getRoleName().trim());
             newRole.setRoleCode(createReq.getRoleCode().trim());
             newRole.setDescription(createReq.getDescription());
+            // 数据范围缺省 ALL，保持存量行为；取值由 RoleCreateReq @Pattern 兜底
+            newRole.setDataScope(com.abin.checkrepeatservice.common.datascope.DataScope
+                    .normalize(createReq.getDataScope()));
             newRole.setIsDeleted(0);
             
             int result = sysRoleMapper.insert(newRole);
@@ -120,6 +123,11 @@ public class AdminPermissionServiceImpl implements AdminPermissionService {
         role.setRoleName(updateReq.getRoleName());
         role.setRoleCode(updateReq.getRoleCode());
         role.setDescription(updateReq.getDescription());
+        // 数据范围：null 表示不修改（前端旧表单不传时不能被清空为默认 ALL）
+        if (updateReq.getDataScope() != null) {
+            role.setDataScope(com.abin.checkrepeatservice.common.datascope.DataScope
+                    .normalize(updateReq.getDataScope()));
+        }
         // 移除status更新，角色的状态通过isDeleted字段控制
         
         sysRoleMapper.updateById(role);

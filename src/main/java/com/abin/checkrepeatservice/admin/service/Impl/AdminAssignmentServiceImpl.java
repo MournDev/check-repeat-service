@@ -43,6 +43,10 @@ public class AdminAssignmentServiceImpl implements AdminAssignmentService {
     @Resource
     private com.abin.checkrepeatservice.common.component.PaperStageGate paperStageGate;
 
+    // 治理项：数据范围统一裁决（分配列表与统计按角色范围收窄）
+    @Resource
+    private com.abin.checkrepeatservice.common.datascope.DataScopeResolver dataScopeResolver;
+
     @Override
     public Result<Map<String, Object>> getAssignmentStats() {
         try {
@@ -54,6 +58,7 @@ public class AdminAssignmentServiceImpl implements AdminAssignmentService {
             LambdaQueryWrapper<PaperInfo> unassignedWrapper = new LambdaQueryWrapper<>();
             unassignedWrapper.isNull(PaperInfo::getTeacherId)
                            .eq(PaperInfo::getPaperStatus, DictConstants.PaperStatus.PENDING);
+            dataScopeResolver.applyPaperScope(unassignedWrapper);
             int unassignedStudents = paperInfoMapper.selectCount(unassignedWrapper).intValue();
             stats.put("unassignedStudents", unassignedStudents);
             
@@ -78,6 +83,7 @@ public class AdminAssignmentServiceImpl implements AdminAssignmentService {
             LambdaQueryWrapper<PaperInfo> todayWrapper = new LambdaQueryWrapper<>();
             todayWrapper.isNotNull(PaperInfo::getTeacherId)
                        .ge(PaperInfo::getCreateTime, todayStart);
+            dataScopeResolver.applyPaperScope(todayWrapper);
             int todayAssignments = paperInfoMapper.selectCount(todayWrapper).intValue();
             stats.put("todayAssignments", todayAssignments);
             
@@ -98,6 +104,7 @@ public class AdminAssignmentServiceImpl implements AdminAssignmentService {
             wrapper.isNull(PaperInfo::getTeacherId) // 未分配指导老师
                    // 待分配的学生 = 已提交、尚未指定导师 → pending（见上方 getAssignmentStats 说明）
                    .eq(PaperInfo::getPaperStatus, DictConstants.PaperStatus.PENDING);
+            dataScopeResolver.applyPaperScope(wrapper);
             
             // 关键词搜索
             // S11 安全修复：inSql 字符串拼接存在 SQL 注入，改用 apply {0} 参数绑定
@@ -222,6 +229,9 @@ public class AdminAssignmentServiceImpl implements AdminAssignmentService {
             if (paper == null) {
                 return Result.error(ResultCode.PARAM_ERROR, "论文不存在");
             }
+            if (!dataScopeResolver.canAccessPaper(paper)) {
+                return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权分配该论文");
+            }
 
             SysUser teacher = sysUserMapper.selectById(teacherId);
             if (teacher == null) {
@@ -281,6 +291,11 @@ public class AdminAssignmentServiceImpl implements AdminAssignmentService {
                     PaperInfo paper = paperInfoMapper.selectById(studentId);
                     if (paper == null) {
                         details.add("论文ID " + studentId + " 不存在");
+                        failCount++;
+                        continue;
+                    }
+                    if (!dataScopeResolver.canAccessPaper(paper)) {
+                        details.add("论文ID " + studentId + " 超出当前数据范围");
                         failCount++;
                         continue;
                     }
