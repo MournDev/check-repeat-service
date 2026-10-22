@@ -28,6 +28,17 @@ public class CheckTaskResultDTO {
     private Long paperId;
 
     /**
+     * 论文版本号（M3.1：任务创建时快照的 paper_info.version；存量任务为 null）
+     */
+    private Integer paperVersion;
+
+    /**
+     * 论文提交记录ID（M3.1：对应 paper_submit.id；存量任务为 null）
+     */
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
+    private Long submitId;
+
+    /**
      * 论文标题
      */
     private String paperTitle;

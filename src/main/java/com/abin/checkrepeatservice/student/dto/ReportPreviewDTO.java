@@ -45,6 +45,8 @@ public class ReportPreviewDTO {
         @JsonFormat(shape = JsonFormat.Shape.STRING)
         private Long reportId;
         private Long paperId;
+        /** 论文版本号（M3.1：任务创建时快照的 paper_info.version；存量任务为 null） */
+        private Integer paperVersion;
         private String paperTitle;
         private String author;
         private BigDecimal similarityRate;

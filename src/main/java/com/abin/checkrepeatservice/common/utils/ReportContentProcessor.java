@@ -113,6 +113,8 @@ public class ReportContentProcessor {
         baseInfo.setReportNo(checkReport.getReportNo());
         baseInfo.setTaskId(checkTask.getId());
         baseInfo.setTaskNo(checkTask.getTaskNo());
+        // M3.1 版本—报告绑定：报告基础信息带出任务快照的论文版本
+        baseInfo.setPaperVersion(checkTask.getPaperVersion());
         baseInfo.setPaperId(checkTask.getPaperId());
 
         // 补充论文与用户信息

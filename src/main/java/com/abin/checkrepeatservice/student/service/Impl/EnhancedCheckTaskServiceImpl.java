@@ -55,6 +55,10 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
     @Resource
     private PaperInfoMapper paperInfoMapper;
 
+    // M3.1 版本—报告绑定：任务落库时快照论文版本与最新提交记录
+    @Resource
+    private com.abin.checkrepeatservice.admin.mapper.PaperSubmitMapper paperSubmitMapper;
+
     // 架构修复（P0）：异步执行改为 AFTER_COMMIT 事件，修复本类 @Async 自调用失效
     @Resource
     private ApplicationEventPublisher eventPublisher;
@@ -114,6 +118,9 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
         checkTask.setPaperId(paperId);
         checkTask.setTaskNo(generateTaskNo());
         checkTask.setCheckStatus(CheckTaskStatusEnum.PENDING.getCode());
+        // M3.1 版本—报告绑定：快照论文版本 + 最新一次提交记录
+        checkTask.setPaperVersion(paperInfo.getVersion());
+        checkTask.setSubmitId(resolveLatestSubmitId(paperId));
         UserBusinessInfoUtils.setAuditField(checkTask, true);
         save(checkTask);
         
@@ -371,6 +378,20 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
                 .collect(Collectors.toList());
     }
     
+    /**
+     * M3.1：取该论文最新一次提交记录 ID（paper_submit.id）。
+     * 无提交记录时返回 null（历史数据/未走提交流程的论文），不阻断任务创建。
+     */
+    private Long resolveLatestSubmitId(Long paperId) {
+        PaperSubmit latest = paperSubmitMapper.selectOne(
+                new LambdaQueryWrapper<PaperSubmit>()
+                        .eq(PaperSubmit::getPaperId, paperId)
+                        .orderByDesc(PaperSubmit::getSubmitVersion)
+                        .last("LIMIT 1")
+        );
+        return latest != null ? latest.getId() : null;
+    }
+
     private String generateTaskNo() {
         String datePrefix = LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd"));
         String seqPrefix = "CHECK" + datePrefix;
@@ -448,6 +469,8 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
         
         baseInfo.setTaskId(task.getId());
         baseInfo.setTaskNo(task.getTaskNo());
+        // M3.1 版本—报告绑定：报告基础信息带出任务快照的论文版本
+        baseInfo.setPaperVersion(task.getPaperVersion());
         baseInfo.setReportId(report.getId());
         baseInfo.setReportNo(report.getReportNo());
         baseInfo.setSimilarityRate(checkResult.getSimilarity());
@@ -487,6 +510,9 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
         dto.setTaskId(task.getId());
         dto.setTaskNo(task.getTaskNo());
         dto.setPaperId(task.getPaperId());
+        // M3.1 版本—报告绑定：任务上快照的版本与提交记录（存量任务为 null）
+        dto.setPaperVersion(task.getPaperVersion());
+        dto.setSubmitId(task.getSubmitId());
         dto.setCheckStatus(task.getCheckStatus());
         dto.setCheckRate(task.getCheckRate() != null ? task.getCheckRate().doubleValue() : null);
         // P5 新指标：存量任务为 null，前端按「—」展示

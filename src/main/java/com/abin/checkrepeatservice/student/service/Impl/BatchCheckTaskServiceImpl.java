@@ -6,6 +6,7 @@ import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.pojo.entity.CheckTask;
 import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
+import com.abin.checkrepeatservice.pojo.entity.PaperSubmit;
 import com.abin.checkrepeatservice.student.dto.BatchCheckRequestDTO;
 import com.abin.checkrepeatservice.student.dto.BatchCheckResultDTO;
 import com.abin.checkrepeatservice.student.event.CheckTaskCreatedEvent;
@@ -51,6 +52,10 @@ public class BatchCheckTaskServiceImpl {
     // P5 学院月度查重额度：批量入口逐篇新建任务前校验并扣减
     @Resource
     private CollegeQuotaService collegeQuotaService;
+
+    // M3.1 版本—报告绑定：任务落库时快照论文版本与最新提交记录
+    @Resource
+    private com.abin.checkrepeatservice.admin.mapper.PaperSubmitMapper paperSubmitMapper;
 
     /**
      * S13：批量创建并行化用线程池（AsyncConfig 的通用池，core 3 / max 10 / CallerRunsPolicy 兜底）。
@@ -200,6 +205,9 @@ public class BatchCheckTaskServiceImpl {
         checkTask.setFileId(paperInfo.getFileId());
         checkTask.setTaskNo(generateTaskNo());
         checkTask.setCheckStatus("PENDING");
+        // M3.1 版本—报告绑定：快照论文版本 + 最新一次提交记录
+        checkTask.setPaperVersion(paperInfo.getVersion());
+        checkTask.setSubmitId(resolveLatestSubmitId(paperId));
         // S13：本方法在并行线程中执行，SecurityContext 取不到当前用户
         // （MyMetaObjectHandler 会兜底填匿名管理员 ID），审计字段显式写入；
         // MP strictInsertFill 不覆盖非空字段，不会被自动填充回退
@@ -213,6 +221,20 @@ public class BatchCheckTaskServiceImpl {
         checkTaskMapper.insert(checkTask);
         
         return checkTask;
+    }
+
+    /**
+     * M3.1：取该论文最新一次提交记录 ID（paper_submit.id）。
+     * 无提交记录时返回 null（历史数据/未走提交流程的论文），不阻断任务创建。
+     */
+    private Long resolveLatestSubmitId(Long paperId) {
+        PaperSubmit latest = paperSubmitMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<PaperSubmit>()
+                        .eq(PaperSubmit::getPaperId, paperId)
+                        .orderByDesc(PaperSubmit::getSubmitVersion)
+                        .last("LIMIT 1")
+        );
+        return latest != null ? latest.getId() : null;
     }
 
     /**

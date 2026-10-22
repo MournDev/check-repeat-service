@@ -1731,6 +1731,60 @@ UPDATE `message_template` SET
 WHERE `template_code` = 'TEACHER_REJECT_NOTICE';
 
 -- ============================================================================
+-- 段 1.22：check_task 补 paper_version / submit_id（M3.1 版本—报告绑定）
+--
+-- 背景：报告此前只能经 check_task.paper_id 反查到论文主记录，无法确认这份报告
+--   对应的是论文的哪一版、哪一次提交（paper_info 重提会 version+1，paper_submit
+--   每次提交新增一行）。补两列后，报告 → 任务 → 提交记录可直连，多版本论文的
+--   报告不再混在一起。存量任务保持 NULL（历史任务无法可靠回溯是第几次提交），
+--   不做回填。
+-- 部署顺序：必须「先跑本段，再部署后端 jar」（实体已映射新列）。
+-- 幂等性：information_schema 探测列/索引是否存在，重复执行输出"已存在，跳过"。
+-- 执行后自检：见段 5.16。
+-- ============================================================================
+
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.columns
+   WHERE table_schema = DATABASE()
+     AND table_name = 'check_task'
+     AND column_name = 'paper_version'
+);
+SET @ddl = IF(@col_exists = 0,
+  'ALTER TABLE `check_task` '
+  'ADD COLUMN `paper_version` int DEFAULT NULL COMMENT ''论文版本号（创建任务时快照 paper_info.version；存量任务为 NULL）'' AFTER `paper_id`',
+  'SELECT ''check_task.paper_version 已存在，跳过'' AS msg');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.columns
+   WHERE table_schema = DATABASE()
+     AND table_name = 'check_task'
+     AND column_name = 'submit_id'
+);
+SET @ddl = IF(@col_exists = 0,
+  'ALTER TABLE `check_task` '
+  'ADD COLUMN `submit_id` bigint DEFAULT NULL COMMENT ''论文提交记录ID（关联 paper_submit.id，创建任务时取最新一次提交；存量任务为 NULL）'' AFTER `paper_version`',
+  'SELECT ''check_task.submit_id 已存在，跳过'' AS msg');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @idx_exists = (
+  SELECT COUNT(*) FROM information_schema.statistics
+   WHERE table_schema = DATABASE()
+     AND table_name = 'check_task'
+     AND index_name = 'idx_ct_paper_submit'
+);
+SET @ddl = IF(@idx_exists = 0,
+  'ALTER TABLE `check_task` ADD KEY `idx_ct_paper_submit` (`paper_id`, `submit_id`)',
+  'SELECT ''check_task.idx_ct_paper_submit 已存在，跳过'' AS msg');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- ============================================================================
 -- 段 2：similarity_threshold 系列表的 is_deleted 历史 NULL 归零
 --
 -- 背景：category_similarity_threshold.is_deleted 在 init.sql 里一度是 DEFAULT NULL，
@@ -2198,6 +2252,15 @@ SELECT (SELECT COUNT(*) FROM system_message WHERE is_deleted IS NULL)           
        (SELECT COUNT(*) FROM information_schema.COLUMNS
          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'review_workflow'
            AND COLUMN_NAME = 'is_deleted' AND IS_NULLABLE = 'YES')                  AS wf_col;
+
+-- 5.16 段 1.22 check_task 版本—报告绑定两列执行后：
+--   期望：ct_version_submit_cols=2 / ct_paper_submit_idx=1
+SELECT (SELECT COUNT(*) FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'check_task'
+           AND COLUMN_NAME IN ('paper_version','submit_id'))                      AS ct_version_submit_cols,
+       (SELECT COUNT(DISTINCT INDEX_NAME) FROM information_schema.STATISTICS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'check_task'
+           AND INDEX_NAME = 'idx_ct_paper_submit')                                 AS ct_paper_submit_idx;
 
 
 -- ============================================================================

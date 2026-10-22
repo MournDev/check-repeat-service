@@ -28,6 +28,21 @@ public class CheckTask extends BaseEntity {
     private Long paperId;
 
     /**
+     * 论文版本号（M3.1）：创建任务时快照 paper_info.version，
+     * 使报告可反查到对应论文版本；存量任务为 null
+     */
+    @TableField("paper_version")
+    private Integer paperVersion;
+
+    /**
+     * 论文提交记录ID（M3.1）：创建任务时取该论文最新一次 paper_submit.id，
+     * 使报告可反查到对应提交记录；存量任务为 null
+     */
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
+    @TableField("submit_id")
+    private Long submitId;
+
+    /**
      * 对应的论文文件 ID（关联 file_info.id）
      */
     @JsonFormat(shape = JsonFormat.Shape.STRING)

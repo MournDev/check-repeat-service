@@ -507,6 +507,8 @@ DROP TABLE IF EXISTS `check_task`;
 CREATE TABLE `check_task` (
   `id` bigint NOT NULL COMMENT '任务唯一ID（雪花ID）',
   `paper_id` bigint NOT NULL COMMENT '对应的论文ID（关联paper_info.id）',
+  `paper_version` int DEFAULT NULL COMMENT '论文版本号（创建任务时快照 paper_info.version；存量任务为 NULL）',
+  `submit_id` bigint DEFAULT NULL COMMENT '论文提交记录ID（关联 paper_submit.id，创建任务时取最新一次提交；存量任务为 NULL）',
   `file_id` bigint DEFAULT NULL COMMENT '论文文件ID',
   `report_id` bigint DEFAULT NULL COMMENT '对应的查重报告ID（关联check_report.id，任务成功时生成）',
   `task_no` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL COMMENT '任务编号（如“CHECK20240512001”，唯一）',
@@ -530,6 +532,7 @@ CREATE TABLE `check_task` (
   `check_rule_id` bigint DEFAULT NULL COMMENT '查重规则ID（关联check_rule.id）',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_task_no` (`task_no`),
+  KEY `idx_ct_paper_submit` (`paper_id`,`submit_id`),
   KEY `idx_check_task_rule_id` (`check_rule_id`),
   KEY `idx_check_task_delete_by` (`delete_by`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='查重任务表';
