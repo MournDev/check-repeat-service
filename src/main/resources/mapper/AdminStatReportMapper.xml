@@ -5,6 +5,9 @@
     <!--
       管理端全校统计报表（论文全生命周期 P5）。
       MySQL 开启 only_full_group_by：SELECT 只允许分组列 + 聚合列，全部查询已按此约束书写。
+
+      数据范围（治理项）：scope 非空时按论文归属学院/专业/导师/学生过滤；
+      scope 为 null 表示 ALL，整段跳过，SQL 与接入前保持一致。
     -->
 
     <!-- 查重结果分布：派生子表先按 CASE 打桶（0-10 为左闭右开，90-100 含 100），
@@ -29,6 +32,21 @@
             FROM check_result cr
             WHERE cr.is_deleted = 0
               AND cr.repeat_rate IS NOT NULL
+            <if test="scope != null and scope.denyAll">
+                AND 1 = 0
+            </if>
+            <if test="scope != null and scope.collegeId != null">
+                AND cr.paper_id IN (SELECT id FROM paper_info WHERE is_deleted = 0 AND college_id = #{scope.collegeId})
+            </if>
+            <if test="scope != null and scope.majorId != null">
+                AND cr.paper_id IN (SELECT id FROM paper_info WHERE is_deleted = 0 AND major_id = #{scope.majorId})
+            </if>
+            <if test="scope != null and scope.teacherId != null">
+                AND cr.paper_id IN (SELECT id FROM paper_info WHERE is_deleted = 0 AND teacher_id = #{scope.teacherId})
+            </if>
+            <if test="scope != null and scope.studentId != null">
+                AND cr.paper_id IN (SELECT id FROM paper_info WHERE is_deleted = 0 AND student_id = #{scope.studentId})
+            </if>
         ) t
         GROUP BY t.bucket
     </select>
@@ -45,6 +63,21 @@
         LEFT JOIN college c ON pi.college_id = c.id
         WHERE pi.is_deleted = 0
           AND pi.similarity_rate IS NOT NULL
+        <if test="scope != null and scope.denyAll">
+            AND 1 = 0
+        </if>
+        <if test="scope != null and scope.collegeId != null">
+            AND pi.college_id = #{scope.collegeId}
+        </if>
+        <if test="scope != null and scope.majorId != null">
+            AND pi.major_id = #{scope.majorId}
+        </if>
+        <if test="scope != null and scope.teacherId != null">
+            AND pi.teacher_id = #{scope.teacherId}
+        </if>
+        <if test="scope != null and scope.studentId != null">
+            AND pi.student_id = #{scope.studentId}
+        </if>
         GROUP BY pi.college_id, c.college_name
     </select>
 
@@ -58,6 +91,21 @@
         FROM check_result cr
         WHERE cr.is_deleted = 0
           AND cr.check_time IS NOT NULL
+        <if test="scope != null and scope.denyAll">
+            AND 1 = 0
+        </if>
+        <if test="scope != null and scope.collegeId != null">
+            AND cr.paper_id IN (SELECT id FROM paper_info WHERE is_deleted = 0 AND college_id = #{scope.collegeId})
+        </if>
+        <if test="scope != null and scope.majorId != null">
+            AND cr.paper_id IN (SELECT id FROM paper_info WHERE is_deleted = 0 AND major_id = #{scope.majorId})
+        </if>
+        <if test="scope != null and scope.teacherId != null">
+            AND cr.paper_id IN (SELECT id FROM paper_info WHERE is_deleted = 0 AND teacher_id = #{scope.teacherId})
+        </if>
+        <if test="scope != null and scope.studentId != null">
+            AND cr.paper_id IN (SELECT id FROM paper_info WHERE is_deleted = 0 AND student_id = #{scope.studentId})
+        </if>
         GROUP BY DATE_FORMAT(cr.check_time, '%Y-%m')
         ORDER BY ym
     </select>

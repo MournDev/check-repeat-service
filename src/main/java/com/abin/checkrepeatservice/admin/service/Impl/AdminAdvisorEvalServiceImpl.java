@@ -7,6 +7,8 @@ import com.abin.checkrepeatservice.admin.service.AdminAdvisorEvalService;
 import com.abin.checkrepeatservice.admin.vo.AdvisorEvalExcelVO;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.constant.DictConstants;
+import com.abin.checkrepeatservice.common.datascope.DataScopeResolver;
+import com.abin.checkrepeatservice.common.datascope.DataScopeSqlFilter;
 import com.abin.checkrepeatservice.common.service.Impl.DictService;
 import com.abin.checkrepeatservice.mapper.AdvisorEvaluationMapper;
 import com.abin.checkrepeatservice.mapper.SysUserMapper;
@@ -71,10 +73,14 @@ public class AdminAdvisorEvalServiceImpl implements AdminAdvisorEvalService {
     @Resource
     private DictService dictService;
 
+    @Resource
+    private DataScopeResolver dataScopeResolver;
+
     @Override
     public Result<Page<AdvisorEvalPageItemVO>> page(AdvisorEvalPageReq req) {
         Page<AdvisorEvalPageItemVO> page = advisorEvaluationMapper.selectEvalPage(
-                new Page<>(req.getPageNum(), req.getPageSize()), req);
+                new Page<>(req.getPageNum(), req.getPageSize()), req,
+                dataScopeResolver.currentFilterOrNull());
         // XML 只出 tagsJson 原始串，这里解析进 tags（防前端各处重复解析 JSON）
         page.getRecords().forEach(item -> item.setTags(parseTags(item.getTagsJson())));
         return Result.success(page);
@@ -83,25 +89,31 @@ public class AdminAdvisorEvalServiceImpl implements AdminAdvisorEvalService {
     @Override
     public Result<AdvisorEvalStatsVO> stats(LocalDate beginDate, LocalDate endDate) {
         AdvisorEvalStatsVO vo = new AdvisorEvalStatsVO();
+        DataScopeSqlFilter scope = dataScopeResolver.currentFilterOrNull();
 
         // 1. 完成率：已评份数 / 可评论文数
         //    无时间段：分子全量评价，分母=当前状态 defense_passed/finalized/archived 且已分配导师
         //    （P4 归档后论文不再停留在 finalized，分母必须并入 archived，否则完成率会超过 100%）
         //    有时间段：分子按评价提交时间过滤，分母=该时段内 defense_passed 状态日志的论文数
         //    （按"何时通过终期答辩"归口届别；存量无日志论文不参与分段统计，避免跨届混算失真）
-        long totalEvaluations = advisorEvaluationMapper.selectCount(applyCreateTimeRange(new LambdaQueryWrapper<>(),
-                beginDate, endDate));
+        //    分子/分母都按当前登录人的数据范围过滤，避免学院范围角色看到全校完成率
+        LambdaQueryWrapper<AdvisorEvaluation> evaluationWrapper =
+                applyCreateTimeRange(new LambdaQueryWrapper<>(), beginDate, endDate);
+        dataScopeResolver.applyPaperIdScope(evaluationWrapper, "paper_id");
+        long totalEvaluations = advisorEvaluationMapper.selectCount(evaluationWrapper);
         long eligiblePapers;
         boolean hasRange = beginDate != null || endDate != null;
         if (hasRange) {
-            eligiblePapers = advisorEvaluationMapper.selectDefensePassedPaperCount(beginDate, endDate);
+            eligiblePapers = advisorEvaluationMapper.selectDefensePassedPaperCount(beginDate, endDate, scope);
         } else {
-            eligiblePapers = paperInfoMapper.selectCount(new LambdaQueryWrapper<PaperInfo>()
+            LambdaQueryWrapper<PaperInfo> eligibleWrapper = new LambdaQueryWrapper<PaperInfo>()
                     .in(PaperInfo::getPaperStatus,
                             DictConstants.PaperStatus.DEFENSE_PASSED,
                             DictConstants.PaperStatus.FINALIZED,
                             DictConstants.PaperStatus.ARCHIVED)
-                    .isNotNull(PaperInfo::getTeacherId));
+                    .isNotNull(PaperInfo::getTeacherId);
+            dataScopeResolver.applyPaperScope(eligibleWrapper);
+            eligiblePapers = paperInfoMapper.selectCount(eligibleWrapper);
         }
         // @TableLogic 自动附加 is_deleted=0；uk_paper_id 保证一份评价对应一篇论文
         vo.setEligiblePapers(eligiblePapers);
@@ -111,7 +123,8 @@ public class AdminAdvisorEvalServiceImpl implements AdminAdvisorEvalService {
                         .setScale(2, RoundingMode.HALF_UP));
 
         // 2. 导师排行：XML 聚合出 teacherId/evalCount/avgOverall，姓名与评价分 Java 侧回填
-        List<AdvisorEvalStatsVO.TeacherRankItem> rank = advisorEvaluationMapper.selectTeacherRank(beginDate, endDate);
+        List<AdvisorEvalStatsVO.TeacherRankItem> rank =
+                advisorEvaluationMapper.selectTeacherRank(beginDate, endDate, scope);
         fillTeacherNames(rank);
         rank.forEach(item -> {
             if (item.getAvgOverall() != null) {
@@ -132,7 +145,7 @@ public class AdminAdvisorEvalServiceImpl implements AdminAdvisorEvalService {
 
         // 4. 学院对比：NULL 学院归"未分配"，记录缺失归"未知学院"，按均分降序
         List<AdvisorEvalStatsVO.CollegeCompareItem> collegeCompare =
-                advisorEvaluationMapper.selectCollegeEvalCompare(beginDate, endDate);
+                advisorEvaluationMapper.selectCollegeEvalCompare(beginDate, endDate, scope);
         collegeCompare.forEach(item -> {
             if (item.getCollegeId() == null) {
                 item.setCollegeName("未分配");
@@ -168,7 +181,7 @@ public class AdminAdvisorEvalServiceImpl implements AdminAdvisorEvalService {
         req.setPageNum(1);
         req.setPageSize(-1);
         List<AdvisorEvalPageItemVO> all = advisorEvaluationMapper
-                .selectEvalPage(new Page<>(1, -1), req)
+                .selectEvalPage(new Page<>(1, -1), req, dataScopeResolver.currentFilterOrNull())
                 .getRecords();
 
         Map<String, String> labelMap = dictService.getDictValueMap(DictConstants.DICT_ADVISOR_EVAL_TAG);

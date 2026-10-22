@@ -14,6 +14,8 @@ import com.abin.checkrepeatservice.common.Exception.BusinessException;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.component.PaperStageGate;
 import com.abin.checkrepeatservice.common.constant.DictConstants;
+import com.abin.checkrepeatservice.common.datascope.DataScopeResolver;
+import com.abin.checkrepeatservice.common.datascope.DataScopeSqlFilter;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.common.mapper.CollegeMapper;
 import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
@@ -89,12 +91,17 @@ public class AdminDefenseServiceImpl implements AdminDefenseService {
     @Resource
     private PaperStatusLogService paperStatusLogService;
 
+    @Resource
+    private DataScopeResolver dataScopeResolver;
+
     // ==================== 批次 CRUD ====================
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Result<DefenseBatchVO> createBatch(DefenseBatchReq req) {
         Long operatorId = UserBusinessInfoUtils.getCurrentUserId();
+        // 数据范围（治理项）：学院范围管理员只能创建本学院批次
+        assertBatchCollegeScope(req.getCollegeId());
 
         // 批次编号唯一性预校验（友好提示，避免直接撞唯一索引报 500）
         Long existCount = defenseBatchMapper.selectCount(new LambdaQueryWrapper<DefenseBatch>()
@@ -135,6 +142,8 @@ public class AdminDefenseServiceImpl implements AdminDefenseService {
         if (Integer.valueOf(DefenseBatch.STATUS_FINISHED).equals(batch.getStatus())) {
             throw new BusinessException(ResultCode.PERMISSION_NOT_STATUS, "已结束的批次不可编辑");
         }
+        // 不允许把批次改挂到数据范围外的学院
+        assertBatchCollegeScope(req.getCollegeId());
 
         DefenseBatch update = new DefenseBatch();
         update.setId(id);
@@ -170,6 +179,7 @@ public class AdminDefenseServiceImpl implements AdminDefenseService {
         if (status != null) {
             wrapper.eq(DefenseBatch::getStatus, status);
         }
+        applyBatchScope(wrapper);
 
         Page<DefenseBatch> result = defenseBatchMapper.selectPage(new Page<>(page, size), wrapper);
         Page<DefenseBatchVO> voPage = new Page<>(result.getCurrent(), result.getSize(), result.getTotal());
@@ -315,6 +325,11 @@ public class AdminDefenseServiceImpl implements AdminDefenseService {
             PaperInfo paper = paperMap.get(paperId);
             if (paper == null) {
                 skips.add("论文" + paperId + "：不存在或已删除");
+                continue;
+            }
+            // 数据范围（治理项）：不允许把范围外论文拉进本批次
+            if (!dataScopeResolver.canAccessPaper(paper)) {
+                skips.add("论文" + paperId + "：不在当前数据范围内");
                 continue;
             }
             if (existingPaperIds.contains(paperId)) {
@@ -483,7 +498,55 @@ public class AdminDefenseServiceImpl implements AdminDefenseService {
         if (batch == null) {
             throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "答辩批次不存在或已删除");
         }
+        if (!canAccessBatch(batch)) {
+            throw new BusinessException(ResultCode.PERMISSION_NO_ACCESS, "无权访问该答辩批次");
+        }
         return batch;
+    }
+
+    /**
+     * 答辩批次的数据范围（治理项）。
+     *
+     * <p>批次表只带学院维度（无专业/导师/学生列），因此 COLLEGE 按学院过滤；
+     * MAJOR/TEACHER/SELF 无法定位批次，直接拒绝，避免越权查看全校批次。</p>
+     */
+    private void applyBatchScope(LambdaQueryWrapper<DefenseBatch> wrapper) {
+        DataScopeSqlFilter filter = dataScopeResolver.currentFilter();
+        if (filter.isUnrestricted()) {
+            return;
+        }
+        if (filter.getCollegeId() != null) {
+            wrapper.eq(DefenseBatch::getCollegeId, filter.getCollegeId());
+        } else {
+            wrapper.apply("1 = 0");
+        }
+    }
+
+    /**
+     * 单条批次是否在当前登录人的数据范围内
+     */
+    private boolean canAccessBatch(DefenseBatch batch) {
+        DataScopeSqlFilter filter = dataScopeResolver.currentFilter();
+        if (filter.isUnrestricted()) {
+            return true;
+        }
+        if (filter.isDenyAll() || filter.getCollegeId() == null) {
+            return false;
+        }
+        return Objects.equals(batch.getCollegeId(), filter.getCollegeId());
+    }
+
+    /**
+     * 创建/改挂批次时的学院归属校验（仅限本学院；ALL 不受限）
+     */
+    private void assertBatchCollegeScope(Long collegeId) {
+        DataScopeSqlFilter filter = dataScopeResolver.currentFilter();
+        if (filter.isUnrestricted()) {
+            return;
+        }
+        if (filter.getCollegeId() == null || !Objects.equals(collegeId, filter.getCollegeId())) {
+            throw new BusinessException(ResultCode.PERMISSION_NO_ACCESS, "只能操作本学院的答辩批次");
+        }
     }
 
     /**

@@ -77,6 +77,22 @@
         <if test="req.endDate != null">
             AND ae.create_time &lt; DATE_ADD(#{req.endDate}, INTERVAL 1 DAY)
         </if>
+        <!-- 数据范围（治理项）：scope 为空表示 ALL，不加限制 -->
+        <if test="scope != null and scope.denyAll">
+            AND 1 = 0
+        </if>
+        <if test="scope != null and scope.collegeId != null">
+            AND p.college_id = #{scope.collegeId}
+        </if>
+        <if test="scope != null and scope.majorId != null">
+            AND p.major_id = #{scope.majorId}
+        </if>
+        <if test="scope != null and scope.teacherId != null">
+            AND p.teacher_id = #{scope.teacherId}
+        </if>
+        <if test="scope != null and scope.studentId != null">
+            AND p.student_id = #{scope.studentId}
+        </if>
         ORDER BY ae.create_time DESC, ae.id DESC
     </select>
 
@@ -94,6 +110,22 @@
         </if>
         <if test="endDate != null">
             AND create_time &lt; DATE_ADD(#{endDate}, INTERVAL 1 DAY)
+        </if>
+        <!-- 数据范围（治理项）：评价按论文归属过滤；scope 为空表示 ALL -->
+        <if test="scope != null and scope.denyAll">
+            AND 1 = 0
+        </if>
+        <if test="scope != null and scope.collegeId != null">
+            AND paper_id IN (SELECT id FROM paper_info WHERE is_deleted = 0 AND college_id = #{scope.collegeId})
+        </if>
+        <if test="scope != null and scope.majorId != null">
+            AND paper_id IN (SELECT id FROM paper_info WHERE is_deleted = 0 AND major_id = #{scope.majorId})
+        </if>
+        <if test="scope != null and scope.teacherId != null">
+            AND paper_id IN (SELECT id FROM paper_info WHERE is_deleted = 0 AND teacher_id = #{scope.teacherId})
+        </if>
+        <if test="scope != null and scope.studentId != null">
+            AND paper_id IN (SELECT id FROM paper_info WHERE is_deleted = 0 AND student_id = #{scope.studentId})
         </if>
         GROUP BY teacher_id
     </select>
@@ -116,6 +148,21 @@
         <if test="endDate != null">
             AND ae.create_time &lt; DATE_ADD(#{endDate}, INTERVAL 1 DAY)
         </if>
+        <if test="scope != null and scope.denyAll">
+            AND 1 = 0
+        </if>
+        <if test="scope != null and scope.collegeId != null">
+            AND p.college_id = #{scope.collegeId}
+        </if>
+        <if test="scope != null and scope.majorId != null">
+            AND p.major_id = #{scope.majorId}
+        </if>
+        <if test="scope != null and scope.teacherId != null">
+            AND p.teacher_id = #{scope.teacherId}
+        </if>
+        <if test="scope != null and scope.studentId != null">
+            AND p.student_id = #{scope.studentId}
+        </if>
         GROUP BY p.college_id, c.college_name
     </select>
 
@@ -132,6 +179,21 @@
         </if>
         <if test="endDate != null">
           AND create_time &lt; DATE_ADD(#{endDate}, INTERVAL 1 DAY)
+        </if>
+        <if test="scope != null and scope.denyAll">
+          AND 1 = 0
+        </if>
+        <if test="scope != null and scope.collegeId != null">
+          AND paper_id IN (SELECT id FROM paper_info WHERE is_deleted = 0 AND college_id = #{scope.collegeId})
+        </if>
+        <if test="scope != null and scope.majorId != null">
+          AND paper_id IN (SELECT id FROM paper_info WHERE is_deleted = 0 AND major_id = #{scope.majorId})
+        </if>
+        <if test="scope != null and scope.teacherId != null">
+          AND paper_id IN (SELECT id FROM paper_info WHERE is_deleted = 0 AND teacher_id = #{scope.teacherId})
+        </if>
+        <if test="scope != null and scope.studentId != null">
+          AND paper_id IN (SELECT id FROM paper_info WHERE is_deleted = 0 AND student_id = #{scope.studentId})
         </if>
     </select>
 

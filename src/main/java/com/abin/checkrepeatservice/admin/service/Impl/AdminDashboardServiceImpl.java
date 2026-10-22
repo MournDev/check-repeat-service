@@ -7,6 +7,7 @@ import com.abin.checkrepeatservice.admin.vo.CollegePaperStatsVO;
 import com.abin.checkrepeatservice.admin.vo.MajorPaperStatsVO;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.constant.DictConstants;
+import com.abin.checkrepeatservice.common.datascope.DataScopeResolver;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.monitor.service.DatabaseMonitorService;
 import com.abin.checkrepeatservice.monitor.service.SystemMonitorService;
@@ -60,12 +61,15 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
     @Resource
     private SysBackupService sysBackupService;
 
+    @Resource
+    private DataScopeResolver dataScopeResolver;
+
     @Override
     public Result<Map<String, Object>> getSystemStats() {
         try {
             Map<String, Object> stats = new HashMap<>();
             
-            // 用户统计
+            // 用户统计（系统级口径：用户数量不按论文数据范围裁剪）
             // S14：原「总数 + 管理员/学生/教师」共 4 次 count 合并为一条 GROUP BY
             List<Map<String, Object>> userTypeRows = sysUserMapper.selectUserTypeStats();
             long totalUsers = 0L;
@@ -91,8 +95,9 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
             LocalDateTime monthStart = LocalDateTime.now().minusDays(30);
 
             // S14：原 总数/有效/撤回/5 状态/今周月新增共 11 次 selectCount 合并为一条 GROUP BY 聚合
-            List<Map<String, Object>> paperRows =
-                    paperInfoMapper.selectPaperStatusStats(todayStart, weekStart, monthStart);
+            // 数据范围（治理项）：论文类指标按当前登录人范围过滤；ALL 时 scope 为 null 且 SQL 不变
+            List<Map<String, Object>> paperRows = paperInfoMapper.selectPaperStatusStats(
+                    todayStart, weekStart, monthStart, dataScopeResolver.currentFilterOrNull());
             long totalPapers = 0L;
             long nullStatusPapers = 0L;
             long todaySubmissions = 0L;
@@ -133,9 +138,11 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
             stats.put("completedPapers", papersByStatus.getOrDefault(DictConstants.PaperStatus.COMPLETED, 0L));
             stats.put("rejectedPapers", papersByStatus.getOrDefault(DictConstants.PaperStatus.REJECTED, 0L));
 
-            // 高相似度论文统计
-            Long highSimilarityPapers = checkResultMapper.selectCount(new LambdaQueryWrapper<CheckResult>()
-                    .ge(CheckResult::getRepeatRate, new BigDecimal("80")));
+            // 高相似度论文统计（数据范围：按查重结果关联的论文归属过滤）
+            LambdaQueryWrapper<CheckResult> highSimilarityWrapper = new LambdaQueryWrapper<CheckResult>()
+                    .ge(CheckResult::getRepeatRate, new BigDecimal("80"));
+            dataScopeResolver.applyPaperIdScope(highSimilarityWrapper, "paper_id");
+            Long highSimilarityPapers = checkResultMapper.selectCount(highSimilarityWrapper);
             stats.put("highSimilarityPapers", highSimilarityPapers);
 
             // 时间维度统计（计数来自上面的聚合）
@@ -144,14 +151,18 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
             stats.put("monthSubmissions", monthSubmissions);
             
             // 本周审核统计
-            Long weekReviews = checkResultMapper.selectCount(new LambdaQueryWrapper<CheckResult>()
-                    .ge(CheckResult::getCreateTime, weekStart));
+            LambdaQueryWrapper<CheckResult> weekReviewWrapper = new LambdaQueryWrapper<CheckResult>()
+                    .ge(CheckResult::getCreateTime, weekStart);
+            dataScopeResolver.applyPaperIdScope(weekReviewWrapper, "paper_id");
+            Long weekReviews = checkResultMapper.selectCount(weekReviewWrapper);
             stats.put("weekReviews", weekReviews);
             
             // 平均相似度
-            List<CheckResult> recentResults = checkResultMapper.selectList(new LambdaQueryWrapper<CheckResult>()
+            LambdaQueryWrapper<CheckResult> recentWrapper = new LambdaQueryWrapper<CheckResult>()
                     .orderByDesc(CheckResult::getCreateTime)
-                    .last("LIMIT 100"));
+                    .last("LIMIT 100");
+            dataScopeResolver.applyPaperIdScope(recentWrapper, "paper_id");
+            List<CheckResult> recentResults = checkResultMapper.selectList(recentWrapper);
             if (!recentResults.isEmpty()) {
                 BigDecimal avgSimilarity = recentResults.stream()
                         .map(CheckResult::getRepeatRate)
@@ -223,18 +234,20 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
     public Result<Map<String, Object>> getRealtimeStats() {
         Map<String, Object> stats = new HashMap<>();
         
-        // 今日论文提交数
+        // 今日论文提交数（按当前登录人数据范围过滤）
         LocalDateTime todayStart = LocalDateTime.now().withHour(0).withMinute(0).withSecond(0);
-        Long todayPapers = paperInfoMapper.selectCount(new LambdaQueryWrapper<PaperInfo>()
-                .ge(PaperInfo::getCreateTime, todayStart));
+        LambdaQueryWrapper<PaperInfo> todayPaperWrapper = new LambdaQueryWrapper<PaperInfo>()
+                .ge(PaperInfo::getCreateTime, todayStart);
+        dataScopeResolver.applyPaperScope(todayPaperWrapper);
+        Long todayPapers = paperInfoMapper.selectCount(todayPaperWrapper);
         stats.put("todayPapers", todayPapers);
         
-        // 本周审核数
+        // 本周审核数（按查重结果关联的论文归属过滤）
         LocalDateTime weekStart = LocalDateTime.now().minusDays(7);
-        Long weekReviews = checkResultMapper.selectCount(
-            new LambdaQueryWrapper<CheckResult>()
-                .ge(CheckResult::getCreateTime, weekStart)
-        );
+        LambdaQueryWrapper<CheckResult> weekReviewWrapper = new LambdaQueryWrapper<CheckResult>()
+                .ge(CheckResult::getCreateTime, weekStart);
+        dataScopeResolver.applyPaperIdScope(weekReviewWrapper, "paper_id");
+        Long weekReviews = checkResultMapper.selectCount(weekReviewWrapper);
         stats.put("weekReviews", weekReviews);
         
         // 在线用户数（最近1小时内登录）
@@ -247,11 +260,13 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
         Integer systemLoad = getSystemLoadFromDatabase();
         stats.put("systemLoad", systemLoad);
         
-        // 当前活跃任务数
-        Long activeTasks = paperInfoMapper.selectCount(new LambdaQueryWrapper<PaperInfo>()
+        // 当前活跃任务数（按当前登录人数据范围过滤）
+        LambdaQueryWrapper<PaperInfo> activeTaskWrapper = new LambdaQueryWrapper<PaperInfo>()
                 .in(PaperInfo::getPaperStatus, Arrays.asList(
                     DictConstants.PaperStatus.CHECKING,
-                    DictConstants.PaperStatus.AUDITING)));
+                    DictConstants.PaperStatus.AUDITING));
+        dataScopeResolver.applyPaperScope(activeTaskWrapper);
+        Long activeTasks = paperInfoMapper.selectCount(activeTaskWrapper);
         stats.put("activeTasks", activeTasks);
         
         // 今日新增用户数
@@ -271,8 +286,9 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
         Map<String, Object> collegeStats = new HashMap<>();
         
         try {
-            // 使用VO形式的查询方法
-            List<CollegePaperStatsVO> collegePaperStats = paperInfoMapper.selectCollegePaperStats();
+            // 使用VO形式的查询方法（按当前登录人数据范围过滤）
+            List<CollegePaperStatsVO> collegePaperStats =
+                    paperInfoMapper.selectCollegePaperStats(dataScopeResolver.currentFilterOrNull());
             
             // 转换为Map格式（如果前端需要）
             List<Map<String, Object>> result = collegePaperStats.stream()
@@ -304,8 +320,9 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
         Map<String, Object> majorStats = new HashMap<>();
         
         try {
-            // 明确指定泛型类型
-            List<MajorPaperStatsVO> majorPaperStats = paperInfoMapper.selectMajorPaperStats();
+            // 明确指定泛型类型（按当前登录人数据范围过滤）
+            List<MajorPaperStatsVO> majorPaperStats =
+                    paperInfoMapper.selectMajorPaperStats(dataScopeResolver.currentFilterOrNull());
 
             List<Map<String, Object>> result = majorPaperStats.stream()
                     .map(vo -> {

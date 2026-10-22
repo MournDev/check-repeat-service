@@ -106,6 +106,17 @@ public class DataScopeResolver {
     }
 
     /**
+     * 当前登录人的数据范围过滤参数；ALL（无限制）时返回 null。
+     *
+     * <p>供聚合类 XML 使用：{@code <if test="scope != null">} 即可让 ALL 角色
+     * 完全跳过范围条件，避免给统计 SQL 增加无谓的子查询。</p>
+     */
+    public DataScopeSqlFilter currentFilterOrNull() {
+        DataScopeSqlFilter filter = currentFilter();
+        return filter.isUnrestricted() ? null : filter;
+    }
+
+    /**
      * 把范围条件附加到「含 paper_id 列的任意查询」（如评阅任务列表）：
      * paper_id IN (SELECT id FROM paper_info WHERE ...范围条件)。
      *

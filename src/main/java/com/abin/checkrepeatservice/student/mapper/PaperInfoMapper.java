@@ -2,6 +2,7 @@ package com.abin.checkrepeatservice.student.mapper;
 
 import com.abin.checkrepeatservice.admin.vo.CollegePaperStatsVO;
 import com.abin.checkrepeatservice.admin.vo.MajorPaperStatsVO;
+import com.abin.checkrepeatservice.common.datascope.DataScopeSqlFilter;
 import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
 import com.abin.checkrepeatservice.teacher.vo.CollegeDistributionVO;
 import com.abin.checkrepeatservice.teacher.vo.SimilarityDistributionVO;
@@ -60,13 +61,17 @@ public interface PaperInfoMapper extends BaseMapper<PaperInfo> {
     
     /**
      * 获取学院论文分布统计（管理员用）
+     *
+     * @param scope 数据范围；null 表示全量（ALL）
      */
-    List<CollegePaperStatsVO> selectCollegePaperStats();
+    List<CollegePaperStatsVO> selectCollegePaperStats(@Param("scope") DataScopeSqlFilter scope);
     
     /**
      * 获取专业论文分布统计（管理员用）
+     *
+     * @param scope 数据范围；null 表示全量（ALL）
      */
-    List<MajorPaperStatsVO> selectMajorPaperStats();
+    List<MajorPaperStatsVO> selectMajorPaperStats(@Param("scope") DataScopeSqlFilter scope);
 
     /**
      * S14：论文按状态聚合（单条 GROUP BY），替代管理端论文统计/仪表盘原先十多次 selectCount。
@@ -74,6 +79,7 @@ public interface PaperInfoMapper extends BaseMapper<PaperInfo> {
      * 时间入参传 null 时对应列返回 0（论文状态为 NULL 的存量行也会单独成组，计入总数）。</p>
      */
     @Select("""
+            <script>
             SELECT paper_status AS status,
                    COUNT(*) AS cnt,
                    SUM(CASE WHEN #{todayStart} IS NOT NULL AND create_time >= #{todayStart}
@@ -84,9 +90,26 @@ public interface PaperInfoMapper extends BaseMapper<PaperInfo> {
                             THEN 1 ELSE 0 END) AS monthCnt
             FROM paper_info
             WHERE is_deleted = 0
+            <if test="scope != null and scope.denyAll">
+                AND 1 = 0
+            </if>
+            <if test="scope != null and scope.collegeId != null">
+                AND college_id = #{scope.collegeId}
+            </if>
+            <if test="scope != null and scope.majorId != null">
+                AND major_id = #{scope.majorId}
+            </if>
+            <if test="scope != null and scope.teacherId != null">
+                AND teacher_id = #{scope.teacherId}
+            </if>
+            <if test="scope != null and scope.studentId != null">
+                AND student_id = #{scope.studentId}
+            </if>
             GROUP BY paper_status
+            </script>
             """)
     List<Map<String, Object>> selectPaperStatusStats(@Param("todayStart") LocalDateTime todayStart,
                                                      @Param("weekStart") LocalDateTime weekStart,
-                                                     @Param("monthStart") LocalDateTime monthStart);
+                                                     @Param("monthStart") LocalDateTime monthStart,
+                                                     @Param("scope") DataScopeSqlFilter scope);
 }

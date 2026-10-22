@@ -326,8 +326,9 @@ public class AdminPaperServiceImpl implements AdminPaperService {
 
             if (com.abin.checkrepeatservice.common.datascope.DataScope.ALL
                     .equals(dataScopeResolver.resolveScope())) {
+                // 本分支仅 ALL 角色进入，scope 传 null 即全量口径
                 List<Map<String, Object>> rows =
-                        paperInfoMapper.selectPaperStatusStats(todayStart, null, null);
+                        paperInfoMapper.selectPaperStatusStats(todayStart, null, null, null);
                 for (Map<String, Object> row : rows) {
                     long cnt = row.get("cnt") == null ? 0L : ((Number) row.get("cnt")).longValue();
                     totalPapers += cnt;

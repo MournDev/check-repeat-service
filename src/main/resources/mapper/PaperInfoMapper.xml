@@ -118,6 +118,22 @@
         FROM paper_info p
                  LEFT JOIN college c ON p.college_id = c.id
         WHERE p.is_deleted = 0
+        <!-- 数据范围（治理项）：scope 为空表示 ALL，不加限制 -->
+        <if test="scope != null and scope.denyAll">
+            AND 1 = 0
+        </if>
+        <if test="scope != null and scope.collegeId != null">
+            AND p.college_id = #{scope.collegeId}
+        </if>
+        <if test="scope != null and scope.majorId != null">
+            AND p.major_id = #{scope.majorId}
+        </if>
+        <if test="scope != null and scope.teacherId != null">
+            AND p.teacher_id = #{scope.teacherId}
+        </if>
+        <if test="scope != null and scope.studentId != null">
+            AND p.student_id = #{scope.studentId}
+        </if>
         GROUP BY p.college_id, c.college_name
         ORDER BY paperCount DESC
     </select>
@@ -131,6 +147,21 @@
         FROM paper_info p
                  LEFT JOIN major m ON p.major_id = m.id
         WHERE p.is_deleted = 0
+        <if test="scope != null and scope.denyAll">
+            AND 1 = 0
+        </if>
+        <if test="scope != null and scope.collegeId != null">
+            AND p.college_id = #{scope.collegeId}
+        </if>
+        <if test="scope != null and scope.majorId != null">
+            AND p.major_id = #{scope.majorId}
+        </if>
+        <if test="scope != null and scope.teacherId != null">
+            AND p.teacher_id = #{scope.teacherId}
+        </if>
+        <if test="scope != null and scope.studentId != null">
+            AND p.student_id = #{scope.studentId}
+        </if>
         GROUP BY p.major_id, m.major_name
         ORDER BY paperCount DESC
     </select>

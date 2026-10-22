@@ -50,4 +50,15 @@ public class DataScopeSqlFilter {
     public static DataScopeSqlFilter self(Long studentId) {
         return new DataScopeSqlFilter(false, null, null, null, studentId);
     }
+
+    /**
+     * 无任何限制（ALL）时为 true。
+     *
+     * <p>聚合类自定义 SQL 用它决定是否整体跳过范围片段，保证 ALL 角色的 SQL
+     * 与接入数据范围之前逐字节一致，不引入多余 EXISTS/子查询。</p>
+     */
+    public boolean isUnrestricted() {
+        return !denyAll && collegeId == null && majorId == null
+                && teacherId == null && studentId == null;
+    }
 }

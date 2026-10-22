@@ -9,6 +9,7 @@ import com.abin.checkrepeatservice.admin.vo.CollegeCompareExcelVO;
 import com.abin.checkrepeatservice.admin.vo.MonthlyTrendExcelVO;
 import com.abin.checkrepeatservice.admin.vo.SimilarityDistributionExcelVO;
 import com.abin.checkrepeatservice.common.Result;
+import com.abin.checkrepeatservice.common.datascope.DataScopeResolver;
 import com.alibaba.excel.EasyExcel;
 import com.alibaba.excel.ExcelWriter;
 import com.alibaba.excel.write.metadata.WriteSheet;
@@ -53,9 +54,13 @@ public class AdminStatReportServiceImpl implements AdminStatReportService {
     @Resource
     private AdminStatReportMapper adminStatReportMapper;
 
+    @Resource
+    private DataScopeResolver dataScopeResolver;
+
     @Override
     public Result<List<SimilarityDistributionVO>> getSimilarityDistribution() {
-        Map<String, Long> bucketCountMap = adminStatReportMapper.selectSimilarityDistribution().stream()
+        Map<String, Long> bucketCountMap = adminStatReportMapper
+                .selectSimilarityDistribution(dataScopeResolver.currentFilterOrNull()).stream()
                 .collect(Collectors.toMap(SimilarityDistributionVO::getBucket,
                         SimilarityDistributionVO::getCount, (a, b) -> a));
 
@@ -72,7 +77,8 @@ public class AdminStatReportServiceImpl implements AdminStatReportService {
 
     @Override
     public Result<List<CollegeCompareVO>> getCollegeCompare() {
-        List<CollegeCompareVO> list = adminStatReportMapper.selectCollegeCompare();
+        List<CollegeCompareVO> list = adminStatReportMapper
+                .selectCollegeCompare(dataScopeResolver.currentFilterOrNull());
         for (CollegeCompareVO vo : list) {
             if (vo.getCollegeId() == null) {
                 vo.setCollegeName("未分配");
@@ -86,7 +92,8 @@ public class AdminStatReportServiceImpl implements AdminStatReportService {
 
     @Override
     public Result<List<MonthlyTrendVO>> getMonthlyTrend() {
-        Map<String, MonthlyTrendVO> ymMap = adminStatReportMapper.selectMonthlyTrend().stream()
+        Map<String, MonthlyTrendVO> ymMap = adminStatReportMapper
+                .selectMonthlyTrend(dataScopeResolver.currentFilterOrNull()).stream()
                 .collect(Collectors.toMap(MonthlyTrendVO::getYm, Function.identity(), (a, b) -> a));
 
         // 取最近 12 个月（含当月），缺失月补 0，保证趋势连续
