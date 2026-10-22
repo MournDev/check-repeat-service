@@ -235,10 +235,11 @@ public class CheckTaskEventListener {
         } catch (Exception e) {
             log.error("查重任务执行失败 - 任务 ID: {}", taskId, e);
 
-            // 异常处理：更新任务状态为失败
+            // M1.2：引擎全失败/比对故障必须落 failure + fail_reason，且兜底 message 为 null 的情况
+            String failReason = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
             stateMachine.transitionStatus(taskId,
                 com.abin.checkrepeatservice.common.enums.CheckTaskStatusEnum.FAILURE,
-                e.getMessage().length() > 500 ? e.getMessage().substring(0, 500) : e.getMessage());
+                failReason.length() > 500 ? failReason.substring(0, 500) : failReason);
 
             // 回滚论文状态
             PaperInfo updatePaper = new PaperInfo();

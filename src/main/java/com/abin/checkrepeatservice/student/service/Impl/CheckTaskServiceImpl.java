@@ -510,11 +510,12 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
         } catch (Exception e) {
             log.error("查重任务执行失败（任务 ID：{}）", taskId, e);
                     
-            // 异常处理：使用状态机更新任务状态为"执行失败"
+            // 异常处理：使用状态机更新任务状态为"执行失败"，并落 fail_reason（M1.2 引擎全失败可见）
+            String failReason = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
             stateMachine.transitionStatus(
                 taskId, 
                 CheckTaskStatusEnum.FAILURE, 
-                e.getMessage().length() > 500 ? e.getMessage().substring(0, 500) : e.getMessage()
+                failReason.length() > 500 ? failReason.substring(0, 500) : failReason
             );
         
             // 【关键改进 4】失败时回滚论文状态

@@ -273,6 +273,10 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
         if (newStatus.isFinalStatus()) {
             task.setEndTime(LocalDateTime.now());
         }
+        // M1.2：失败状态必须把原因一并落库，否则前端只能看到 failure 而看不到为何失败
+        if (newStatus == CheckTaskStatusEnum.FAILURE) {
+            task.setFailReason(reason == null ? "" : (reason.length() > 500 ? reason.substring(0, 500) : reason));
+        }
         updateById(task);
         
         log.info("任务状态更新：ID={}, {} -> {}, 原因={}", 
@@ -352,9 +356,9 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
             
         } catch (Exception e) {
             log.error("查重任务执行失败：taskId={}", taskId, e);
-            task.setFailReason(e.getMessage().length() > 500 ? 
-                             e.getMessage().substring(0, 500) : e.getMessage());
-            updateTaskStatus(taskId, CheckTaskStatusEnum.FAILURE, e.getMessage());
+            // M1.2：引擎全失败/比对故障落 failure + fail_reason（updateTaskStatus 负责写 fail_reason）
+            String failReason = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            updateTaskStatus(taskId, CheckTaskStatusEnum.FAILURE, failReason);
             
             // 恢复论文状态
             PaperInfo paperInfo = paperInfoMapper.selectById(task.getPaperId());

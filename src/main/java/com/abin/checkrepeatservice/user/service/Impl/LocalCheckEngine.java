@@ -101,6 +101,10 @@ public class LocalCheckEngine implements CheckEngine {
             libraryWrapper.ne(PaperInfo::getId, excludePaperId);
         }
         List<PaperInfo> paperList = paperInfoMapper.selectList(libraryWrapper);
+        // M1.2：比对库为空是合法业务状态（新学校/库尚未入库），返回 0% 并在 extraInfo 注明，
+        // 不视为引擎故障；但库中有论文却一篇都没比对上，则属于引擎故障，必须抛出。
+        boolean libraryEmpty = paperList.isEmpty();
+        int comparedCount = 0;
         double maxSimilarity = 0.0;
         String mostSimilarPaperTitle = "";
         BigInteger mostSimilarSimHash = BigInteger.ZERO;
@@ -124,6 +128,8 @@ public class LocalCheckEngine implements CheckEngine {
                 if (libraryData == null) {
                     continue;
                 }
+                // 成功加载比对数据即视为本篇完成比对（海明预筛跳过也属正常比对结果）
+                comparedCount++;
 
                 // 3.1 SimHash快速筛选（海明距离超过阈值，直接跳过）
                 int hammingDistance = textSimilarityUtils.calculateHammingDistance(targetSimHash, libraryData.getSimHash());
@@ -155,6 +161,11 @@ public class LocalCheckEngine implements CheckEngine {
                 log.error("比对库中论文失败（ID：{}）：", paper.getId(), e);
                 continue; // 单篇论文比对失败，不影响整体流程
             }
+        }
+
+        // M1.2：库中有论文但一篇都没能加载/比对成功 → 引擎故障，不允许静默返回 0%
+        if (!libraryEmpty && comparedCount == 0) {
+            throw new RuntimeException("比对库论文全部读取失败，无法完成查重（库内论文数：" + paperList.size() + "）");
         }
 
         // ===== P5 句级分析：候选论文句级标注 + 总相似比/单篇最大相似比/引用率 =====
@@ -190,7 +201,11 @@ public class LocalCheckEngine implements CheckEngine {
         result.setSentenceHits(sentenceHits);
         result.setCheckSource("论文信息库（SimHash+余弦相似度）");
         result.setReportUrl("/local/report/" + System.currentTimeMillis());
-        result.setExtraInfo(String.format(
+        // M1.2：空库合法返回 0%，但在额外信息里明确说明原因，避免被误读为引擎成功比对的 0%
+        String libraryNote = libraryEmpty
+                ? "比对库暂无可用论文（content_path 未回填），本次相似度按 0% 记，非引擎故障。\n"
+                : "";
+        result.setExtraInfo(libraryNote + String.format(
                 "最高相似度论文：%s\nSimHash海明距离：%d\n整篇相似度：%.2f%%\n总相似比：%.2f%%\n单篇最大相似比：%.2f%%\n引用率：%.2f%%\n命中句数：%d\n比对论文总数：%d",
                 mostSimilarPaperTitle,
                 textSimilarityUtils.calculateHammingDistance(targetSimHash, mostSimilarSimHash),

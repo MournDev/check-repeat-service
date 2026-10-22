@@ -1,6 +1,8 @@
 package com.abin.checkrepeatservice.common.engine;
 
+import com.abin.checkrepeatservice.common.Exception.BusinessException;
 import com.abin.checkrepeatservice.common.enums.CheckEngineTypeEnum;
+import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.pojo.vo.CheckResult;
 import com.abin.checkrepeatservice.user.service.CheckEngine;
 import jakarta.annotation.PostConstruct;
@@ -76,6 +78,9 @@ public class CheckEngineManager {
         CheckResult bestResult = null;
         StringBuilder sourceInfo = new StringBuilder();
         StringBuilder extraInfo = new StringBuilder();
+        // M1.2：记录成功引擎数与各引擎失败原因，全部失败时向调用方抛异常
+        int successCount = 0;
+        StringBuilder failureInfo = new StringBuilder();
 
         // 依次执行各个引擎
         for (CheckEngineTypeEnum engineType : engineTypes) {
@@ -84,6 +89,7 @@ public class CheckEngineManager {
                 CheckResult result = engine.check(paperContent, paperTitle, excludePaperId);
 
                 if (result.isSuccess() && result.getSimilarity() != null) {
+                    successCount++;
                     // 记录最高相似度
                     if (result.getSimilarity().doubleValue() >= maxSimilarity) {
                         maxSimilarity = result.getSimilarity().doubleValue();
@@ -103,12 +109,27 @@ public class CheckEngineManager {
                         extraInfo.append("[").append(engineType.getDescription()).append("] ")
                                 .append(result.getExtraInfo()).append("\n");
                     }
+                } else {
+                    failureInfo.append(engineType.getDescription()).append("：")
+                            .append(result.getFailReason() != null ? result.getFailReason() : "未返回有效相似度")
+                            .append("；");
                 }
 
             } catch (Exception e) {
                 log.error("查重引擎执行失败: {}", engineType.getDescription(), e);
-                // 单个引擎失败不影响整体流程
+                // 单个引擎失败不影响其他引擎，但失败原因必须记下来供全失败时上报
+                failureInfo.append(engineType.getDescription()).append("：")
+                        .append(e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName())
+                        .append("；");
             }
+        }
+
+        // M1.2：所有引擎都失败/无有效结果时，禁止再返回 success=true 的 0%，
+        // 必须抛异常由执行链路落 failure + fail_reason
+        if (successCount == 0) {
+            String reason = "查重引擎全部执行失败（" + failureInfo + "）";
+            throw new BusinessException(ResultCode.SYSTEM_ERROR,
+                    reason.length() > 500 ? reason.substring(0, 500) : reason, null);
         }
 
         // 设置综合结果
