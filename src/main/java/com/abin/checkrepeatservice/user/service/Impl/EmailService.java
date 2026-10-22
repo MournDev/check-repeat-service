@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Map;
 
 /**
@@ -83,6 +84,21 @@ public class EmailService {
 
             return false;
         }
+    }
+
+    /**
+     * 发送「邮件配置测试」邮件（管理端测试按钮使用）。
+     *
+     * <p>真实走 SMTP 发送，返回是否成功；失败原因由 sendNoticeEmail 记录到
+     * sys_notice_log，调用方不得把失败伪装成成功。</p>
+     */
+    public boolean sendConfigTestEmail(String toEmail) {
+        String sendTime = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+        String content = "<p>这是一封来自论文查重与管理系统的配置测试邮件。</p>"
+                + "<p>收到此邮件说明当前 SMTP 邮件配置可用。</p>"
+                + "<p>发送时间：" + sendTime + "</p>";
+        return sendNoticeEmail(toEmail, "邮件配置测试", content,
+                "SYSTEM_CONFIG_TEST", null, "USER");
     }
 
     /**

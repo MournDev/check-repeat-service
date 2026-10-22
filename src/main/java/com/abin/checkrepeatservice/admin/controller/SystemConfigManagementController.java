@@ -5,6 +5,7 @@ import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.annotation.OperationLog;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.pojo.entity.SystemConfig;
+import com.abin.checkrepeatservice.user.service.Impl.EmailService;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONWriter;
 import jakarta.annotation.Resource;
@@ -37,6 +38,9 @@ public class SystemConfigManagementController {
 
     @Resource
     private SystemConfigService systemConfigService;
+
+    @Resource
+    private EmailService emailService;
 
     /**
      * 1. 获取所有系统配置
@@ -219,7 +223,11 @@ public class SystemConfigManagementController {
     @PreAuthorize("hasAuthority('SUPER_ADMIN')")
     @OperationLog(type = "config_email_test", description = "管理员发送测试邮件")
     public Result<String> testEmailConfig(@RequestBody Map<String, String> request) {
+        // 兼容两套前端字段名：系统配置页用 recipientEmail，规则配置页用 testEmail
         String recipientEmail = request.get("recipientEmail");
+        if (recipientEmail == null || recipientEmail.isEmpty()) {
+            recipientEmail = request.get("testEmail");
+        }
         log.info("接收测试邮件配置请求: recipientEmail={}", recipientEmail);
         
         if (recipientEmail == null || recipientEmail.isEmpty()) {
@@ -227,13 +235,18 @@ public class SystemConfigManagementController {
         }
         
         try {
-            // 这里应该调用邮件服务进行测试
-            // 模拟测试成功
+            // 真实走 SMTP 发送：失败必须如实返回，避免管理员误判配置可用
+            boolean sent = emailService.sendConfigTestEmail(recipientEmail);
+            if (!sent) {
+                log.warn("邮件配置测试失败: recipientEmail={}", recipientEmail);
+                return Result.error(ResultCode.SYSTEM_ERROR,
+                        "测试邮件发送失败，请检查 SMTP 配置与收件地址");
+            }
             log.info("邮件配置测试成功: {}", recipientEmail);
             return Result.success("邮件配置测试成功，邮件已发送至: " + recipientEmail);
         } catch (Exception e) {
-            log.error("邮件配置测试失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "邮件配置测试失败: " + "系统异常，请稍后重试");
+            log.error("邮件配置测试异常: recipientEmail={}", recipientEmail, e);
+            return Result.error(ResultCode.SYSTEM_ERROR, "邮件配置测试失败，系统异常，请稍后重试");
         }
     }
 

@@ -16,6 +16,7 @@ import com.abin.checkrepeatservice.pojo.entity.CheckRule;
 import com.abin.checkrepeatservice.pojo.entity.CompareLib;
 import com.abin.checkrepeatservice.pojo.entity.SystemConfig;
 import com.abin.checkrepeatservice.pojo.entity.SystemParam;
+import com.abin.checkrepeatservice.user.service.Impl.EmailService;
 import com.alibaba.fastjson2.JSON;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import jakarta.annotation.Resource;
@@ -46,6 +47,9 @@ public class AdminRuleConfigController {
 	
     @Autowired
     private SystemConfigService systemConfigService;
+
+    @Resource
+    private EmailService emailService;
     
     @Value("${spring.mail.host:localhost}")
     private String mailHost;
@@ -385,7 +389,11 @@ public class AdminRuleConfigController {
             return Result.error(ResultCode.PARAM_ERROR, "请求体不能为空，请提供测试邮箱地址");
         }
         
+        // 兼容两套前端字段名：规则配置页用 testEmail，系统配置页用 recipientEmail
         String testEmail = testRequest.get("testEmail");
+        if (testEmail == null || testEmail.isEmpty()) {
+            testEmail = testRequest.get("recipientEmail");
+        }
         if (testEmail == null || testEmail.isEmpty()) {
             log.warn("测试邮箱地址为空");
             return Result.error(ResultCode.PARAM_ERROR, "测试邮箱地址不能为空");
@@ -394,13 +402,18 @@ public class AdminRuleConfigController {
         log.info("开始测试邮件发送至: {}", testEmail);
         
         try {
-            // 实际的邮件发送逻辑
-            // 这里应该调用邮件服务进行测试
-            log.info("邮件测试发送成功");
+            // 真实走 SMTP 发送：失败必须如实返回，避免管理员误判配置可用
+            boolean sent = emailService.sendConfigTestEmail(testEmail);
+            if (!sent) {
+                log.warn("邮件测试发送失败: {}", testEmail);
+                return Result.error(ResultCode.SYSTEM_ERROR,
+                        "测试邮件发送失败，请检查 SMTP 配置与收件地址");
+            }
+            log.info("邮件测试发送成功: {}", testEmail);
             return Result.success("测试邮件发送成功，请检查邮箱: " + testEmail);
         } catch (Exception e) {
-            log.error("邮件测试发送失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "邮件测试发送失败: " + "系统异常，请稍后重试");
+            log.error("邮件测试发送异常: {}", testEmail, e);
+            return Result.error(ResultCode.SYSTEM_ERROR, "邮件测试发送失败，系统异常，请稍后重试");
         }
     }
 
