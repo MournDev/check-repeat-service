@@ -39,6 +39,19 @@ public interface CheckEngine {
     }
     
     /**
+     * 引擎是否已真实实现（M1.1 检测边界明示）。
+     *
+     * <p>预留引擎（第三方 API、深度学习）只保留接入路径，未对接真实数据源。
+     * 调用方必须在建任务前用本方法判定，未实现时明确报错，禁止把“未接入”
+     * 静默降级成 0% 结果。</p>
+     *
+     * @return true-可参与真实查重；false-仅预留、不可用
+     */
+    default boolean isImplemented() {
+        return true;
+    }
+
+    /**
      * 检查引擎健康状态
      * @return 是否健康可用
      */

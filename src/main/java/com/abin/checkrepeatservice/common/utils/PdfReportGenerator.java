@@ -127,6 +127,8 @@ public class PdfReportGenerator {
                 addTableField(baseInfoTable, simHeiFont, "学生姓名", baseInfo.getStudentName());
                 addTableField(baseInfoTable, simHeiFont, "指导教师", baseInfo.getTeacherName());
                 addTableField(baseInfoTable, simHeiFont, "生成时间", baseInfo.getGenerateTime());
+                // M1.1 检测边界明示：PDF 报告显式标注检测范围
+                addTableField(baseInfoTable, simHeiFont, "检测范围", baseInfo.getCheckScope());
             } else {
                 // 如果基础信息为空，添加提示
                 addTableField(baseInfoTable, simHeiFont, "提示", "暂无基础信息");

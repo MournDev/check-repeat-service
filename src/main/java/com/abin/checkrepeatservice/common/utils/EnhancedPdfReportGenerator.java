@@ -135,6 +135,8 @@ public class EnhancedPdfReportGenerator {
             addInfoRow(infoTable, font, "论文标题", baseInfo.getPaperTitle());
             addInfoRow(infoTable, font, "作者", baseInfo.getAuthor());
             addInfoRow(infoTable, font, "指导教师", baseInfo.getTeacherName());
+            // M1.1 检测边界明示：封面显式标注检测范围
+            addInfoRow(infoTable, font, "检测范围", baseInfo.getCheckScope());
         }
         
         document.add(infoTable);

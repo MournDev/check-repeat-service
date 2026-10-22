@@ -18,6 +18,7 @@ public class CheckResultVO {
     private BigDecimal similarity; // 相似度（百分比）
     private String keywords;// 关键词
     private String checkSource; // 查重来源（本地库/第三方）
+    private String checkScope; // 检测范围（M1.1：当前仅校内历史论文库，未接入外部查重数据库）
     private String reportUrl; // 查重报告链接（本地库可为空）
     private String mostSimilarPaper; // 最相似论文标题（本地库专用）
     private String checkStatus; // 查重状态：SUCCESS/FAIL

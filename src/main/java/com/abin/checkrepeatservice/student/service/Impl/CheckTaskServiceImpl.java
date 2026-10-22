@@ -220,6 +220,8 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
         vo.setTaskId(checkTask.getId());
         vo.setPaperId(checkTask.getPaperId());
         vo.setCheckStatus(checkTask.getCheckStatus());
+        // M1.1 检测边界明示：建任务响应即声明检测范围
+        vo.setCheckScope(CheckEngineManager.CHECK_SCOPE);
         vo.setCreateTime(checkTask.getCreateTime());
         return vo;
     }
@@ -367,6 +369,8 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
         resultVO.setTaskId(checkTask.getId());
         resultVO.setPaperId(checkTask.getPaperId());
         resultVO.setCheckStatus(checkTask.getCheckStatus());
+        // M1.1 检测边界明示：查重结果响应声明检测范围
+        resultVO.setCheckScope(CheckEngineManager.CHECK_SCOPE);
         resultVO.setCreateTime(checkTask.getCreateTime());
 
         // 3. Add report information if available
@@ -746,6 +750,8 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
         // 设置查重结果
         baseInfo.setSimilarityRate(BigDecimal.valueOf(checkRate));
         baseInfo.setCheckTime(LocalDateTime.now());
+        // M1.1 检测边界明示：报告显式标注实际检测范围
+        baseInfo.setCheckScope(CheckEngineManager.CHECK_SCOPE);
         baseInfo.setReportDetails(checkReport.getRepeatDetails());
 
         // 设置论文信息
@@ -787,6 +793,8 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
         dto.setPaperVersion(checkTask.getPaperVersion());
         dto.setSubmitId(checkTask.getSubmitId());
         dto.setCheckStatus(checkTask.getCheckStatus());
+        // M1.1 检测边界明示：任务列表/详情声明检测范围
+        dto.setCheckScope(CheckEngineManager.CHECK_SCOPE);
         dto.setCheckRate(checkTask.getCheckRate() != null ? checkTask.getCheckRate().doubleValue() : null);
         // P5 新指标：存量任务为 null，前端按「—」展示
         dto.setMaxPerSource(checkTask.getMaxPerSource() != null ? checkTask.getMaxPerSource().doubleValue() : null);

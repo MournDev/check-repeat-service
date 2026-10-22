@@ -55,6 +55,8 @@ public class ReportPreviewDTO {
         private String studentName;
         private String teacherName;
         private String checkRuleName;
+        /** 检测范围（M1.1：当前仅校内历史论文库，未接入外部查重数据库） */
+        private String checkScope;
         private LocalDateTime checkTime;
         private String reportDetails;
         private String generateTime; // 格式：yyyy-MM-dd HH:mm:ss

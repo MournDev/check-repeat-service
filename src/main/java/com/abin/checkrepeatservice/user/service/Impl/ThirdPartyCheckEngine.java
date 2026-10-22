@@ -48,6 +48,12 @@ public class ThirdPartyCheckEngine implements CheckEngine {
     }
 
     @Override
+    public boolean isImplemented() {
+        // M1.1：外部查重源尚未接入，禁止被选为可用引擎
+        return false;
+    }
+
+    @Override
     public boolean isHealthy() {
         return enabled && apiUrl != null && !apiUrl.isBlank();
     }

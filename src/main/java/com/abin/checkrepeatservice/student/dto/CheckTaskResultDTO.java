@@ -49,6 +49,11 @@ public class CheckTaskResultDTO {
     private String ruleName;
 
     /**
+     * 检测范围（M1.1：当前仅校内历史论文库，未接入外部查重数据库）
+     */
+    private String checkScope;
+
+    /**
      * 任务状态（0-待执行，1-执行中，2-执行成功，3-执行失败）
      */
     private String checkStatus;

@@ -44,6 +44,12 @@ public class DeepLearningCheckEngine implements CheckEngine {
     }
 
     @Override
+    public boolean isImplemented() {
+        // M1.1：外部语义模型尚未接入，禁止被选为可用引擎
+        return false;
+    }
+
+    @Override
     public boolean isHealthy() {
         return enabled && modelPath != null && !modelPath.isBlank();
     }

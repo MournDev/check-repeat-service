@@ -106,8 +106,9 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
             return Result.error(ResultCode.RESOURCE_NOT_FOUND, "论文不存在或已删除");
         }
         
-        // 2. 解析引擎类型
+        // 2. 解析引擎类型，并校验检测边界（M1.1：未接入的外部引擎直接拒绝，不建任务）
         List<CheckEngineTypeEnum> engines = parseEngineTypes(engineTypes);
+        checkEngineManager.ensureEnginesAvailable(engines);
 
         // P5 学院月度额度：任务真正落库前校验并扣减学院当月额度。
         // 重试路径复用已存在任务，不走本新建入口，不会重复扣减。
@@ -479,6 +480,8 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
         baseInfo.setReportNo(report.getReportNo());
         baseInfo.setSimilarityRate(checkResult.getSimilarity());
         baseInfo.setCheckTime(LocalDateTime.now());
+        // M1.1 检测边界明示：报告显式标注实际检测范围
+        baseInfo.setCheckScope(CheckEngineManager.CHECK_SCOPE);
         
         PaperInfo paperInfo = paperInfoMapper.selectById(task.getPaperId());
         if (paperInfo != null) {
@@ -505,6 +508,8 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
         vo.setTaskId(task.getId());
         vo.setPaperId(task.getPaperId());
         vo.setCheckStatus(task.getCheckStatus());
+        // M1.1 检测边界明示：建任务响应即声明检测范围
+        vo.setCheckScope(CheckEngineManager.CHECK_SCOPE);
         vo.setCreateTime(task.getCreateTime());
         return vo;
     }
@@ -518,6 +523,8 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
         dto.setPaperVersion(task.getPaperVersion());
         dto.setSubmitId(task.getSubmitId());
         dto.setCheckStatus(task.getCheckStatus());
+        // M1.1 检测边界明示：任务列表/详情声明检测范围
+        dto.setCheckScope(CheckEngineManager.CHECK_SCOPE);
         dto.setCheckRate(task.getCheckRate() != null ? task.getCheckRate().doubleValue() : null);
         // P5 新指标：存量任务为 null，前端按「—」展示
         dto.setMaxPerSource(task.getMaxPerSource() != null ? task.getMaxPerSource().doubleValue() : null);

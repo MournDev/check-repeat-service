@@ -117,6 +117,8 @@ public class ReportContentProcessor {
         baseInfo.setPaperVersion(checkTask.getPaperVersion());
         baseInfo.setPaperId(checkTask.getPaperId());
 
+        // M1.1 检测边界明示：报告必须声明实际检测范围
+        baseInfo.setCheckScope(com.abin.checkrepeatservice.common.engine.CheckEngineManager.CHECK_SCOPE);
         // 补充论文与用户信息
         PaperInfo paperInfo = paperInfoMapper.selectById(checkTask.getPaperId());
         SysUser student = sysUserMapper.selectById(paperInfo.getStudentId());

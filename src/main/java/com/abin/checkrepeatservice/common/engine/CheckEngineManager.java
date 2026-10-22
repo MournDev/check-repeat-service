@@ -22,6 +22,12 @@ import java.util.concurrent.ConcurrentHashMap;
 @Slf4j
 public class CheckEngineManager {
 
+    /**
+     * M1.1 检测范围明示：当前部署实际参与比对的库范围。
+     * 报告与结果必须显式带出，避免 0% 被误读为“全网无重复”。
+     */
+    public static final String CHECK_SCOPE = "校内历史论文库（未接入外部查重数据库）";
+
     @Autowired
     private List<CheckEngine> checkEngines;
 
@@ -58,6 +64,29 @@ public class CheckEngineManager {
     }
     
     /**
+     * M1.1 检测边界校验：请求的引擎必须已注册且已真实接入。
+     * 未接入时直接抛出明确业务异常，禁止建任务后再静默降级成 0%。
+     */
+    public void ensureEnginesAvailable(List<CheckEngineTypeEnum> engineTypes) {
+        if (engineTypes == null || engineTypes.isEmpty()) {
+            throw new IllegalArgumentException("至少需要指定一个查重引擎");
+        }
+        List<String> unavailable = engineTypes.stream()
+                .filter(type -> {
+                    CheckEngine engine = engineMap.get(type);
+                    return engine == null || !engine.isImplemented();
+                })
+                .map(CheckEngineTypeEnum::getDescription)
+                .distinct()
+                .toList();
+        if (!unavailable.isEmpty()) {
+            throw new BusinessException(ResultCode.PARAM_ERROR,
+                    "当前院校未接入外部查重源，仅支持本地引擎（" + CHECK_SCOPE + "）；不可用引擎："
+                            + String.join("、", unavailable), null);
+        }
+    }
+
+    /**
      * 执行查重 - 支持多引擎组合
      */
     public CheckResult executeCheck(String paperContent, String paperTitle, List<CheckEngineTypeEnum> engineTypes) {
@@ -72,6 +101,8 @@ public class CheckEngineManager {
         if (engineTypes == null || engineTypes.isEmpty()) {
             throw new IllegalArgumentException("至少需要指定一个查重引擎");
         }
+        // M1.1：执行前再校验一次，防止绕过建任务入口直接调用
+        ensureEnginesAvailable(engineTypes);
 
         CheckResult compositeResult = new CheckResult();
         double maxSimilarity = 0.0;
@@ -153,7 +184,10 @@ public class CheckEngineManager {
      * 获取所有可用的引擎类型
      */
     public List<CheckEngineTypeEnum> getAvailableEngineTypes() {
-        return engineMap.keySet().stream()
+        return engineMap.entrySet().stream()
+                // M1.1：只暴露已真实接入的引擎，预留引擎不进入可选列表
+                .filter(entry -> entry.getValue().isImplemented())
+                .map(Map.Entry::getKey)
                 .sorted((e1, e2) -> Integer.compare(e1.getOrder(), e2.getOrder()))
                 .toList();
     }
