@@ -539,8 +539,9 @@ public class AdminPaperServiceImpl implements AdminPaperService {
             // 更新论文查重标记
             updatePaperCheckFlags(paperInfo, "school", "local");
             
-            // 执行内部查重检测
-            Result<SimilarityDetectionResult> detectionResult = detectionService.detectPaperSimilarity(paperId, null);
+            // 执行内部查重检测（管理端已做数据范围校验，走管理入口）
+            Result<SimilarityDetectionResult> detectionResult =
+                    detectionService.detectPaperSimilarityForAdmin(paperId, null);
             
             if (detectionResult.getCode() == 200) {
                 SimilarityDetectionResult result = detectionResult.getData();
@@ -595,8 +596,9 @@ public class AdminPaperServiceImpl implements AdminPaperService {
                     // 更新论文查重标记
                     updatePaperCheckFlags(paperInfo, "school", "local");
                         
-                    // 执行内部查重检测
-                    Result<SimilarityDetectionResult> detectionResult = detectionService.detectPaperSimilarity(paperId, null);
+                    // 执行内部查重检测（管理端已做数据范围校验，走管理入口）
+                    Result<SimilarityDetectionResult> detectionResult =
+                            detectionService.detectPaperSimilarityForAdmin(paperId, null);
                         
                     if (detectionResult.getCode() == 200) {
                         SimilarityDetectionResult result = detectionResult.getData();

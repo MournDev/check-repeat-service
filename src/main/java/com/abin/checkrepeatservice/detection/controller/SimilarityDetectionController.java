@@ -35,16 +35,17 @@ public class SimilarityDetectionController {
      * 执行论文查重检测
      */
     @PostMapping("/similarity-check")
-    @Operation(summary = "论文查重检测", description = "对指定论文执行相似度检测")
+    @Operation(summary = "论文查重检测", description = "对本人已入库论文执行相似度检测（仅比对已准入论文）")
     public Result<SimilarityDetectionResult> detectSimilarity(
             @RequestHeader("Authorization") String token,
             @Parameter(description = "论文ID") @RequestParam Long paperId,
-            @Parameter(description = "比对论文ID列表（可选，null表示全库比对）") @RequestBody(required = false) List<Long> targetPaperIds) {
+            @Parameter(description = "比对论文ID列表（可选，null表示已准入比对库全库）") @RequestBody(required = false) List<Long> targetPaperIds) {
         try {
             Long userId = jwtUtils.getUserIdFromToken(token);
             log.info("用户请求查重检测: userId={}, paperId={}", userId, paperId);
             
-            Result<SimilarityDetectionResult> result = detectionService.detectPaperSimilarity(paperId, targetPaperIds);
+            Result<SimilarityDetectionResult> result = detectionService.detectPaperSimilarity(
+                    paperId, targetPaperIds, userId);
             
             if (result.isSuccess()) {
                 log.info("查重检测完成: paperId={}, similarity={}%", paperId, 
@@ -83,7 +84,7 @@ public class SimilarityDetectionController {
      * 重新检测论文
      */
     @PostMapping("/recheck/{paperId}")
-    @Operation(summary = "重新查重检测", description = "重新对论文执行查重检测")
+    @Operation(summary = "重新查重检测", description = "重新对本人论文执行查重检测（仅比对已准入论文）")
     public Result<SimilarityDetectionResult> recheckPaper(
             @RequestHeader("Authorization") String token,
             @Parameter(description = "论文ID") @PathVariable Long paperId) {
@@ -91,7 +92,7 @@ public class SimilarityDetectionController {
             Long userId = jwtUtils.getUserIdFromToken(token);
             log.info("用户请求重新查重: userId={}, paperId={}", userId, paperId);
             
-            return detectionService.detectPaperSimilarity(paperId, null);
+            return detectionService.detectPaperSimilarity(paperId, null, userId);
         } catch (Exception e) {
             log.error("重新查重失败: paperId={}", paperId, e);
             return Result.error(ResultCode.SYSTEM_ERROR, "重新查重失败: " + "系统异常，请稍后重试");

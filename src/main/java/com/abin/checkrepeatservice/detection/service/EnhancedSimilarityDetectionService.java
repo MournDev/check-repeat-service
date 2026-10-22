@@ -2,23 +2,27 @@ package com.abin.checkrepeatservice.detection.service;
 
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
+import com.abin.checkrepeatservice.common.service.PaperContentMinioService;
+import com.abin.checkrepeatservice.common.utils.IKAnalyzerUtils;
 import com.abin.checkrepeatservice.common.utils.RiskLevelUtils;
 import com.abin.checkrepeatservice.common.utils.TextSimilarityUtils;
 import com.abin.checkrepeatservice.detection.dto.SimilarityDetectionResult;
 import com.abin.checkrepeatservice.detection.dto.SimilaritySegment;
+import com.abin.checkrepeatservice.mapper.SysUserMapper;
 import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
+import com.abin.checkrepeatservice.pojo.entity.SysUser;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.tika.Tika;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import jakarta.annotation.Resource;
-import java.io.InputStream;
-import java.math.BigDecimal;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.stream.Collectors;
 
 /**
  * 增强版查重检测服务
@@ -30,55 +34,89 @@ public class EnhancedSimilarityDetectionService {
 
     @Resource
     private PaperInfoMapper paperInfoMapper;
+
+    @Resource
+    private PaperContentMinioService paperContentMinioService;
+
+    @Resource
+    private SysUserMapper sysUserMapper;
     
     @Resource
     private TextSimilarityUtils textSimilarityUtils;
-    
-    // 用于并行处理的线程池
-    private final ExecutorService executorService = Executors.newFixedThreadPool(10);
-    
-    // Apache Tika实例
-    private final Tika tika = new Tika();
+
+    // 复用全局异步线程池（不再自建固定线程池）
+    @Resource(name = "asyncExecutor")
+    private ThreadPoolTaskExecutor asyncExecutor;
 
     /**
-     * 执行完整的论文查重检测
-     * @param paperId 待检测论文ID
-     * @param targetPaperIds 比对论文ID列表（null表示全库比对）
-     * @return 查重检测结果
+     * 执行完整的论文查重检测。
+     *
+     * @param paperId        待检测论文ID
+     * @param targetPaperIds 比对论文ID列表（null 表示已准入比对库全库）
+     * @param requesterId    当前登录学生ID（归属校验，禁止检测他人论文）
      */
-    public Result<SimilarityDetectionResult> detectPaperSimilarity(Long paperId, List<Long> targetPaperIds) {
+    public Result<SimilarityDetectionResult> detectPaperSimilarity(Long paperId, List<Long> targetPaperIds,
+                                                                   Long requesterId) {
+        return detectPaperSimilarityInternal(paperId, targetPaperIds, requesterId, true);
+    }
+
+    /**
+     * 管理端校内查重入口：调用方已在管理端完成数据范围校验，此处不再按学生归属拦截。
+     */
+    public Result<SimilarityDetectionResult> detectPaperSimilarityForAdmin(Long paperId,
+                                                                           List<Long> targetPaperIds) {
+        return detectPaperSimilarityInternal(paperId, targetPaperIds, null, false);
+    }
+
+    private Result<SimilarityDetectionResult> detectPaperSimilarityInternal(Long paperId,
+                                                                            List<Long> targetPaperIds,
+                                                                            Long requesterId,
+                                                                            boolean enforceOwnership) {
         try {
-            log.info("开始论文查重检测: paperId={}, targetCount={}", paperId, 
-                    targetPaperIds != null ? targetPaperIds.size() : "全库");
-            
-            // 1. 获取待检测论文内容
+            log.info("开始论文查重检测: paperId={}, requesterId={}, targetCount={}", paperId,
+                    requesterId, targetPaperIds != null ? targetPaperIds.size() : "全库");
+
+            // 1. 归属校验：学生入口仅允许检测本人论文（原先可传任意 paperId，存在越权）
             PaperInfo targetPaper = paperInfoMapper.selectById(paperId);
             if (targetPaper == null) {
-                return Result.error(ResultCode.PARAM_ERROR, "待检测论文不存在");
+                return Result.error(ResultCode.RESOURCE_NOT_FOUND, "待检测论文不存在");
             }
-            
+            if (enforceOwnership && (requesterId == null
+                    || !Objects.equals(targetPaper.getStudentId(), requesterId))) {
+                log.warn("越权查重请求被拒绝: paperId={}, requesterId={}", paperId, requesterId);
+                return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权检测他人论文");
+            }
+
+            // 2. 正文必须已入库：不再用摘要冒充正文（摘要比对结果没有参考价值）
             String targetContent = extractPaperContent(targetPaper);
-            if (targetContent == null || targetContent.trim().isEmpty()) {
-                return Result.error(ResultCode.PARAM_ERROR, "论文内容为空，无法进行查重");
+            if (!StringUtils.hasText(targetContent)) {
+                return Result.error(ResultCode.PARAM_ERROR,
+                        "论文正文尚未入库，请先提交并完成一次正式查重后再使用此接口");
             }
-            
-            // 2. 获取比对论文列表
-            List<PaperInfo> comparisonPapers = getComparisonPapers(targetPaperIds, targetPaper.getCollegeId());
+
+            // 3. 比对源只取已准入、正文已入库的论文，并排除自身
+            List<PaperInfo> comparisonPapers = getComparisonPapers(targetPaperIds, targetPaper.getId());
             if (comparisonPapers.isEmpty()) {
-                return Result.error(ResultCode.PARAM_ERROR, "无可用的比对论文");
+                return Result.error(ResultCode.PARAM_ERROR, "无可用比对论文（比对库暂无已准入论文）");
             }
-            
-            // 3. 执行并行查重检测
-            SimilarityDetectionResult result = performParallelDetection(targetContent, comparisonPapers);
-            
-            // 4. 生成检测报告
-            generateDetectionReport(result, targetPaper, comparisonPapers);
-            
-            log.info("论文查重检测完成: paperId={}, overallSimilarity={}%, segmentCount={}", 
+
+            // 4. 批量回填作者姓名，避免逐篇查库
+            Map<Long, String> authorNames = loadAuthorNames(targetPaper, comparisonPapers);
+
+            // 5. 执行并行查重检测
+            SimilarityDetectionResult result = performParallelDetection(targetContent, comparisonPapers, authorNames);
+
+            // 6. 生成检测报告
+            generateDetectionReport(result, targetPaper, authorNames);
+
+            log.info("论文查重检测完成: paperId={}, overallSimilarity={}%, segmentCount={}",
                     paperId, result.getOverallSimilarity(), result.getSimilarSegments().size());
-            
+
             return Result.success("查重检测完成", result);
-            
+
+        } catch (IllegalStateException e) {
+            log.error("论文查重检测失败: paperId={}, reason={}", paperId, e.getMessage());
+            return Result.error(ResultCode.SYSTEM_ERROR, "查重检测失败：" + e.getMessage());
         } catch (Exception e) {
             log.error("论文查重检测失败: paperId={}", paperId, e);
             return Result.error(ResultCode.SYSTEM_ERROR, "查重检测失败: " + "系统异常，请稍后重试");
@@ -86,77 +124,126 @@ public class EnhancedSimilarityDetectionService {
     }
 
     /**
-     * 提取论文内容
+     * 读取论文真实正文（MinIO content_path）；未入库/读取失败返回 null。
+     * 不再回落到摘要——摘要不是查重对象。
      */
     private String extractPaperContent(PaperInfo paper) {
+        if (paper == null || !StringUtils.hasText(paper.getContentPath())) {
+            return null;
+        }
         try {
-            // 这里应该根据文件ID从存储系统获取文件内容
-            // 简化实现，返回论文摘要作为示例
-            return paper.getPaperAbstract() != null ? paper.getPaperAbstract() : "";
+            return paperContentMinioService.readPaperContent(paper.getContentPath());
         } catch (Exception e) {
-            log.error("提取论文内容失败: paperId={}", paper.getId(), e);
+            log.warn("读取论文正文失败: paperId={}, error={}", paper.getId(), e.getMessage());
             return null;
         }
     }
 
     /**
-     * 获取比对论文列表
+     * 获取比对论文列表：只保留已准入（library_admitted=1）且正文已入库的论文。
+     *
+     * @param targetPaperId 待查论文ID（排除自身）
      */
-    private List<PaperInfo> getComparisonPapers(List<Long> targetPaperIds, Long excludeCollegeId) {
+    private List<PaperInfo> getComparisonPapers(List<Long> targetPaperIds, Long targetPaperId) {
         List<PaperInfo> papers = new ArrayList<>();
-        
+
         try {
             if (targetPaperIds != null && !targetPaperIds.isEmpty()) {
-                // 指定比对论文
+                // 指定比对论文：同样必须已准入，防止借此读取未归档论文
                 for (Long paperId : targetPaperIds) {
+                    if (paperId == null || Objects.equals(paperId, targetPaperId)) {
+                        continue;
+                    }
                     PaperInfo paper = paperInfoMapper.selectById(paperId);
-                    if (paper != null && paper.getIsDeleted() == 0) {
+                    if (isComparable(paper)) {
                         papers.add(paper);
                     }
                 }
             } else {
-                // 全库比对（排除同学院论文）
-                com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<PaperInfo> wrapper = 
-                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
+                LambdaQueryWrapper<PaperInfo> wrapper = new LambdaQueryWrapper<>();
                 wrapper.eq(PaperInfo::getIsDeleted, 0)
-                       .ne(PaperInfo::getCollegeId, excludeCollegeId)
-                       .isNotNull(PaperInfo::getPaperAbstract);
-                
+                       .eq(PaperInfo::getLibraryAdmitted, 1)
+                       .isNotNull(PaperInfo::getContentPath)
+                       .ne(PaperInfo::getContentPath, "")
+                       .ne(PaperInfo::getId, targetPaperId);
                 papers = paperInfoMapper.selectList(wrapper);
             }
         } catch (Exception e) {
             log.error("获取比对论文列表失败", e);
         }
-        
+
         return papers;
+    }
+
+    private boolean isComparable(PaperInfo paper) {
+        return paper != null && Integer.valueOf(1).equals(paper.getLibraryAdmitted())
+                && StringUtils.hasText(paper.getContentPath());
+    }
+
+    /**
+     * 批量加载作者姓名（realName 优先，空回落 username）
+     */
+    private Map<Long, String> loadAuthorNames(PaperInfo targetPaper, List<PaperInfo> comparisonPapers) {
+        Set<Long> studentIds = new HashSet<>();
+        if (targetPaper.getStudentId() != null) {
+            studentIds.add(targetPaper.getStudentId());
+        }
+        comparisonPapers.stream()
+                .map(PaperInfo::getStudentId)
+                .filter(Objects::nonNull)
+                .forEach(studentIds::add);
+        if (studentIds.isEmpty()) {
+            return Map.of();
+        }
+        return sysUserMapper.selectBatchIds(studentIds).stream()
+                .collect(Collectors.toMap(SysUser::getId,
+                        u -> StringUtils.hasText(u.getRealName()) ? u.getRealName() : u.getUsername()));
     }
 
     /**
      * 执行并行查重检测
      */
-    private SimilarityDetectionResult performParallelDetection(String targetContent, List<PaperInfo> comparisonPapers) {
+    private SimilarityDetectionResult performParallelDetection(String targetContent,
+                                                               List<PaperInfo> comparisonPapers,
+                                                               Map<Long, String> authorNames) {
         SimilarityDetectionResult result = new SimilarityDetectionResult();
-        List<CompletableFuture<SimilaritySegment>> futures = new ArrayList<>();
-        
-        // 为每篇比对论文创建异步检测任务
-        for (PaperInfo paper : comparisonPapers) {
-            CompletableFuture<SimilaritySegment> future = CompletableFuture.supplyAsync(() -> {
-                return detectSimilarityWithPaper(targetContent, paper);
-            }, executorService);
-            futures.add(future);
-        }
-        
-        // 等待所有任务完成
         List<SimilaritySegment> segments = new ArrayList<>();
-        for (CompletableFuture<SimilaritySegment> future : futures) {
-            try {
-                SimilaritySegment segment = future.get();
-                if (segment.getSimilarity() > 0) {
-                    segments.add(segment);
+        int unreadableCount = 0;
+
+        // 分批提交：全局异步池队列有界（50），一次性提交全库论文会触发拒绝策略
+        final int batchSize = 20;
+        for (int start = 0; start < comparisonPapers.size(); start += batchSize) {
+            int end = Math.min(start + batchSize, comparisonPapers.size());
+            List<CompletableFuture<SimilaritySegment>> futures = new ArrayList<>(end - start);
+            for (int i = start; i < end; i++) {
+                PaperInfo paper = comparisonPapers.get(i);
+                try {
+                    futures.add(CompletableFuture.supplyAsync(
+                            () -> detectSimilarityWithPaper(targetContent, paper, authorNames),
+                            asyncExecutor));
+                } catch (RejectedExecutionException e) {
+                    unreadableCount++;
+                    log.warn("查重任务被线程池拒绝: paperId={}", paper.getId());
                 }
-            } catch (Exception e) {
-                log.warn("单篇论文查重失败", e);
             }
+            for (CompletableFuture<SimilaritySegment> future : futures) {
+                try {
+                    SimilaritySegment segment = future.get();
+                    if (segment == null) {
+                        unreadableCount++;
+                    } else if (segment.getSimilarity() > 0) {
+                        segments.add(segment);
+                    }
+                } catch (Exception e) {
+                    unreadableCount++;
+                    log.warn("单篇论文查重失败", e);
+                }
+            }
+        }
+
+        // 有比对论文却全部读不到正文 → 引擎故障，不能静默返回 0%
+        if (segments.isEmpty() && unreadableCount == comparisonPapers.size()) {
+            throw new IllegalStateException("比对库论文正文全部读取失败，无法完成查重");
         }
         
         // 按相似度降序排列
@@ -176,40 +263,43 @@ public class EnhancedSimilarityDetectionService {
     /**
      * 与单篇论文进行相似度检测
      */
-    private SimilaritySegment detectSimilarityWithPaper(String targetContent, PaperInfo comparisonPaper) {
+    private SimilaritySegment detectSimilarityWithPaper(String targetContent, PaperInfo comparisonPaper,
+                                                        Map<Long, String> authorNames) {
         SimilaritySegment segment = new SimilaritySegment();
         segment.setPaperId(comparisonPaper.getId());
         segment.setPaperTitle(comparisonPaper.getPaperTitle());
-        segment.setAuthor(getPaperAuthor(comparisonPaper));
+        segment.setAuthor(getPaperAuthor(comparisonPaper, authorNames));
         segment.setCollege(comparisonPaper.getCollegeName());
         
         try {
             String comparisonContent = extractPaperContent(comparisonPaper);
-            if (comparisonContent != null && !comparisonContent.trim().isEmpty()) {
-                // 执行多维度相似度计算
-                double similarity = textSimilarityUtils.calculateComprehensiveSimilarity(
-                    targetContent, comparisonContent);
-                segment.setSimilarity(similarity);
-                
-                // 提取重复片段
-                List<String> repeatedFragments = extractRepeatedFragments(
-                    targetContent, comparisonContent, similarity);
-                segment.setRepeatedFragments(repeatedFragments);
+            if (!StringUtils.hasText(comparisonContent)) {
+                return null;
             }
+            // 执行多维度相似度计算
+            double similarity = textSimilarityUtils.calculateComprehensiveSimilarity(
+                targetContent, comparisonContent);
+            segment.setSimilarity(similarity);
+
+            // 提取重复片段
+            segment.setRepeatedFragments(extractRepeatedFragments(
+                targetContent, comparisonContent, similarity));
         } catch (Exception e) {
             log.warn("与论文{}比对失败: {}", comparisonPaper.getId(), e.getMessage());
-            segment.setSimilarity(0.0);
+            return null;
         }
         
         return segment;
     }
 
     /**
-     * 获取论文作者信息
+     * 获取论文作者信息（批量预载的真实姓名）
      */
-    private String getPaperAuthor(PaperInfo paper) {
-        // 这里应该关联查询用户表获取真实姓名
-        return "作者" + paper.getStudentId(); // 简化实现
+    private String getPaperAuthor(PaperInfo paper, Map<Long, String> authorNames) {
+        if (paper.getStudentId() == null) {
+            return "未知";
+        }
+        return authorNames.getOrDefault(paper.getStudentId(), "未知");
     }
 
     /**
@@ -217,23 +307,26 @@ public class EnhancedSimilarityDetectionService {
      */
     private List<String> extractRepeatedFragments(String content1, String content2, double similarity) {
         List<String> fragments = new ArrayList<>();
-        
-        if (similarity > 10) { // 相似度大于10%才提取片段
-            // 简化实现：提取高频词汇作为重复片段
-            String[] words1 = content1.split("\\s+");
-            String[] words2 = content2.split("\\s+");
-            
-            Set<String> commonWords = new HashSet<>();
-            for (String word : words1) {
-                if (Arrays.asList(words2).contains(word) && word.length() > 2) {
-                    commonWords.add(word);
+
+        if (similarity > 10) { // 相似度大于10%才提取
+            // 用统一分词器提取共同高频词元（原先按空格切分，对中文等于整段比较）
+            List<String> tokens1 = IKAnalyzerUtils.segment(content1);
+            Set<String> tokens2 = new HashSet<>(IKAnalyzerUtils.segment(content2));
+
+            Map<String, Integer> commonFreq = new HashMap<>();
+            for (String token : tokens1) {
+                if (tokens2.contains(token)) {
+                    commonFreq.merge(token, 1, Integer::sum);
                 }
             }
-            
-            // 取前5个最常见的重复词
-            fragments.addAll(commonWords.stream().limit(5).toList());
+            // 按出现次数降序取前 5 个真实共同词元
+            commonFreq.entrySet().stream()
+                    .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
+                    .limit(5)
+                    .map(Map.Entry::getKey)
+                    .forEach(fragments::add);
         }
-        
+
         return fragments;
     }
 
@@ -262,12 +355,12 @@ public class EnhancedSimilarityDetectionService {
     /**
      * 生成检测报告
      */
-    private void generateDetectionReport(SimilarityDetectionResult result, 
-                                       PaperInfo targetPaper, List<PaperInfo> comparisonPapers) {
+    private void generateDetectionReport(SimilarityDetectionResult result,
+                                       PaperInfo targetPaper, Map<Long, String> authorNames) {
         // 设置基础信息
         result.setTargetPaperId(targetPaper.getId());
         result.setTargetPaperTitle(targetPaper.getPaperTitle());
-        result.setTargetAuthor(getPaperAuthor(targetPaper));
+        result.setTargetAuthor(getPaperAuthor(targetPaper, authorNames));
         result.setTargetCollege(targetPaper.getCollegeName());
         
         // 风险等级评估
@@ -319,10 +412,4 @@ public class EnhancedSimilarityDetectionService {
         return recommendations;
     }
 
-    /**
-     * 关闭线程池
-     */
-    public void shutdown() {
-        executorService.shutdown();
-    }
 }
