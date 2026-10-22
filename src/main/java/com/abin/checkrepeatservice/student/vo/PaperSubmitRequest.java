@@ -3,6 +3,7 @@ package com.abin.checkrepeatservice.student.vo;
 import com.abin.checkrepeatservice.common.annotation.ValidPaperType;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import lombok.Data;
 
 
@@ -33,5 +34,12 @@ public class PaperSubmitRequest {
         
     @NotBlank(message = "文件 MD5 不能为空")
     private String fileMd5;
+
+    /**
+     * 学位类型（可选，缺省 undergraduate）：undergraduate-本科 / master-硕士 / doctor-博士。
+     * 查重时 CheckPolicyResolver 按该值命中检测策略阈值。
+     */
+    @Pattern(regexp = "^(undergraduate|master|doctor)$", message = "学位类型只能是 undergraduate/master/doctor")
+    private String degreeType;
 
 }

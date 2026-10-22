@@ -101,6 +101,7 @@ public class StudentPaperController {
                     request.getCollegeId(),
                     request.getMajorId(),
                     request.getPaperType(),
+                    request.getDegreeType(),
                     request.getFileId(),
                     request.getFileMd5(),
                     studentId

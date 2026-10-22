@@ -2,6 +2,7 @@ package com.abin.checkrepeatservice.student.dto;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import lombok.Data;
 
 /**
@@ -38,4 +39,11 @@ public class PaperReSubmitAfterWithdrawRequest {
      * 科目代码（可选）
      */
     private String subjectCode;
+
+    /**
+     * 学位类型（可选，不传则保留原论文的学位类型）：
+     * undergraduate-本科 / master-硕士 / doctor-博士
+     */
+    @Pattern(regexp = "^(undergraduate|master|doctor)$", message = "学位类型只能是 undergraduate/master/doctor")
+    private String degreeType;
 }

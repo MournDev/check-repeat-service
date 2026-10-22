@@ -271,7 +271,7 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
     @Transactional(rollbackFor = Exception.class)
     public PaperInfo submitPaper(MultipartFile multipartFile, String subjectCode, String paperTitle,
                                  String paperAbstract, Long collegeId, Long majorId, String paperType,
-                                 Long studentId) {
+                                 String degreeType, Long studentId) {
         
         log.info("开始完整论文提交流程 - 学生ID: {}, 论文标题: {}", studentId, paperTitle);
         
@@ -281,7 +281,7 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
             
             // 2. 调用文件ID方式提交 - 修复参数类型
             return submitPaperByFileId(subjectCode, paperTitle, paperAbstract, collegeId, majorId, 
-                                     paperType, uploadedFile.getId(), uploadedFile.getMd5(), studentId);
+                                     paperType, degreeType, uploadedFile.getId(), uploadedFile.getMd5(), studentId);
             
         } catch (Exception e) {
             log.error("完整论文提交流程失败 - 学生ID: {}, 论文标题: {}", studentId, paperTitle, e);
@@ -320,7 +320,7 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
      */
     @Transactional(rollbackFor = Exception.class)
     public PaperInfo submitPaperByFileId(String subjectCode,String paperTitle, String paperAbstract,
-                                         Long collegeId, Long majorId, String paperType,
+                                         Long collegeId, Long majorId, String paperType, String degreeType,
                                          Long fileId, String fileMd5, Long studentId) {
 
         log.info("开始文件ID方式提交论文 - 学生ID: {}, 论文标题: {}, 文件ID: {}",
@@ -332,18 +332,20 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
 
             // 2. 查找是否已存在该学生的论文（根据标题判断）
             PaperInfo existingPaper = findExistingPaper(studentId, paperTitle);
+            // 学位类型：显式传入优先；未传时保留原论文值，新建默认本科
+            String effectiveDegreeType = resolveDegreeType(degreeType, existingPaper);
 
             PaperInfo paperInfo;
             boolean isNewPaper = false;//是否为新论文
             if (existingPaper != null) {
                 // 更新现有论文信息
                 paperInfo = updatePaperInfo(existingPaper, subjectCode, paperTitle, paperAbstract,
-                        collegeId, majorId, paperType, fileId, fileMd5);
+                        collegeId, majorId, paperType, effectiveDegreeType, fileId, fileMd5);
                 log.info("更新现有论文 - 论文ID: {}", paperInfo.getId());
             } else {
                 // 创建新论文信息
                 paperInfo = createPaperInfo(subjectCode,paperTitle, paperAbstract, collegeId,
-                        majorId, paperType, fileId, fileMd5, studentId);
+                        majorId, paperType, effectiveDegreeType, fileId, fileMd5, studentId);
                 log.info("创建新论文 - 论文ID: {}", paperInfo.getId());
                 isNewPaper = true;
             }
@@ -472,10 +474,24 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
     }
 
     /**
+     * 学位类型：显式传入优先；未传时保留原论文值；新建论文默认本科。
+     * 合法值由 PaperSubmitRequest @Pattern 兜底（undergraduate/master/doctor）。
+     */
+    private String resolveDegreeType(String degreeType, PaperInfo existingPaper) {
+        if (StringUtils.hasText(degreeType)) {
+            return degreeType.trim().toLowerCase();
+        }
+        if (existingPaper != null && StringUtils.hasText(existingPaper.getDegreeType())) {
+            return existingPaper.getDegreeType();
+        }
+        return "undergraduate";
+    }
+
+    /**
      * 创建新论文信息
      */
     private PaperInfo createPaperInfo(String subjectCode,String paperTitle, String paperAbstract,
-                                      Long collegeId, Long majorId, String paperType,
+                                      Long collegeId, Long majorId, String paperType, String degreeType,
                                       Long fileId, String fileMd5, Long studentId) {
         PaperInfo paperInfo = new PaperInfo();
         // 设置作者姓名
@@ -493,6 +509,7 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
         paperInfo.setCollegeId(collegeId);
         paperInfo.setMajorId(majorId);
         paperInfo.setPaperType(paperType);
+        paperInfo.setDegreeType(degreeType);
         paperInfo.setFileId(fileId);
         paperInfo.setFileMd5(fileMd5);
         paperInfo.setFilePath(fileInfo.getStoragePath());
@@ -517,7 +534,7 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
      * 更新现有论文信息
      */
     private PaperInfo updatePaperInfo(PaperInfo existingPaper, String  subjectCode,String paperTitle, String paperAbstract,
-                                      Long collegeId, Long majorId, String paperType,
+                                      Long collegeId, Long majorId, String paperType, String degreeType,
                                       Long fileId, String fileMd5) {
 
         applySubject(existingPaper, subjectCode);
@@ -526,6 +543,7 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
         existingPaper.setCollegeId(collegeId);
         existingPaper.setMajorId(majorId);
         existingPaper.setPaperType(paperType);
+        existingPaper.setDegreeType(degreeType);
         existingPaper.setFileId(fileId);
         existingPaper.setFileMd5(fileMd5);
         existingPaper.setFilePath(fileInfoMapper.selectById(fileId).getStoragePath());
@@ -889,6 +907,10 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
             updatePaper.setId(paperId);
             updatePaper.setPaperTitle(request.getPaperTitle());
             updatePaper.setPaperAbstract(request.getPaperAbstract());
+            // 学位类型可选：不传则保留原论文的学位类型
+            if (StringUtils.hasText(request.getDegreeType())) {
+                updatePaper.setDegreeType(request.getDegreeType().trim().toLowerCase());
+            }
             updatePaper.setFileId(request.getFileId());
             updatePaper.setFileMd5(request.getFileMd5());
             // 撤回后重提也允许改学科。request.subjectCode 这个字段一直存在、前端 submitParams

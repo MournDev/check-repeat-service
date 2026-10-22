@@ -36,13 +36,14 @@ public interface PaperInfoService extends IService<PaperInfo> {
      * @param collegeId 院ID
      * @param majorId 专业ID
      * @param paperType 论文类型
+     * @param degreeType 学位类型（可选，缺省 undergraduate）
      * @param fileId 文件ID
      * @param fileMd5 文件MD5
      * @param studentId 学生ID
      * @return 论文信息
      */
     PaperInfo submitPaperByFileId(String subjectCode, String paperTitle, String paperAbstract,
-                                  Long collegeId, Long majorId, String paperType,
+                                  Long collegeId, Long majorId, String paperType, String degreeType,
                                   Long fileId, String fileMd5, Long studentId);
     
     /**
@@ -54,12 +55,13 @@ public interface PaperInfoService extends IService<PaperInfo> {
      * @param collegeId 学院ID
      * @param majorId 专业ID
      * @param paperType 论文类型
+     * @param degreeType 学位类型（可选，缺省 undergraduate）
      * @param studentId 学生ID
      * @return 论文信息
      */
     PaperInfo submitPaper(MultipartFile multipartFile, String subjectCode, String paperTitle, 
                          String paperAbstract, Long collegeId, Long majorId, String paperType, 
-                         Long studentId);
+                         String degreeType, Long studentId);
     /**
      * 获取论文状态标签接口
      * @param statusValue 状态值
