@@ -193,6 +193,18 @@ public class DetectionCacheService {
     }
 
     /**
+     * 数值型命中率（百分比 0-100，保留一位小数），供仪表盘等结构化指标使用。
+     *
+     * <p>无读写记录时返回 0（即「尚未产生数据」），不编造默认值。</p>
+     */
+    public synchronized double hitRatePercent() {
+        long hit = hitCount.get();
+        long miss = missCount.get();
+        long total = hit + miss;
+        return total == 0 ? 0.0 : Math.round(hit * 1000.0 / total) / 10.0;
+    }
+
+    /**
      * 命中率快照（监控/排查用）
      */
     public synchronized String stats() {

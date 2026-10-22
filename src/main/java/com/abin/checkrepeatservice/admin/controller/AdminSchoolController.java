@@ -121,18 +121,10 @@ public class AdminSchoolController {
      */
     @GetMapping("/college-distribution")
     public Result<Map<String, Object>> getCollegeDistribution() {
-        try {
-            Map<String, Object> stats = new HashMap<>();
-            Map<String, Object> collegeStats = getCollegeDistributionStats();
-            stats.put("collegeStats", collegeStats);
-            return Result.success("学院分布数据获取成功", stats);
-        } catch (Exception e) {
-            log.error("获取学院分布数据失败", e);
-            // 出错时返回模拟数据作为降级处理
-            Map<String, Object> fallback = new HashMap<>();
-            fallback.put("collegeStats", getDefaultCollegeDistribution());
-            return Result.success("学院分布数据获取成功", fallback);
-        }
+        Map<String, Object> stats = new HashMap<>();
+        // getCollegeDistributionStats 内部已做异常隔离并返回空分布，不再降级成硬编码假数据
+        stats.put("collegeStats", getCollegeDistributionStats());
+        return Result.success("学院分布数据获取成功", stats);
     }
 
     /**
@@ -167,19 +159,6 @@ public class AdminSchoolController {
         }
 
         return collegeStats;
-    }
-
-    /**
-     * 默认学院分布数据（降级使用）
-     */
-    private List<Map<String, Object>> getDefaultCollegeDistribution() {
-        return List.of(
-            Map.of("college", "计算机学院", "paperCount", 320, "studentCount", 800),
-            Map.of("college", "软件学院", "paperCount", 280, "studentCount", 750),
-            Map.of("college", "信息学院", "paperCount", 190, "studentCount", 520),
-            Map.of("college", "数学学院", "paperCount", 150, "studentCount", 400),
-            Map.of("college", "物理学院", "paperCount", 120, "studentCount", 350)
-        );
     }
 
     /**

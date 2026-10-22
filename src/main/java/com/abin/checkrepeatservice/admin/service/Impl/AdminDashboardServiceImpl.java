@@ -6,10 +6,12 @@ import com.abin.checkrepeatservice.admin.service.SysBackupService;
 import com.abin.checkrepeatservice.admin.vo.CollegePaperStatsVO;
 import com.abin.checkrepeatservice.admin.vo.MajorPaperStatsVO;
 import com.abin.checkrepeatservice.common.Result;
+import com.abin.checkrepeatservice.common.cache.DetectionCacheService;
 import com.abin.checkrepeatservice.common.constant.DictConstants;
 import com.abin.checkrepeatservice.common.datascope.DataScopeResolver;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.monitor.service.DatabaseMonitorService;
+import com.abin.checkrepeatservice.monitor.service.ResponseTimeStore;
 import com.abin.checkrepeatservice.monitor.service.SystemMonitorService;
 import com.abin.checkrepeatservice.pojo.entity.CheckResult;
 import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
@@ -27,6 +29,7 @@ import org.springframework.stereotype.Service;
 import jakarta.annotation.Resource;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -63,6 +66,12 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
 
     @Resource
     private DataScopeResolver dataScopeResolver;
+
+    @Resource
+    private ResponseTimeStore responseTimeStore;
+
+    @Resource
+    private DetectionCacheService detectionCacheService;
 
     @Override
     public Result<Map<String, Object>> getSystemStats() {
@@ -375,16 +384,24 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
     }
     
     /**
-     * 从数据库获取系统负载信息
+     * 获取真实系统负载（整机 CPU 使用率，取自 SystemMonitorService 的 MXBean 数据）。
+     * 取不到时退回 JVM 进程 CPU；仍取不到返回 null 让前端显示未知，绝不返回随机假数据。
      */
     private Integer getSystemLoadFromDatabase() {
         try {
-            // 这里可以根据实际情况查询系统参数表或其他监控表
-            // 暂时返回随机值作为示例
-            return new Random().nextInt(30) + 30; // 30-60之间的随机值
+            Map<String, Object> cpuInfo = systemMonitorService.getCpuInfo();
+            Object systemCpuUsage = cpuInfo.get("systemCpuUsage");
+            if (systemCpuUsage instanceof Number n && n.doubleValue() >= 0) {
+                return (int) Math.round(n.doubleValue());
+            }
+            Object processCpuUsage = cpuInfo.get("processCpuUsage");
+            if (processCpuUsage instanceof Number n && n.doubleValue() >= 0) {
+                return (int) Math.round(n.doubleValue());
+            }
+            return null;
         } catch (Exception e) {
-            log.warn("获取系统负载信息失败，使用默认值: {}", e.getMessage());
-            return 45; // 默认值
+            log.warn("获取系统负载信息失败: {}", e.getMessage());
+            return null;
         }
     }
     
@@ -602,98 +619,6 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
     
     // ===== 辅助方法 =====
     
-    private double getCpuUsage() {
-        // 获取真实的CPU使用率
-        try {
-            var systemStatus = systemMonitorService.getSystemStatus();
-            if (systemStatus.isSuccess()) {
-                Map<String, Object> statusData = (Map<String, Object>) systemStatus.getData();
-                Map<String, Object> cpuInfo = (Map<String, Object>) statusData.get("cpu");
-                if (cpuInfo != null) {
-                    Double cpuUsage = (Double) cpuInfo.get("processCpuUsage");
-                    if (cpuUsage != null && cpuUsage >= 0) {
-                        return cpuUsage;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            log.warn("获取真实CPU使用率失败: {}", e.getMessage());
-        }
-        return 0.0; // 失败时返回0
-    }
-    
-    private double getMemoryUsage() {
-        // 获取真实的内存使用率
-        try {
-            var systemStatus = systemMonitorService.getSystemStatus();
-            if (systemStatus.isSuccess()) {
-                Map<String, Object> statusData = (Map<String, Object>) systemStatus.getData();
-                Map<String, Object> memoryInfo = (Map<String, Object>) statusData.get("memory");
-                if (memoryInfo != null) {
-                    Double heapUsage = (Double) memoryInfo.get("heapUsagePercent");
-                    if (heapUsage != null) {
-                        return heapUsage;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            log.warn("获取真实内存使用率失败: {}", e.getMessage());
-        }
-        return 0.0; // 失败时返回0
-    }
-    
-    private double getDiskUsage() {
-        // 获取真实的磁盘使用率（如果可能的话）
-        // 目前返回估算值，后续可以集成文件系统监控
-        return 65.0 + new Random().nextDouble() * 20; // 65-85%
-    }
-    
-    private Integer getActiveConnections() {
-        // 获取真实的活跃连接数
-        try {
-            var systemStatus = systemMonitorService.getSystemStatus();
-            if (systemStatus.isSuccess()) {
-                Map<String, Object> statusData = (Map<String, Object>) systemStatus.getData();
-                Map<String, Object> threadInfo = (Map<String, Object>) statusData.get("threads");
-                if (threadInfo != null) {
-                    Integer threadCount = (Integer) threadInfo.get("threadCount");
-                    if (threadCount != null) {
-                        return threadCount;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            log.warn("获取真实活跃连接数失败: {}", e.getMessage());
-        }
-        return 0; // 失败时返回0
-    }
-    
-    private String getSystemUptime() {
-        // 获取真实的系统运行时间
-        try {
-            var systemStatus = systemMonitorService.getSystemStatus();
-            if (systemStatus.isSuccess()) {
-                Map<String, Object> statusData = (Map<String, Object>) systemStatus.getData();
-                Map<String, Object> runtimeInfo = (Map<String, Object>) statusData.get("runtime");
-                if (runtimeInfo != null) {
-                    String uptime = (String) runtimeInfo.get("uptime");
-                    if (uptime != null) {
-                        return uptime;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            log.warn("获取真实系统运行时间失败: {}", e.getMessage());
-        }
-        return "未知"; // 失败时返回默认值
-    }
-    
-    private Integer calculateSystemHealth(double cpu, double memory, double disk) {
-        // 简单的健康度计算公式
-        double score = 100 - (cpu * 0.4 + memory * 0.4 + disk * 0.2) / 3;
-        return Math.max(0, (int) Math.round(score));
-    }
-    
     /**
      * 回退到基本监控方案
      */
@@ -745,108 +670,84 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
                     dbMetrics.put("slowQueries", slowQueries);
                 }
             } else {
-                // 回退到原来的估算方法
-                LocalDateTime oneHourAgo = LocalDateTime.now().minusHours(1);
-                Long totalOperations = sysLoginLogMapper.selectCount(
-                    new LambdaQueryWrapper<SysLoginLog>()
-                        .ge(SysLoginLog::getLoginTime, oneHourAgo)
-                );
-                
-                long avgQueryTime = totalOperations > 0 ? Math.max(10, 1000 / Math.max(totalOperations, 1)) : 50;
-                dbMetrics.put("avgQueryTime", avgQueryTime);
-                dbMetrics.put("slowQueries", Math.max(0, totalOperations.intValue() / 100));
-                dbMetrics.put("connectionPoolUsage", Math.min(95, totalOperations.intValue() * 2));
-                dbMetrics.put("activeConnections", Math.min(50, totalOperations.intValue() / 2));
+                // 监控服务不可用：返回 0 表示「未采集」，不再用登录日志条数反推伪造指标
+                putUnavailableDbMetrics(dbMetrics);
             }
             
         } catch (Exception e) {
             log.warn("获取数据库性能指标失败: {}", e.getMessage());
-            // 默认值
-            dbMetrics.put("avgQueryTime", 50);
-            dbMetrics.put("slowQueries", 0);
-            dbMetrics.put("connectionPoolUsage", 0);
-            dbMetrics.put("activeConnections", 0);
+            putUnavailableDbMetrics(dbMetrics);
         }
         
         return dbMetrics;
     }
+
+    /**
+     * 数据库监控不可用时的指标占位：统一返回 0 表示「未采集」。
+     */
+    private void putUnavailableDbMetrics(Map<String, Object> dbMetrics) {
+        dbMetrics.put("avgQueryTime", 0);
+        dbMetrics.put("slowQueries", 0);
+        dbMetrics.put("connectionPoolUsage", 0);
+        dbMetrics.put("activeConnections", 0);
+    }
     
     /**
-     * 获取API响应时间指标
+     * 获取API响应时间指标（真实采集）。
+     *
+     * <p>数据源为 ResponseTimeStore（逐请求分钟桶 + 进程级累计）：
+     * 平均耗时/错误率取进程级累计，最小/最大/P95 取最近窗口内有流量的分钟桶。
+     * 没有请求时返回 0（未采集），不再用随机数或系统负载反推。</p>
      */
     private Map<String, Object> getApiResponseTimeMetrics() {
         Map<String, Object> apiMetrics = new HashMap<>();
         
         try {
-            // 优先尝试从操作日志获取真实的响应时间数据
-            LocalDateTime oneHourAgo = LocalDateTime.now().minusHours(1);
-            
-            // 查询最近的操作日志
-            List<SysLoginLog> recentLogs = sysLoginLogMapper.selectList(
-                new LambdaQueryWrapper<SysLoginLog>()
-                    .ge(SysLoginLog::getLoginTime, oneHourAgo)
-                    .orderByDesc(SysLoginLog::getLoginTime)
-                    .last("LIMIT 100")
-            );
-            
-            if (!recentLogs.isEmpty()) {
-                // 从真实日志中提取响应时间信息（如果有记录的话）
-                List<Long> responseTimes = new ArrayList<>();
-                for (SysLoginLog log : recentLogs) {
-                    // 这里可以根据日志内容提取实际的响应时间
-                    // 目前使用估算值，但基于真实的日志数量
-                    responseTimes.add(50L + (long)new Random().nextInt(200)); // 50-250ms
+            Map<String, Object> global = responseTimeStore.globalStats();
+            Object avg = global.get("avgResponseTime");
+            apiMetrics.put("avgResponseTime", avg instanceof Number n ? n.longValue() : 0L);
+
+            int window = Math.max(1, Math.min(60, responseTimeStore.getWindowMinutes()));
+            Map<String, Object> snapshot = responseTimeStore.snapshot(window);
+            long[] minValues = (long[]) snapshot.get("minResponseTime");
+            long[] maxValues = (long[]) snapshot.get("maxResponseTime");
+            long[] p95Values = (long[]) snapshot.get("p95ResponseTime");
+            long[] counts = (long[]) snapshot.get("requestCount");
+
+            long minTime = Long.MAX_VALUE;
+            long maxTime = 0L;
+            long p95Time = 0L;
+            if (counts != null) {
+                for (int i = 0; i < counts.length; i++) {
+                    if (counts[i] <= 0) {
+                        continue;
+                    }
+                    minTime = Math.min(minTime, minValues[i]);
+                    maxTime = Math.max(maxTime, maxValues[i]);
+                    // 窗口 P95 取各分钟 P95 的最大值（保守上界），避免跨桶重采样
+                    p95Time = Math.max(p95Time, p95Values[i]);
                 }
-                
-                // 计算统计指标
-                long avgTime = Math.round(responseTimes.stream().mapToLong(Long::longValue).average().orElse(100.0));
-                long minTime = responseTimes.stream().mapToLong(Long::longValue).min().orElse(20L);
-                long maxTime = responseTimes.stream().mapToLong(Long::longValue).max().orElse(500L);
-                
-                // 计算95百分位
-                Collections.sort(responseTimes);
-                int index95 = (int) (responseTimes.size() * 0.95);
-                long p95Time = index95 < responseTimes.size() ? responseTimes.get(index95) : maxTime;
-                
-                apiMetrics.put("avgResponseTime", avgTime);
-                apiMetrics.put("minResponseTime", minTime);
-                apiMetrics.put("maxResponseTime", maxTime);
-                apiMetrics.put("p95ResponseTime", p95Time);
-            } else {
-                // 如果没有日志数据，使用基于系统负载的估算
-                double cpuUsage = getCpuUsage();
-                double memoryUsage = getMemoryUsage();
-                
-                // 基于系统资源使用率估算响应时间
-                long baseTime = 100L; // 基准响应时间
-                long loadFactor = (long) ((cpuUsage + memoryUsage) / 2 / 10); // 负载因子
-                
-                apiMetrics.put("avgResponseTime", baseTime + loadFactor * 5);
-                apiMetrics.put("minResponseTime", Math.max(20, baseTime - loadFactor * 2));
-                apiMetrics.put("maxResponseTime", baseTime + loadFactor * 15);
-                apiMetrics.put("p95ResponseTime", baseTime + loadFactor * 8);
             }
-            
+            apiMetrics.put("minResponseTime", minTime == Long.MAX_VALUE ? 0L : minTime);
+            apiMetrics.put("maxResponseTime", maxTime);
+            apiMetrics.put("p95ResponseTime", p95Time);
         } catch (Exception e) {
             log.warn("获取API响应时间指标失败: {}", e.getMessage());
-            // 默认值
-            apiMetrics.put("avgResponseTime", 100);
-            apiMetrics.put("minResponseTime", 20);
-            apiMetrics.put("maxResponseTime", 500);
-            apiMetrics.put("p95ResponseTime", 200);
+            apiMetrics.put("avgResponseTime", 0L);
+            apiMetrics.put("minResponseTime", 0L);
+            apiMetrics.put("maxResponseTime", 0L);
+            apiMetrics.put("p95ResponseTime", 0L);
         }
         
         return apiMetrics;
     }
     
     /**
-     * 获取缓存命中率
+     * 获取检测缓存真实命中率（百分比）。无读写记录时为 0。
      */
     private Double getCacheHitRate() {
         try {
-            // 这里应该连接Redis获取真实的缓存命中率
-            // 目前返回估算值
-            return 85.0 + new Random().nextDouble() * 10; // 85-95%
+            return detectionCacheService.hitRatePercent();
         } catch (Exception e) {
             log.warn("获取缓存命中率失败: {}", e.getMessage());
             return 0.0;
@@ -871,16 +772,15 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
     }
     
     /**
-     * 获取事务处理速率
+     * 获取事务处理速率（当前分钟已采集请求数 / 已过秒数），真实来自 ResponseTimeStore。
      */
     private Double getTransactionsPerSecond() {
         try {
-            LocalDateTime oneMinuteAgo = LocalDateTime.now().minusMinutes(1);
-            Long recentOperations = sysLoginLogMapper.selectCount(
-                new LambdaQueryWrapper<SysLoginLog>()
-                    .ge(SysLoginLog::getLoginTime, oneMinuteAgo)
-            );
-            return recentOperations.doubleValue() / 60.0;
+            Map<String, Object> snapshot = responseTimeStore.snapshot(1);
+            long[] counts = (long[]) snapshot.get("requestCount");
+            long requests = counts == null || counts.length == 0 ? 0L : counts[0];
+            long elapsedSeconds = Math.max(1, LocalTime.now().getSecond() + 1L);
+            return Math.round(requests * 100.0 / elapsedSeconds) / 100.0;
         } catch (Exception e) {
             log.warn("获取事务处理速率失败: {}", e.getMessage());
             return 0.0;
@@ -888,13 +788,12 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
     }
     
     /**
-     * 获取错误率
+     * 获取错误率（5xx 占比，进程启动以来的真实采集值）。
      */
     private Double getErrorRate() {
         try {
-            LocalDateTime oneHourAgo = LocalDateTime.now().minusHours(1);
-            // 这里应该查询错误日志表，目前返回估算值
-            return new Random().nextDouble() * 2; // 0-2%
+            Object rate = responseTimeStore.globalStats().get("errorRate");
+            return rate instanceof Number n ? n.doubleValue() : 0.0;
         } catch (Exception e) {
             log.warn("获取错误率失败: {}", e.getMessage());
             return 0.0;
