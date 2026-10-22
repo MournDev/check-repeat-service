@@ -48,6 +48,10 @@ public class AutoAssignmentServiceImpl implements AutoAssignmentService {
     @Resource
     private AutoAssignmentConfigMapper autoAssignmentConfigMapper;
 
+    // M2.2 阶段门收口：论文状态流转统一校验（默认影子模式，只告警不阻断）
+    @Resource
+    private com.abin.checkrepeatservice.common.component.PaperStageGate paperStageGate;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Override
@@ -550,7 +554,10 @@ public class AutoAssignmentServiceImpl implements AutoAssignmentService {
         student.setAllocationType("auto");
         student.setAllocationStatus("pending");
         student.setAllocationTime(LocalDateTime.now());
-        student.setPaperStatus("assigned");
+        paperStageGate.guard(student.getPaperStatus(),
+                com.abin.checkrepeatservice.common.constant.DictConstants.PaperStatus.ASSIGNED,
+                "autoAssignmentBatch");
+        student.setPaperStatus(com.abin.checkrepeatservice.common.constant.DictConstants.PaperStatus.ASSIGNED);
         student.setUpdateTime(LocalDateTime.now());
         paperInfoMapper.updateById(student);
     }

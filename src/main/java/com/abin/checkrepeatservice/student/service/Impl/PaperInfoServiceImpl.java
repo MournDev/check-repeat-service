@@ -102,6 +102,10 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
     @Resource
     private SubjectService subjectService;
 
+    // M2.2 阶段门收口：论文状态流转统一校验（默认影子模式，只告警不阻断）
+    @Resource
+    private com.abin.checkrepeatservice.common.component.PaperStageGate paperStageGate;
+
     // 架构修复（P0）：提交后分配导师/查重改为事件驱动，避免本类 @Async 自调用失效
     @Resource
     private ApplicationEventPublisher eventPublisher;
@@ -230,6 +234,8 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
             }
 
             // 3. 更新论文状态为已撤回,软删除
+            paperStageGate.guard(paperInfo.getPaperStatus(),
+                    DictConstants.PaperStatus.WITHDRAWN, "deletePaper");
             PaperInfo updateInfo = new PaperInfo();
             updateInfo.setId(paperId);
             updateInfo.setPaperStatus(DictConstants.PaperStatus.WITHDRAWN);
@@ -523,6 +529,8 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
         existingPaper.setFileId(fileId);
         existingPaper.setFileMd5(fileMd5);
         existingPaper.setFilePath(fileInfoMapper.selectById(fileId).getStoragePath());
+        paperStageGate.guard(existingPaper.getPaperStatus(),
+                DictConstants.PaperStatus.PENDING, "updatePaperInfo");
         existingPaper.setPaperStatus(DictConstants.PaperStatus.PENDING); // 重置状态
         existingPaper.setWordCount(fileInfoMapper.selectById(fileId).getWordCount());//论文字数
         // 重置相似度为 NULL（= 未检测）：updateById 按非空策略跳过 null 字段，必须显式置空
@@ -686,6 +694,8 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
     @Transactional(rollbackFor = Exception.class)
     private void resetPaperStatusAfterCheckFailed(Long paperId, PaperInfo paperInfo) {
         try {
+            paperStageGate.guard(paperInfo.getPaperStatus(),
+                    DictConstants.PaperStatus.PENDING, "resetPaperStatusAfterCheckFailed");
             PaperInfo updatePaper = new PaperInfo();
             updatePaper.setId(paperId);
             updatePaper.setPaperStatus(DictConstants.PaperStatus.PENDING);  // 重置为待分配
@@ -831,6 +841,8 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
             }
                 
             // 5. 更新论文状态为已撤回
+            paperStageGate.guard(paperInfo.getPaperStatus(),
+                    DictConstants.PaperStatus.WITHDRAWN, "withdrawPaper");
             PaperInfo updateInfo = new PaperInfo();
             updateInfo.setId(paperId);
             updateInfo.setPaperStatus(DictConstants.PaperStatus.WITHDRAWN);
@@ -869,6 +881,10 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
             }
             
             // 2. 更新论文基本信息
+            // M2.2：撤回后重提是从 withdrawn 回到 pending，先过阶段门（影子模式默认只告警）
+            PaperInfo currentPaper = paperInfoMapper.selectById(paperId);
+            paperStageGate.guard(currentPaper == null ? null : currentPaper.getPaperStatus(),
+                    DictConstants.PaperStatus.PENDING, "resubmitAfterWithdraw");
             PaperInfo updatePaper = new PaperInfo();
             updatePaper.setId(paperId);
             updatePaper.setPaperTitle(request.getPaperTitle());
@@ -952,6 +968,8 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
             }
             
             // 4. 更新论文状态为待审核（申请修改状态）
+            paperStageGate.guard(paperInfo.getPaperStatus(),
+                    DictConstants.PaperStatus.AUDITING, "applyPaperModify");
             PaperInfo updateInfo = new PaperInfo();
             updateInfo.setId(paperId);
             updateInfo.setPaperStatus(DictConstants.PaperStatus.AUDITING); // 或者自定义一个申请修改状态

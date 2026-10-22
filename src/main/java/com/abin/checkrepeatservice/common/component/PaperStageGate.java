@@ -2,6 +2,8 @@ package com.abin.checkrepeatservice.common.component;
 
 import com.abin.checkrepeatservice.common.Exception.BusinessException;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
@@ -24,9 +26,22 @@ import static com.abin.checkrepeatservice.common.constant.DictConstants.PaperSta
  *
  * 已有流程在 P1 保持原状（不强制接入，避免回归），P2 起新流程必须接入；
  * 后续重构存量流程时逐个替换为走本组件。
+ *
+ * M2.2 收口：存量链路统一改走 {@link #guard}，默认 shadow 模式只记录疑似非法流转，
+ * 待日志确认无告警后再把 paper.stage-gate.mode 切到 enforce 强制拦截。
  */
+@Slf4j
 @Component
 public class PaperStageGate {
+
+    /**
+     * M2.2 阶段门模式：
+     *  - shadow（默认）：存量链路只记录疑似非法流转，不阻断业务，用于上线前积累真实流转边；
+     *  - enforce：非法流转直接拒绝（新流程与已完成收口的链路使用）；
+     *  - off：关闭校验（排障兜底）。
+     */
+    @Value("${paper.stage-gate.mode:shadow}")
+    private String mode;
 
     /**
      * 合法流转表：from → 允许的 to 集合。
@@ -54,8 +69,9 @@ public class PaperStageGate {
             // 退回修改：重新提交回到待分配（与存量 reSubmitPaper 行为一致）；
             // 教师也可对被驳回论文重新发起审核（存量 reReview 行为）
             Map.entry(REJECTED, Set.of(PENDING, AUDITING, WITHDRAWN)),
+            // 撤回后重新提交（存量 resubmitAfterWithdraw）：回到待分配重走流程
+            Map.entry(WITHDRAWN, Set.of(PENDING)),
             // 终态
-            Map.entry(WITHDRAWN, Set.of()),
             Map.entry(ARCHIVED, Set.of()));
 
     /**
@@ -82,6 +98,42 @@ public class PaperStageGate {
             throw new BusinessException(ResultCode.PERMISSION_NOT_STATUS,
                     String.format("论文状态不允许从 [%s] 流转到 [%s]", from, to));
         }
+    }
+
+    /**
+     * 统一落库前校验入口（M2.2 存量链路收口）。
+     *
+     * <p>与 {@link #assertTransition} 的区别：是否阻断由 paper.stage-gate.mode 决定。
+     * 存量链路先接入本方法跑影子模式，确认不再出现疑似非法流转后，再切 enforce，
+     * 避免一次性强制校验导致历史操作回归。</p>
+     *
+     * @param from  当前状态（可为历史数字码，内部归一化）
+     * @param to    目标状态
+     * @param scene 调用场景（用于定位影子模式告警来源，如 checkTaskListener）
+     */
+    public void guard(String from, String to, String scene) {
+        String normalizedFrom = normalizeLegacy(from);
+        String normalizedTo = normalizeLegacy(to);
+        // 同状态写入不算流转（如重复置为 PENDING），不计入违规
+        if (normalizedFrom != null && normalizedFrom.equals(normalizedTo)) {
+            return;
+        }
+        String effectiveMode = mode == null ? "shadow" : mode.trim().toLowerCase();
+        if ("off".equals(effectiveMode)) {
+            return;
+        }
+        boolean legal = canTransition(normalizedFrom, normalizedTo);
+        if (legal) {
+            return;
+        }
+        if ("enforce".equals(effectiveMode)) {
+            throw new BusinessException(ResultCode.PERMISSION_NOT_STATUS,
+                    String.format("论文状态不允许从 [%s] 流转到 [%s]（场景：%s）",
+                            normalizedFrom, normalizedTo, scene));
+        }
+        // 影子模式：只记录、不阻断，供后续核对合法流转边
+        log.warn("[PaperStageGate][SHADOW] 疑似非法论文状态流转: from={}, to={}, scene={}",
+                normalizedFrom, normalizedTo, scene);
     }
 
     /**

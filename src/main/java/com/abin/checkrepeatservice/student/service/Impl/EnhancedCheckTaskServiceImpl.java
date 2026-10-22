@@ -92,6 +92,10 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
     // P5 学院月度查重额度：新建任务落库前校验并扣减
     @Resource
     private CollegeQuotaService collegeQuotaService;
+
+    // M2.2 阶段门收口：论文状态流转统一校验（默认影子模式，只告警不阻断）
+    @Resource
+    private com.abin.checkrepeatservice.common.component.PaperStageGate paperStageGate;
     
     private final Tika tika = new Tika();
     
@@ -128,6 +132,9 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
         save(checkTask);
         
         // 4. 更新论文状态
+        paperStageGate.guard(paperInfo.getPaperStatus(),
+                com.abin.checkrepeatservice.common.constant.DictConstants.PaperStatus.CHECKING,
+                "createEnhancedCheckTask");
         paperInfo.setPaperStatus(com.abin.checkrepeatservice.common.constant.DictConstants.PaperStatus.CHECKING);
         paperInfo.setCheckTime(LocalDateTime.now());
         paperInfoMapper.updateById(paperInfo);
@@ -373,9 +380,11 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
             // 恢复论文状态（M4.1：有指导教师回"已分配"，未分配回"待分配"，与流程状态对齐）
             PaperInfo paperInfo = paperInfoMapper.selectById(task.getPaperId());
             if (paperInfo != null) {
-                paperInfo.setPaperStatus(paperInfo.getTeacherId() != null
+                String restoreStatus = paperInfo.getTeacherId() != null
                         ? com.abin.checkrepeatservice.common.constant.DictConstants.PaperStatus.ASSIGNED
-                        : com.abin.checkrepeatservice.common.constant.DictConstants.PaperStatus.PENDING);
+                        : com.abin.checkrepeatservice.common.constant.DictConstants.PaperStatus.PENDING;
+                paperStageGate.guard(paperInfo.getPaperStatus(), restoreStatus, "enhancedCheckTaskFailureRollback");
+                paperInfo.setPaperStatus(restoreStatus);
                 paperInfo.setCheckTime(null);
                 paperInfoMapper.updateById(paperInfo);
             }
@@ -512,6 +521,7 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
                 com.abin.checkrepeatservice.common.constant.DictConstants.PaperStatus.AUDITING :
                 com.abin.checkrepeatservice.common.constant.DictConstants.PaperStatus.REJECTED;
         
+        paperStageGate.guard(paperInfo.getPaperStatus(), newStatus, "enhancedCheckTaskSuccess");
         paperInfo.setPaperStatus(newStatus);
         paperInfoMapper.updateById(paperInfo);
     }

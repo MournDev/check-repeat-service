@@ -39,6 +39,10 @@ public class AdminAssignmentServiceImpl implements AdminAssignmentService {
     @Resource
     private SysDictDataMapper sysDictDataMapper;
 
+    // M2.2 阶段门收口：论文状态流转统一校验（默认影子模式，只告警不阻断）
+    @Resource
+    private com.abin.checkrepeatservice.common.component.PaperStageGate paperStageGate;
+
     @Override
     public Result<Map<String, Object>> getAssignmentStats() {
         try {
@@ -333,6 +337,8 @@ public class AdminAssignmentServiceImpl implements AdminAssignmentService {
         paper.setAllocationType(DictConstants.AllocationType.MANUAL);
         paper.setAllocationStatus(DictConstants.AllocationStatus.PENDING); // 待老师确认
         paper.setAllocationTime(now);
+        paperStageGate.guard(paper.getPaperStatus(),
+                DictConstants.PaperStatus.ASSIGNED, "adminManualAssignment");
         paper.setPaperStatus(DictConstants.PaperStatus.ASSIGNED); // 已分配导师，等待确认
         paper.setUpdateTime(now);
         paperInfoMapper.updateById(paper);

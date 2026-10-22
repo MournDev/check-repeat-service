@@ -35,6 +35,10 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
     @Resource
     private PaperInfoMapper paperInfoMapper;
 
+    // M2.2 阶段门收口：论文状态流转统一校验（默认影子模式，只告警不阻断）
+    @Resource
+    private com.abin.checkrepeatservice.common.component.PaperStageGate paperStageGate;
+
     @Resource
     private SysUserMapper sysUserMapper;
 
@@ -60,6 +64,8 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
             PaperInfo updatePaper = new PaperInfo();
             updatePaper.setId(paperId);
             updatePaper.setAllocationStatus(DictConstants.AllocationStatus.CONFIRMED);
+            paperStageGate.guard(paperInfo.getPaperStatus(),
+                    DictConstants.PaperStatus.CHECKING, "confirmAssignment");
             updatePaper.setPaperStatus(DictConstants.PaperStatus.CHECKING);  // 进入待查重状态
             updatePaper.setConfirmTime(LocalDateTime.now());
             updatePaper.setUpdateTime(LocalDateTime.now());

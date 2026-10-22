@@ -60,6 +60,10 @@ public class AdvisorAssignServiceImpl implements AdvisorAssignService {
     @Resource
     private MessageService messageService;
 
+    // M2.2 阶段门收口：论文状态流转统一校验（默认影子模式，只告警不阻断）
+    @Resource
+    private com.abin.checkrepeatservice.common.component.PaperStageGate paperStageGate;
+
 
 
     private final UserBusinessInfoUtils userBusinessInfoUtils;
@@ -129,6 +133,8 @@ public class AdvisorAssignServiceImpl implements AdvisorAssignService {
                 // 选择最优老师
                 PaperAdvisorTaskVO bestAdvisor = sortedAdvisors.get(0); // 替代 getFirst()
                 // 4. 更新论文信息中的指导老师信息
+                paperStageGate.guard(paperInfo.getPaperStatus(),
+                        DictConstants.PaperStatus.ASSIGNED, "autoAssignAdvisor");
                 PaperInfo updatePaper = new PaperInfo();
                 updatePaper.setId(paperId);
                 updatePaper.setTeacherId(bestAdvisor.getAdvisorId());
@@ -194,6 +200,8 @@ public class AdvisorAssignServiceImpl implements AdvisorAssignService {
         paperInfo.setAllocationType(DictConstants.AllocationType.MANUAL);//手动指定
         paperInfo.setAllocationStatus(DictConstants.AllocationStatus.PENDING);//待确认
         paperInfo.setAllocationTime(LocalDateTime.now());
+        paperStageGate.guard(paperInfo.getPaperStatus(),
+                DictConstants.PaperStatus.ASSIGNED, "manualAssignAdvisor");
         paperInfo.setPaperStatus(DictConstants.PaperStatus.ASSIGNED);//已分配，等待学生确认
         paperInfo.setUpdateTime(LocalDateTime.now());
         // 落库。原来这个方法从头到尾没有 updateById：paperInfo 只在内存里改完就丢了，

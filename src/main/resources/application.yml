@@ -109,6 +109,13 @@ spring:
       content-header: "尊敬的用户：<br><br>您有一条新的系统通知，请查收：<br><br>"
       content-footer: "<br><br>此邮件为系统自动发送，请勿回复。如需帮助，请联系管理员。<br>论文查重系统团队"
 
+# 论文全生命周期阶段门（M2.2 收口）
+paper:
+  stage-gate:
+    # shadow-影子模式（默认，只记录疑似非法流转、不阻断业务）/ enforce-强制校验 / off-关闭
+    # 存量链路先跑 shadow 积累真实流转边，确认无告警后再切 enforce
+    mode: shadow
+
 # 查重算法配置
 check:
   task:

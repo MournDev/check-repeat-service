@@ -77,6 +77,10 @@ public class CheckTaskEventListener {
     @Resource
     private com.abin.checkrepeatservice.admin.service.CollegeQuotaService collegeQuotaService;
 
+    // M2.2 阶段门收口：论文状态流转统一校验（默认影子模式，只告警不阻断）
+    @Resource
+    private com.abin.checkrepeatservice.common.component.PaperStageGate paperStageGate;
+
     // 架构修复（P0）：比对库入库管道，正文提取成功后写入 MinIO 并回填 content_path
     @Resource
     private com.abin.checkrepeatservice.common.service.PaperLibraryIngestService paperLibraryIngestService;
@@ -250,9 +254,11 @@ public class CheckTaskEventListener {
             if (paperInfo != null) {
                 PaperInfo updatePaper = new PaperInfo();
                 updatePaper.setId(paperInfo.getId());
-                updatePaper.setPaperStatus(paperInfo.getTeacherId() != null
+                String restoreStatus = paperInfo.getTeacherId() != null
                         ? DictConstants.PaperStatus.ASSIGNED
-                        : DictConstants.PaperStatus.PENDING);
+                        : DictConstants.PaperStatus.PENDING;
+                paperStageGate.guard(paperInfo.getPaperStatus(), restoreStatus, "checkTaskListenerFailureRollback");
+                updatePaper.setPaperStatus(restoreStatus);
                 updatePaper.setCheckTime(null);
                 paperInfoMapper.updateById(updatePaper);
             }
@@ -384,9 +390,11 @@ public class CheckTaskEventListener {
         boolean qualified = similarity <= threshold.doubleValue();
         PaperInfo updatePaper = new PaperInfo();
         updatePaper.setId(paperInfo.getId());
-        updatePaper.setPaperStatus(qualified
+        String newStatus = qualified
                 ? DictConstants.PaperStatus.AUDITING
-                : DictConstants.PaperStatus.REJECTED);
+                : DictConstants.PaperStatus.REJECTED;
+        paperStageGate.guard(paperInfo.getPaperStatus(), newStatus, "checkTaskListenerSuccess");
+        updatePaper.setPaperStatus(newStatus);
         updatePaper.setSimilarityRate(BigDecimal.valueOf(similarity));
         updatePaper.setCheckCompleted(1);
         updatePaper.setCheckSource("LOCAL");

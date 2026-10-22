@@ -88,6 +88,10 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
     @Resource
     private CheckTaskStateMachine stateMachine;
 
+    // M2.2 阶段门收口：论文状态流转统一校验（默认影子模式，只告警不阻断）
+    @Resource
+    private com.abin.checkrepeatservice.common.component.PaperStageGate paperStageGate;
+
     @Resource
     private CheckEngineManager checkEngineManager;
 
@@ -344,6 +348,7 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
        // 5. 恢复论文状态为"已分配"（论文已通过导师分配阶段，取消查重后回到待查重的已分配状态）
         PaperInfo updatePaper = new PaperInfo();
         updatePaper.setId(paperInfo.getId());
+        paperStageGate.guard(paperInfo.getPaperStatus(), DictConstants.PaperStatus.ASSIGNED, "cancelCheckTask");
         updatePaper.setPaperStatus(DictConstants.PaperStatus.ASSIGNED); // 已分配，等待重新发起查重
         paperInfoMapper.updateById(updatePaper);
        
@@ -528,6 +533,7 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
             String restoreStatus = paperInfo.getTeacherId() != null
                     ? DictConstants.PaperStatus.ASSIGNED
                     : DictConstants.PaperStatus.PENDING;
+            paperStageGate.guard(paperInfo.getPaperStatus(), restoreStatus, "checkTaskFailureRollback");
             PaperInfo updatePaper = new PaperInfo();
             updatePaper.setId(paperInfo.getId());
             updatePaper.setPaperStatus(restoreStatus);
@@ -555,9 +561,11 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
         boolean qualified = similarity <= threshold.doubleValue();
         PaperInfo updatePaper = new PaperInfo();
         updatePaper.setId(paperInfo.getId());
-        updatePaper.setPaperStatus(qualified
+        String successStatus = qualified
                 ? DictConstants.PaperStatus.AUDITING
-                : DictConstants.PaperStatus.REJECTED);
+                : DictConstants.PaperStatus.REJECTED;
+        paperStageGate.guard(paperInfo.getPaperStatus(), successStatus, "checkTaskSuccess");
+        updatePaper.setPaperStatus(successStatus);
         // 补充查重结果相关字段
         updatePaper.setSimilarityRate(BigDecimal.valueOf(similarity));
         updatePaper.setCheckCompleted(1);

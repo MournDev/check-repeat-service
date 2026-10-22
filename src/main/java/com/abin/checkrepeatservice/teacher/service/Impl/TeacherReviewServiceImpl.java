@@ -65,6 +65,10 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
     @Resource
     private PaperInfoMapper paperInfoMapper;
 
+    // M2.2 阶段门收口：论文状态流转统一校验（默认影子模式，只告警不阻断）
+    @Resource
+    private com.abin.checkrepeatservice.common.component.PaperStageGate paperStageGate;
+
     @Resource
     private CheckTaskMapper checkTaskMapper;
 
@@ -259,6 +263,7 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
                     updatePaper.setWorkflowStep(0);
                     statusReason = "导师审核不通过";
                 }
+                paperStageGate.guard(oldStatus, updatePaper.getPaperStatus(), "teacherBatchReview");
                 paperInfoMapper.updateById(updatePaper);
                 
                 successCount++;
@@ -439,6 +444,8 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
         // 2. 更新论文状态为“待审核”
         PaperInfo updatePaper = new PaperInfo();
         updatePaper.setId(paperId);
+        paperStageGate.guard(paperInfo.getPaperStatus(),
+                DictConstants.PaperStatus.AUDITING, "reInitiateReview");
         updatePaper.setPaperStatus(DictConstants.PaperStatus.AUDITING); // 2-待审核
         // P2 接线：重新发起审核回到导师初审起点，多级初审进度一并归零
         updatePaper.setWorkflowStep(0);
