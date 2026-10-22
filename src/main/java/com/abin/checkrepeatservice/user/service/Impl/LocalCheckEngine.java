@@ -16,6 +16,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
@@ -239,10 +240,19 @@ public class LocalCheckEngine implements CheckEngine {
             return null;
         }
 
-        // 预处理库中论文（使用MinIO中的内容进行分词）
-        String segmentedLibraryText = paperContentMinioService.readSegmentedText(paper.getSegmentedPath());
-        if (segmentedLibraryText == null || segmentedLibraryText.isEmpty()) {
-            // 如果MinIO中没有分词结果，则实时处理
+        // 预处理库中论文：只信任带当前分词版本头的缓存；
+        // 旧文件（或没有分词文件）一律按原文实时分词，保证与待查文本使用同一套词表
+        // （英文归一/停用词升级后，新旧词表混算会让英文论文相似度失真）。
+        // segmentedPath 为空（分词入库失败/存量缺失）时直接实时分词，不能让无效路径把整篇论文跳过
+        String cachedSegmentedText = StringUtils.hasText(paper.getSegmentedPath())
+                ? paperContentMinioService.readSegmentedText(paper.getSegmentedPath())
+                : null;
+        String segmentedLibraryText;
+        if (cachedSegmentedText != null
+                && cachedSegmentedText.startsWith(IKAnalyzerUtils.SEGMENT_VERSION_HEADER)) {
+            segmentedLibraryText = cachedSegmentedText.substring(
+                    IKAnalyzerUtils.SEGMENT_VERSION_HEADER.length());
+        } else {
             segmentedLibraryText = IKAnalyzerUtils.segmentToString(libraryContent);
         }
 

@@ -56,7 +56,10 @@ public class PaperLibraryIngestService {
         try {
             String segmentedText = IKAnalyzerUtils.segmentToString(paperText);
             if (segmentedText != null && !segmentedText.isBlank()) {
-                segmentedPath = paperContentMinioService.storeSegmentedText(segmentedText, paperId);
+                // 带分词版本头落库：英文归一/停用词升级后，引擎只认当前版本的缓存，
+                // 旧版本文件自动回落原文实时分词，避免新旧词表混算
+                segmentedPath = paperContentMinioService.storeSegmentedText(
+                        IKAnalyzerUtils.SEGMENT_VERSION_HEADER + segmentedText, paperId);
             }
         } catch (Exception e) {
             // 分词文本入库失败不影响主流程：引擎读不到分词会实时分词
