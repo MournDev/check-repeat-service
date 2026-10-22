@@ -65,6 +65,10 @@ public class TeacherInfoServiceImpl implements TeacherInfoService{
             currentUser.setIntroduce(updateReq.getIntroduce());
             currentUser.setPhone(updateReq.getPhone());
             currentUser.setEmail(updateReq.getEmail());
+            // 通知偏好：仅传入非 null 才落库，避免普通资料保存把开关覆盖成默认值
+            if (updateReq.getNotifyEmail() != null) {
+                currentUser.setNotifyEmail(Boolean.TRUE.equals(updateReq.getNotifyEmail()) ? 1 : 0);
+            }
             currentUser.setOffice(updateReq.getOffice());
             currentUser.setOfficeHours(updateReq.getOfficeHours());
             currentUser.setMaxReviewCount(updateReq.getMaxReviewCount());
@@ -154,6 +158,7 @@ public class TeacherInfoServiceImpl implements TeacherInfoService{
             info.setIntroduce(user.getIntroduce());
             info.setPhone(user.getPhone());
             info.setEmail(user.getEmail());
+            info.setNotifyEmail(Integer.valueOf(1).equals(user.getNotifyEmail()));
             info.setOffice(user.getOffice());
             info.setOfficeHours(user.getOfficeHours());
             info.setMaxReviewCount(user.getMaxReviewCount());

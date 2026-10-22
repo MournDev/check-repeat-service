@@ -28,8 +28,8 @@ public class NotificationFacadeService {
     public void sendPaperSubmittedNotice(Long paperId, String paperTitle, Long studentId) {
         try {
             SysUser student = userQueryService.getUserById(studentId);
-            if (student == null || !StringUtils.hasText(student.getEmail())) {
-                log.warn("无法发送论文提交通知：学生不存在或邮箱为空, studentId={}", studentId);
+            if (!canSendEmail(student)) {
+                log.warn("无法发送论文提交通知：学生不存在、邮箱为空或已关闭邮件通知, studentId={}", studentId);
                 return;
             }
 
@@ -56,8 +56,8 @@ public class NotificationFacadeService {
                                          Double similarityRate) {
         try {
             SysUser student = userQueryService.getUserById(studentId);
-            if (student == null || !StringUtils.hasText(student.getEmail())) {
-                log.warn("无法发送查重完成通知：学生不存在或邮箱为空, studentId={}", studentId);
+            if (!canSendEmail(student)) {
+                log.warn("无法发送查重完成通知：学生不存在、邮箱为空或已关闭邮件通知, studentId={}", studentId);
                 return;
             }
 
@@ -88,8 +88,8 @@ public class NotificationFacadeService {
                                         String feedback, Long advisorId) {
         try {
             SysUser student = userQueryService.getUserById(studentId);
-            if (student == null || !StringUtils.hasText(student.getEmail())) {
-                log.warn("无法发送修改通知：学生不存在或邮箱为空, studentId={}", studentId);
+            if (!canSendEmail(student)) {
+                log.warn("无法发送修改通知：学生不存在、邮箱为空或已关闭邮件通知, studentId={}", studentId);
                 return;
             }
 
@@ -124,8 +124,8 @@ public class NotificationFacadeService {
     public void sendPaperApprovedNotice(Long paperId, String paperTitle, Long studentId) {
         try {
             SysUser student = userQueryService.getUserById(studentId);
-            if (student == null || !StringUtils.hasText(student.getEmail())) {
-                log.warn("无法发送审核通过通知：学生不存在或邮箱为空, studentId={}", studentId);
+            if (!canSendEmail(student)) {
+                log.warn("无法发送审核通过通知：学生不存在、邮箱为空或已关闭邮件通知, studentId={}", studentId);
                 return;
             }
 
@@ -168,8 +168,8 @@ public class NotificationFacadeService {
     private void sendAdvisorAssignedNoticeToStudent(Long paperId, String paperTitle,
                                                     Long studentId, Long advisorId) {
         SysUser student = userQueryService.getUserById(studentId);
-        if (student == null || !StringUtils.hasText(student.getEmail())) {
-            log.warn("无法发送老师分配通知给学生：学生不存在或邮箱为空, studentId={}", studentId);
+        if (!canSendEmail(student)) {
+            log.warn("无法发送老师分配通知给学生：学生不存在、邮箱为空或已关闭邮件通知, studentId={}", studentId);
             return;
         }
 
@@ -198,8 +198,8 @@ public class NotificationFacadeService {
     private void sendAdvisorAssignedNoticeToAdvisor(Long paperId, String paperTitle,
                                                     Long studentId, Long advisorId) {
         SysUser advisor = userQueryService.getAdvisorById(advisorId);
-        if (advisor == null || !StringUtils.hasText(advisor.getEmail())) {
-            log.warn("无法发送老师分配通知给老师：指导老师不存在或邮箱为空, advisorId={}", advisorId);
+        if (!canSendEmail(advisor)) {
+            log.warn("无法发送老师分配通知给老师：指导老师不存在、邮箱为空或已关闭邮件通知, advisorId={}", advisorId);
             return;
         }
 
@@ -236,8 +236,8 @@ public class NotificationFacadeService {
             }
 
             SysUser advisor = userQueryService.getAdvisorById(advisorId);
-            if (advisor == null || !StringUtils.hasText(advisor.getEmail())) {
-                log.warn("无法发送高相似度预警：指导老师不存在或邮箱为空, advisorId={}", advisorId);
+            if (!canSendEmail(advisor)) {
+                log.warn("无法发送高相似度预警：指导老师不存在、邮箱为空或已关闭邮件通知, advisorId={}", advisorId);
                 return;
             }
 
@@ -272,8 +272,8 @@ public class NotificationFacadeService {
                                           String teacherName, Integer round) {
         try {
             SysUser student = userQueryService.getUserById(studentId);
-            if (student == null || !StringUtils.hasText(student.getEmail())) {
-                log.warn("无法发送指导记录通知：学生不存在或邮箱为空, studentId={}", studentId);
+            if (!canSendEmail(student)) {
+                log.warn("无法发送指导记录通知：学生不存在、邮箱为空或已关闭邮件通知, studentId={}", studentId);
                 return;
             }
 
@@ -302,8 +302,8 @@ public class NotificationFacadeService {
                                             String studentName, Integer round) {
         try {
             SysUser advisor = userQueryService.getAdvisorById(teacherId);
-            if (advisor == null || !StringUtils.hasText(advisor.getEmail())) {
-                log.warn("无法发送指导记录确认通知：教师不存在或邮箱为空, teacherId={}", teacherId);
+            if (!canSendEmail(advisor)) {
+                log.warn("无法发送指导记录确认通知：教师不存在、邮箱为空或已关闭邮件通知, teacherId={}", teacherId);
                 return;
             }
 
@@ -332,8 +332,8 @@ public class NotificationFacadeService {
                                        LocalDateTime deadline, String method) {
         try {
             SysUser teacher = userQueryService.getAdvisorById(reviewerId);
-            if (teacher == null || !StringUtils.hasText(teacher.getEmail())) {
-                log.warn("无法发送评阅任务通知：教师不存在或邮箱为空, reviewerId={}", reviewerId);
+            if (!canSendEmail(teacher)) {
+                log.warn("无法发送评阅任务通知：教师不存在、邮箱为空或已关闭邮件通知, reviewerId={}", reviewerId);
                 return;
             }
 
@@ -364,8 +364,8 @@ public class NotificationFacadeService {
                                         String batchNo, String result, String score, String grade) {
         try {
             SysUser student = userQueryService.getUserById(studentId);
-            if (student == null || !StringUtils.hasText(student.getEmail())) {
-                log.warn("无法发送答辩结论通知：学生不存在或邮箱为空, studentId={}", studentId);
+            if (!canSendEmail(student)) {
+                log.warn("无法发送答辩结论通知：学生不存在、邮箱为空或已关闭邮件通知, studentId={}", studentId);
                 return;
             }
 
@@ -481,8 +481,8 @@ public class NotificationFacadeService {
     public void sendCheckSignoffRejectedNotice(Long studentId, String paperTitle) {
         try {
             SysUser student = userQueryService.getUserById(studentId);
-            if (student == null || !StringUtils.hasText(student.getEmail())) {
-                log.warn("无法发送签核退回通知：学生不存在或邮箱为空, studentId={}", studentId);
+            if (!canSendEmail(student)) {
+                log.warn("无法发送签核退回通知：学生不存在、邮箱为空或已关闭邮件通知, studentId={}", studentId);
                 return;
             }
 
@@ -513,8 +513,8 @@ public class NotificationFacadeService {
     public void sendScoreSynthesizedNotice(Long paperId, String paperTitle, Long studentId, String finalScore) {
         try {
             SysUser student = userQueryService.getUserById(studentId);
-            if (student == null || !StringUtils.hasText(student.getEmail())) {
-                log.warn("无法发送总评成绩通知：学生不存在或邮箱为空, studentId={}", studentId);
+            if (!canSendEmail(student)) {
+                log.warn("无法发送总评成绩通知：学生不存在、邮箱为空或已关闭邮件通知, studentId={}", studentId);
                 return;
             }
 
@@ -545,8 +545,8 @@ public class NotificationFacadeService {
     public void sendAdvisorEvalInviteNotice(Long paperId, String paperTitle, Long studentId) {
         try {
             SysUser student = userQueryService.getUserById(studentId);
-            if (student == null || !StringUtils.hasText(student.getEmail())) {
-                log.warn("无法发送导师评价邀请：学生不存在或邮箱为空, studentId={}", studentId);
+            if (!canSendEmail(student)) {
+                log.warn("无法发送导师评价邀请：学生不存在、邮箱为空或已关闭邮件通知, studentId={}", studentId);
                 return;
             }
 
@@ -577,8 +577,8 @@ public class NotificationFacadeService {
                                             LocalDateTime windowEndTime) {
         try {
             SysUser student = userQueryService.getUserById(studentId);
-            if (student == null || !StringUtils.hasText(student.getEmail())) {
-                log.warn("无法发送导师评价催评：学生不存在或邮箱为空, studentId={}", studentId);
+            if (!canSendEmail(student)) {
+                log.warn("无法发送导师评价催评：学生不存在、邮箱为空或已关闭邮件通知, studentId={}", studentId);
                 return;
             }
 
@@ -597,6 +597,18 @@ public class NotificationFacadeService {
         } catch (Exception e) {
             log.error("发送导师评价催评异常：paperId={}，studentId={}", paperId, studentId, e);
         }
+    }
+
+    /**
+     * 收件人是否允许接收业务邮件。
+     *
+     * <p>sys_user.notify_email 默认 1，存量用户行为不变；教师/学生在个人设置里关闭后，
+     * 业务邮件静默跳过，站内信（NotificationService）不受影响。
+     * 账号激活、密码重置等安全类邮件不走本方法，避免关闭偏好后无法找回账号。</p>
+     */
+    private boolean canSendEmail(SysUser user) {
+        return user != null && StringUtils.hasText(user.getEmail())
+                && Integer.valueOf(1).equals(user.getNotifyEmail());
     }
 
     /**

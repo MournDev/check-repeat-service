@@ -57,6 +57,12 @@ public class UpdateTeacherInfoReq {
     /** 邮箱地址 */
     private String email;
 
+    /**
+     * 邮件通知开关（可选）：true-接收业务邮件，false-只收站内信。
+     * 不传（null）时保持原值，避免教师只改资料却把偏好覆盖掉。
+     */
+    private Boolean notifyEmail;
+
     /** 办公地点 */
     private String office;
 
