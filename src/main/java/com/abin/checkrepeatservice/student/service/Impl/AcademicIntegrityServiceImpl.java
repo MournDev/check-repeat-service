@@ -11,7 +11,9 @@ import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
 import com.abin.checkrepeatservice.student.dto.AcademicResourceDTO;
 import com.abin.checkrepeatservice.student.dto.ChecklistItemDTO;
 import com.abin.checkrepeatservice.student.dto.PersonalAdviceDTO;
+import com.abin.checkrepeatservice.pojo.entity.CheckSentenceHit;
 import com.abin.checkrepeatservice.student.mapper.AcademicChecklistMapper;
+import com.abin.checkrepeatservice.student.mapper.CheckSentenceHitMapper;
 import com.abin.checkrepeatservice.student.service.AcademicIntegrityService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.extern.slf4j.Slf4j;
@@ -22,8 +24,10 @@ import jakarta.annotation.Resource;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Random;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -41,6 +45,9 @@ public class AcademicIntegrityServiceImpl implements AcademicIntegrityService {
     
     @Resource
     private CheckTaskMapper checkTaskMapper;
+
+    @Resource
+    private CheckSentenceHitMapper checkSentenceHitMapper;
     
     @Override
     public PersonalAdviceDTO getPersonalAdvice(Long studentId) {
@@ -64,12 +71,18 @@ public class AcademicIntegrityServiceImpl implements AcademicIntegrityService {
             PersonalAdviceDTO advice = new PersonalAdviceDTO();
             advice.setVersion(1); // 使用固定版本号
             
-            // 4. 分析高风险区域（模拟数据）
-            List<PersonalAdviceDTO.HighRiskAreaDTO> highRiskAreas = analyzeHighRiskAreas(latestTask.getCheckRate().doubleValue());
+            double checkRate = latestTask.getCheckRate().doubleValue();
+
+            // 4. 高风险区域：基于该任务真实句级命中明细，按来源论文聚合
+            List<CheckSentenceHit> hits = checkSentenceHitMapper.selectList(
+                    new LambdaQueryWrapper<CheckSentenceHit>()
+                            .eq(CheckSentenceHit::getTaskId, latestTask.getId())
+                            .orderByDesc(CheckSentenceHit::getSimilarity));
+            List<PersonalAdviceDTO.HighRiskAreaDTO> highRiskAreas = analyzeHighRiskAreas(checkRate, hits);
             advice.setHighRiskAreas(highRiskAreas);
             
-            // 5. 识别表现良好的方面
-            List<PersonalAdviceDTO.GoodAspectDTO> goodAspects = identifyGoodAspects(latestTask.getCheckRate().doubleValue());
+            // 5. 表现良好方面：只在整体重复率确实较低时给出，不再编造章节分数
+            List<PersonalAdviceDTO.GoodAspectDTO> goodAspects = identifyGoodAspects(checkRate);
             advice.setGoodAspects(goodAspects);
             
             // 6. 生成通用建议
@@ -225,26 +238,9 @@ public class AcademicIntegrityServiceImpl implements AcademicIntegrityService {
     private PersonalAdviceDTO createDefaultPersonalAdvice() {
         PersonalAdviceDTO advice = new PersonalAdviceDTO();
         advice.setVersion(1);
-        
-        // 默认高风险区域
-        PersonalAdviceDTO.HighRiskAreaDTO defaultArea = new PersonalAdviceDTO.HighRiskAreaDTO();
-        defaultArea.setSection("文献综述");
-        defaultArea.setSimilarity(25.0);
-        defaultArea.setIssue("相似度偏高");
-        defaultArea.setSuggestion("建议重新梳理文献脉络，增加个人观点表达，减少直接引用");
-        
-        advice.setHighRiskAreas(Arrays.asList(defaultArea));
-        
-        // 默认良好方面
-        PersonalAdviceDTO.GoodAspectDTO defaultGood = new PersonalAdviceDTO.GoodAspectDTO();
-        defaultGood.setSection("研究方法");
-        defaultGood.setSimilarity(5.0);
-        defaultGood.setStrength("原创性较好");
-        defaultGood.setEncouragement("继续保持独立思考和创新精神");
-        
-        advice.setGoodAspects(Arrays.asList(defaultGood));
-        
-        // 默认通用建议
+        // 没有查重数据时只给通用建议，不编造章节相似度
+        advice.setHighRiskAreas(new ArrayList<>());
+        advice.setGoodAspects(new ArrayList<>());
         advice.setGeneralTips(Arrays.asList(
             "养成及时记录参考文献的习惯",
             "学会用自己的语言表述他人观点",
@@ -256,55 +252,81 @@ public class AcademicIntegrityServiceImpl implements AcademicIntegrityService {
     }
     
     /**
-     * 分析高风险区域
+     * 分析高风险来源：按句级命中的来源论文聚合，相似度取该来源内最高命中句的真实值。
+     * 句级明细为空（旧任务/句级分析降级）时，只按全篇真实重复率给出一条结论，不虚构章节。
      */
-    private List<PersonalAdviceDTO.HighRiskAreaDTO> analyzeHighRiskAreas(double similarity) {
+    private List<PersonalAdviceDTO.HighRiskAreaDTO> analyzeHighRiskAreas(double similarity,
+                                                                         List<CheckSentenceHit> hits) {
         List<PersonalAdviceDTO.HighRiskAreaDTO> areas = new ArrayList<>();
-        Random random = new Random();
-        
-        // 根据相似度生成不同的风险区域
-        if (similarity > 30) {
-            // 高相似度时，多个高风险区域
-            String[] sections = {"文献综述", "理论框架", "研究现状"};
-            for (String section : sections) {
-                PersonalAdviceDTO.HighRiskAreaDTO area = new PersonalAdviceDTO.HighRiskAreaDTO();
-                area.setSection(section);
-                area.setSimilarity(25.0 + random.nextDouble() * 15); // 25-40%
-                area.setIssue("相似度过高");
-                area.setSuggestion("建议重新组织语言表达，增加原创性内容");
-                areas.add(area);
+
+        // 按来源论文分组（排除引用句：引用命中不计入重复）
+        Map<String, List<CheckSentenceHit>> bySource = new LinkedHashMap<>();
+        if (hits != null) {
+            for (CheckSentenceHit hit : hits) {
+                if (Integer.valueOf(1).equals(hit.getIsCitation())) {
+                    continue;
+                }
+                String key = hit.getHitPaperId() != null ? hit.getHitPaperId().toString()
+                        : (hit.getHitPaperTitle() != null ? hit.getHitPaperTitle() : "unknown");
+                bySource.computeIfAbsent(key, k -> new ArrayList<>()).add(hit);
             }
-        } else if (similarity > 20) {
-            // 中等相似度时，1-2个风险区域
+        }
+
+        for (List<CheckSentenceHit> group : bySource.values()) {
+            CheckSentenceHit top = group.stream()
+                    .max(Comparator.comparingDouble(h -> h.getSimilarity() == null
+                            ? 0.0 : h.getSimilarity().doubleValue()))
+                    .orElse(null);
+            if (top == null) {
+                continue;
+            }
+            double maxSimilarity = top.getSimilarity() == null ? 0.0 : top.getSimilarity().doubleValue();
+
             PersonalAdviceDTO.HighRiskAreaDTO area = new PersonalAdviceDTO.HighRiskAreaDTO();
-            area.setSection("文献综述");
-            area.setSimilarity(20.0 + random.nextDouble() * 15); // 20-35%
-            area.setIssue("相似度偏高");
-            area.setSuggestion("建议完善引用标注，优化段落表达");
+            area.setSection(top.getHitPaperTitle() != null
+                    ? "与《" + top.getHitPaperTitle() + "》相似段落" : "相似段落");
+            area.setSimilarity(round2(maxSimilarity));
+            area.setIssue(String.format("命中 %d 句，最高句相似度 %.2f%%", group.size(), maxSimilarity));
+            area.setSuggestion(maxSimilarity >= 50
+                    ? "建议重写该段落的表述，避免与来源论文大段雷同"
+                    : "建议调整语序与措辞，并规范引用标注");
             areas.add(area);
         }
-        
+
+        areas.sort(Comparator.comparing(PersonalAdviceDTO.HighRiskAreaDTO::getSimilarity).reversed());
+        if (areas.size() > 5) {
+            areas = new ArrayList<>(areas.subList(0, 5));
+        }
+        if (areas.isEmpty() && similarity > 20) {
+            // 无句级明细：只给全篇真实结论，不再按"文献综述/理论框架"编造
+            PersonalAdviceDTO.HighRiskAreaDTO whole = new PersonalAdviceDTO.HighRiskAreaDTO();
+            whole.setSection("全文");
+            whole.setSimilarity(round2(similarity));
+            whole.setIssue("论文整体相似度偏高（无句级明细可定位到具体来源）");
+            whole.setSuggestion("建议对照查重报告逐段修改，补充原创分析并规范引用");
+            areas.add(whole);
+        }
         return areas;
     }
     
     /**
-     * 识别表现良好的方面
+     * 识别表现良好的方面：仅在整体重复率较低时给出真实结论，否则不虚报优点。
      */
     private List<PersonalAdviceDTO.GoodAspectDTO> identifyGoodAspects(double similarity) {
         List<PersonalAdviceDTO.GoodAspectDTO> aspects = new ArrayList<>();
-        Random random = new Random();
-        
-        String[] goodSections = {"研究方法", "数据分析", "结论"};
-        for (String section : goodSections) {
+        if (similarity <= 15) {
             PersonalAdviceDTO.GoodAspectDTO aspect = new PersonalAdviceDTO.GoodAspectDTO();
-            aspect.setSection(section);
-            aspect.setSimilarity(5.0 + random.nextDouble() * 10); // 5-15%
-            aspect.setStrength("原创性较好");
-            aspect.setEncouragement("继续保持独立思考和严谨态度");
+            aspect.setSection("全文");
+            aspect.setSimilarity(round2(similarity));
+            aspect.setStrength("整体原创性良好");
+            aspect.setEncouragement("继续保持独立思考和严谨的引用习惯");
             aspects.add(aspect);
         }
-        
         return aspects;
+    }
+
+    private double round2(double value) {
+        return Math.round(value * 100) / 100.0;
     }
     
     /**
