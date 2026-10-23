@@ -129,7 +129,7 @@ public class StudentInfoController {
      */
     @PostMapping("/update-email")
     public Result<String> updateEmail(@Valid @RequestBody UpdateEmailReq updateReq) {
-        log.info("接收用户邮箱更新请求：用户ID={}", updateReq.getUserId());
+        log.info("接收用户邮箱更新请求");
         return infoService.updateEmail(updateReq);
     }
 

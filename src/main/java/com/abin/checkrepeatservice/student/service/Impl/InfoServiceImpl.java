@@ -3,6 +3,7 @@ package com.abin.checkrepeatservice.student.service.Impl;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.common.mapper.CollegeMapper;
+import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
 import com.abin.checkrepeatservice.mapper.SysRoleMapper;
 import com.abin.checkrepeatservice.mapper.SysUserMapper;
 import com.abin.checkrepeatservice.pojo.dto.UpdatePasswordReq;
@@ -43,6 +44,7 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.security.SecureRandom;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -51,6 +53,15 @@ import java.util.stream.Collectors;
 @Slf4j
 @Service
 public class InfoServiceImpl implements InfoService {
+
+    /**
+     * 邮箱验证码：用 SecureRandom 生成（保留前导零），Redis 记录发送频控与校验失败次数
+     */
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+    private static final int EMAIL_CODE_TTL_SECONDS = 300;
+    private static final int EMAIL_CODE_SEND_INTERVAL_SECONDS = 60;
+    private static final int EMAIL_CODE_MAX_ATTEMPTS = 5;
+
     @Resource
     private SysUserMapper sysUserMapper;
 
@@ -443,22 +454,37 @@ public class InfoServiceImpl implements InfoService {
 
     @Override
     public Result<String> sendEmailCode(String email) {
-        // 生成6位随机验证码
-        String code = String.valueOf((int) ((Math.random() * 9 + 1) * 100000));
+        String targetEmail = email == null ? "" : email.trim();
+        if (!StringUtils.hasText(targetEmail)) {
+            return Result.error(ResultCode.PARAM_ERROR, "邮箱地址不能为空");
+        }
 
-        // 将验证码存储到Redis中，设置5分钟过期时间
-        redisTemplate.opsForValue().set("email_code:" + email, code, 300, TimeUnit.SECONDS);
+        // 同一邮箱 60 秒内只允许发送一次，避免接口被当作邮件轰炸通道
+        String intervalKey = "email_code_interval:" + targetEmail;
+        Boolean allowed = redisTemplate.opsForValue().setIfAbsent(
+                intervalKey, "1", EMAIL_CODE_SEND_INTERVAL_SECONDS, TimeUnit.SECONDS);
+        if (Boolean.FALSE.equals(allowed)) {
+            return Result.error(ResultCode.PARAM_ERROR, "验证码发送过于频繁，请稍后再试");
+        }
+
+        // SecureRandom 生成 6 位验证码（保留前导零），不再用可预测的 Math.random
+        String code = String.format("%06d", SECURE_RANDOM.nextInt(1_000_000));
+        redisTemplate.opsForValue().set("email_code:" + targetEmail, code, EMAIL_CODE_TTL_SECONDS, TimeUnit.SECONDS);
+        // 新验证码下发时清零该邮箱的校验失败计数
+        redisTemplate.delete("email_code_attempts:" + targetEmail);
 
         // 发送邮件
         try {
             SimpleMailMessage message = new SimpleMailMessage();
             message.setFrom(fromEmail);
-            message.setTo(email);
+            message.setTo(targetEmail);
             message.setSubject("验证码");
             message.setText("您的验证码是：" + code + "，5分钟内有效。");
             mailSender.send(message);
             return Result.success("验证码发送成功");
         } catch (Exception e) {
+            // 发送失败则放开频控，允许用户立即重试
+            redisTemplate.delete(intervalKey);
             log.error("发送验证码失败", e);
             return Result.error(ResultCode.SYSTEM_ERROR, "验证码发送失败");
         }
@@ -518,26 +544,55 @@ public class InfoServiceImpl implements InfoService {
 
     @Override
     public Result<String> updateEmail(UpdateEmailReq updateReq) {
-        // 获取用户ID和新邮箱
-        Long userId = updateReq.getUserId();
-        String newEmail = updateReq.getNewEmail();
-        String verificationCode = updateReq.getVerificationCode();
+        if (updateReq == null
+                || !StringUtils.hasText(updateReq.getNewEmail())
+                || !StringUtils.hasText(updateReq.getVerificationCode())) {
+            return Result.error(ResultCode.PARAM_ERROR, "新邮箱和验证码不能为空");
+        }
 
-        // 检查验证码是否正确
+        // 归属校验：以登录态为准，请求体里的 userId 只允许等于当前用户
+        Long currentUserId;
+        try {
+            currentUserId = UserBusinessInfoUtils.getCurrentUserId();
+        } catch (Exception e) {
+            return Result.error(ResultCode.NOT_LOGIN, "用户未登录");
+        }
+        if (updateReq.getUserId() != null && !updateReq.getUserId().equals(currentUserId)) {
+            log.warn("邮箱更新越权拦截：当前用户={}, 请求用户={}", currentUserId, updateReq.getUserId());
+            return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权修改其他用户的邮箱");
+        }
+
+        String newEmail = updateReq.getNewEmail().trim();
+        String verificationCode = updateReq.getVerificationCode().trim();
+
+        // 检查验证码是否正确：连续错误达到上限后验证码作废，防止 6 位码被暴力枚举
         String storedCode = redisTemplate.opsForValue().get("email_code:" + newEmail);
-        if (!verificationCode.equals(storedCode)) {
+        if (storedCode == null) {
+            return Result.error(ResultCode.PARAM_ERROR, "验证码已失效，请重新获取");
+        }
+        if (!storedCode.equals(verificationCode)) {
+            String attemptKey = "email_code_attempts:" + newEmail;
+            Long attempts = redisTemplate.opsForValue().increment(attemptKey);
+            if (attempts != null && attempts == 1L) {
+                redisTemplate.expire(attemptKey, EMAIL_CODE_TTL_SECONDS, TimeUnit.SECONDS);
+            }
+            if (attempts != null && attempts >= EMAIL_CODE_MAX_ATTEMPTS) {
+                redisTemplate.delete("email_code:" + newEmail);
+                redisTemplate.delete(attemptKey);
+                log.warn("邮箱验证码连续错误次数过多已作废：邮箱={}", newEmail);
+            }
             return Result.error(ResultCode.PARAM_ERROR, "验证码错误");
         }
 
-        // 查找用户
-        SysUser user = sysUserMapper.selectById(userId);
+        // 查找当前登录用户（不再信任请求体里的 userId）
+        SysUser user = sysUserMapper.selectById(currentUserId);
         if (user == null) {
             return Result.error(ResultCode.PARAM_ERROR, "用户不存在");
         }
 
         // 检查邮箱是否已被其他用户使用
         SysUser existingUser = sysUserMapper.selectByEmail(newEmail);
-        if (existingUser != null && !existingUser.getId().equals(userId)) {
+        if (existingUser != null && !existingUser.getId().equals(currentUserId)) {
             return Result.error(ResultCode.PARAM_ERROR, "该邮箱已被其他用户使用");
         }
 
@@ -546,8 +601,9 @@ public class InfoServiceImpl implements InfoService {
         user.setEmailVerified(0); // 新邮箱需要重新验证
         sysUserMapper.updateById(user);
 
-        // 删除已使用的验证码
+        // 删除已使用的验证码与失败计数
         redisTemplate.delete("email_code:" + newEmail);
+        redisTemplate.delete("email_code_attempts:" + newEmail);
 
         return Result.success("邮箱更新成功，请重新验证新邮箱");
     }
