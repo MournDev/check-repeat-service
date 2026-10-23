@@ -13,6 +13,10 @@ server:
 kkfileview:
   base-url: ${KKFILEVIEW_BASE_URL:http://localhost:8080}
 
+# 前端页面地址（邮箱验证邮件里的链接使用）
+app:
+  frontend-base-url: ${FRONTEND_BASE_URL:http://localhost:3000}
+
 # 对象存储
 minio:
   # 后端连 MinIO 用（SDK 连接地址）。容器部署下是 compose 网络别名，只有容器内能解析。

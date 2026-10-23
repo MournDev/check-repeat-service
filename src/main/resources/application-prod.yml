@@ -22,6 +22,8 @@ kkfileview:
 # 地址，线上本机并不存在，且后端 8080 只发布在 127.0.0.1，容器必然取不到文件。
 app:
   host: ${APP_HOST:check-backend}
+  # 邮箱验证邮件里的链接指向的前端页面；部署时可用 FRONTEND_BASE_URL 覆盖
+  frontend-base-url: ${FRONTEND_BASE_URL:https://check-repeat-system.xyz}
 
 # 对象存储
 minio:

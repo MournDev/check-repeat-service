@@ -101,6 +101,13 @@ public class InfoServiceImpl implements InfoService {
     @Value("${spring.mail.username}")
     private String fromEmail;
 
+    /**
+     * 前端访问地址：邮箱验证邮件里的链接需要指向用户浏览器可打开的前端页面，
+     * 不能再用后端地址或写死 localhost（否则生产环境点开必然失败）。
+     */
+    @Value("${app.frontend-base-url:http://localhost:3000}")
+    private String frontendBaseUrl;
+
 
     @Resource
     private SysLoginLogMapper sysLoginLogMapper;
@@ -518,27 +525,49 @@ public class InfoServiceImpl implements InfoService {
 
     @Override
     public Result<String> sendVerifyEmail(String email) {
+        String targetEmail = email == null ? "" : email.trim();
+        if (!StringUtils.hasText(targetEmail)) {
+            return Result.error(ResultCode.PARAM_ERROR, "邮箱地址不能为空");
+        }
+
+        // 同一邮箱 60 秒内只允许发送一次，避免接口被当作邮件轰炸通道
+        String intervalKey = "email_verify_interval:" + targetEmail;
+        Boolean allowed = redisTemplate.opsForValue().setIfAbsent(
+                intervalKey, "1", EMAIL_CODE_SEND_INTERVAL_SECONDS, TimeUnit.SECONDS);
+        if (Boolean.FALSE.equals(allowed)) {
+            return Result.error(ResultCode.PARAM_ERROR, "验证邮件发送过于频繁，请稍后再试");
+        }
+
         // 生成唯一验证token
         String token = UUID.randomUUID().toString().replace("-", "");
 
         // 将token和邮箱存储到Redis中，设置24小时过期时间
-        redisTemplate.opsForValue().set("email_verify_token:" + token, email, 24, TimeUnit.HOURS);
+        redisTemplate.opsForValue().set("email_verify_token:" + token, targetEmail, 24, TimeUnit.HOURS);
 
-        // 构建验证链接
-        String verifyUrl = "http://localhost:3000/verify-email?token=" + token;
+        // 构建验证链接：基地址取自配置（可用 FRONTEND_BASE_URL 环境变量覆盖）
+        String verifyUrl = trimTrailingSlash(frontendBaseUrl) + "/verify-email?token=" + token;
         // 发送验证邮件
         try {
             SimpleMailMessage message = new SimpleMailMessage();
             message.setFrom(fromEmail);
-            message.setTo(email);
+            message.setTo(targetEmail);
             message.setSubject("邮箱验证");
             message.setText("请点击以下链接完成邮箱验证：\n" + verifyUrl + "\n链接24小时内有效。");
             mailSender.send(message);
             return Result.success("验证邮件发送成功");
         } catch (Exception e) {
+            // 发送失败则放开频控，允许用户立即重试
+            redisTemplate.delete(intervalKey);
             log.error("发送验证邮件失败", e);
             return Result.error(ResultCode.SYSTEM_ERROR, "验证邮件发送失败");
         }
+    }
+
+    private String trimTrailingSlash(String url) {
+        if (url == null || url.isBlank()) {
+            return "http://localhost:3000";
+        }
+        return url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
     }
 
 
