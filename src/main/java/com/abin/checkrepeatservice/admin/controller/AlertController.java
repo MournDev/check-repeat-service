@@ -2,14 +2,12 @@ package com.abin.checkrepeatservice.admin.controller;
 
 import com.abin.checkrepeatservice.admin.mapper.AlertRecordMapper;
 import com.abin.checkrepeatservice.admin.mapper.AlertRuleMapper;
+import com.abin.checkrepeatservice.admin.service.AlertEvaluationService;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
-import com.abin.checkrepeatservice.monitor.service.SystemMonitorService;
 import com.abin.checkrepeatservice.pojo.entity.AlertRecord;
 import com.abin.checkrepeatservice.pojo.entity.AlertRule;
-import com.abin.checkrepeatservice.pojo.entity.SysLoginLog;
-import com.abin.checkrepeatservice.user.mapper.SysLoginLogMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import jakarta.annotation.Resource;
@@ -48,10 +46,7 @@ public class AlertController {
     private AlertRecordMapper alertRecordMapper;
 
     @Resource
-    private SystemMonitorService systemMonitorService;
-
-    @Resource
-    private SysLoginLogMapper sysLoginLogMapper;
+    private AlertEvaluationService alertEvaluationService;
 
     /**
      * 获取智能预警配置（数据库无规则时返回内置默认阈值）
@@ -63,7 +58,7 @@ public class AlertController {
             config.put("enabled", true);
 
             List<Map<String, Object>> rules = new ArrayList<>();
-            for (AlertRule rule : loadEnabledRules()) {
+            for (AlertRule rule : alertEvaluationService.loadEnabledRules()) {
                 Map<String, Object> item = new HashMap<>();
                 item.put("type", rule.getRuleType());
                 item.put("threshold", rule.getThreshold());
@@ -107,7 +102,7 @@ public class AlertController {
                     Double threshold = asDouble(ruleMap.get("threshold"));
                     Integer duration = asInt(ruleMap.get("duration"), DEFAULT_DURATION_SECONDS);
                     String severity = asString(ruleMap.get("severity"));
-                    upsertRule(ruleType, threshold, duration,
+                    alertEvaluationService.upsertRule(ruleType, threshold, duration,
                             severity == null ? "WARNING" : severity);
                 }
             }
@@ -125,7 +120,8 @@ public class AlertController {
     @GetMapping("/active")
     public Result<List<ActiveAlertVO>> getActiveAlerts() {
         try {
-            evaluateRules(loadEnabledRules());
+            // 页面读取时主动评估一次（定时任务每 5 分钟已评估，这里作为兜底）
+            alertEvaluationService.evaluateActiveRules();
 
             List<ActiveAlertVO> alerts = new ArrayList<>();
             List<AlertRecord> records = alertRecordMapper.selectList(
@@ -176,196 +172,6 @@ public class AlertController {
             log.error("处理预警失败: alertId={}", req.getAlertId(), e);
             return Result.error(ResultCode.SYSTEM_ERROR, "处理预警失败，系统异常，请稍后重试");
         }
-    }
-
-    // ==================== 规则与评估 ====================
-
-    /**
-     * 启用的规则；数据库无配置时返回内置默认规则（只读、不落库）
-     */
-    private List<AlertRule> loadEnabledRules() {
-        List<AlertRule> rules = alertRuleMapper.selectList(new LambdaQueryWrapper<AlertRule>()
-                .eq(AlertRule::getEnabled, 1));
-        if (!rules.isEmpty()) {
-            return rules;
-        }
-        return defaultRules();
-    }
-
-    private List<AlertRule> defaultRules() {
-        return List.of(
-                buildRule("CPU 使用率预警", "high_cpu_usage", "systemCpuUsage", 80.0, 300, "WARNING"),
-                buildRule("内存使用率预警", "high_memory_usage", "heapUsagePercent", 85.0, 300, "WARNING"),
-                buildRule("磁盘使用率预警", "high_disk_usage", "diskUsage", 90.0, 300, "WARNING"),
-                buildRule("登录失败预警", "frequent_login_failures", "loginFailCount", 5.0, 300, "WARNING"));
-    }
-
-    private AlertRule buildRule(String name, String type, String metric,
-                                Double threshold, Integer duration, String severity) {
-        AlertRule rule = new AlertRule();
-        rule.setRuleName(name);
-        rule.setRuleType(type);
-        rule.setMetricName(metric);
-        rule.setThreshold(threshold);
-        rule.setDuration(duration);
-        rule.setSeverity(severity);
-        rule.setEnabled(1);
-        return rule;
-    }
-
-    private void upsertRule(String ruleType, Double threshold, Integer duration, String severity) {
-        AlertRule existing = alertRuleMapper.selectOne(new LambdaQueryWrapper<AlertRule>()
-                .eq(AlertRule::getRuleType, ruleType)
-                .orderByDesc(AlertRule::getId)
-                .last("LIMIT 1"));
-        AlertRule target = existing == null ? new AlertRule() : existing;
-        target.setRuleType(ruleType);
-        target.setRuleName(ruleNameOf(ruleType));
-        target.setMetricName(metricNameOf(ruleType));
-        target.setThreshold(threshold == null ? defaultThresholdOf(ruleType) : threshold);
-        target.setDuration(duration == null ? DEFAULT_DURATION_SECONDS : duration);
-        target.setSeverity(severity);
-        target.setEnabled(1);
-        if (existing == null) {
-            alertRuleMapper.insert(target);
-        } else {
-            alertRuleMapper.updateById(target);
-        }
-    }
-
-    /**
-     * 按当前真实指标评估规则：触发则新增/刷新 ACTIVE 记录，恢复则自动 RESOLVED
-     */
-    private void evaluateRules(List<AlertRule> rules) {
-        for (AlertRule rule : rules) {
-            try {
-                Double value = readMetric(rule);
-                if (value == null || rule.getThreshold() == null) {
-                    continue;
-                }
-                boolean breach = value >= rule.getThreshold();
-                AlertRecord active = findActive(rule);
-                if (breach) {
-                    if (active == null) {
-                        AlertRecord record = new AlertRecord();
-                        record.setRuleId(rule.getId());
-                        record.setRuleName(rule.getRuleName());
-                        record.setSeverity(rule.getSeverity() == null ? "WARNING" : rule.getSeverity());
-                        record.setTitle(titleOf(rule.getRuleType()));
-                        record.setMessage(buildMessage(rule, value));
-                        record.setMetricValue(value);
-                        record.setStatus(STATUS_ACTIVE);
-                        record.setTriggerTime(LocalDateTime.now());
-                        alertRecordMapper.insert(record);
-                    } else {
-                        active.setRuleId(rule.getId());
-                        active.setSeverity(rule.getSeverity() == null ? "WARNING" : rule.getSeverity());
-                        active.setMetricValue(value);
-                        active.setMessage(buildMessage(rule, value));
-                        alertRecordMapper.updateById(active);
-                    }
-                } else if (active != null) {
-                    active.setStatus(STATUS_RESOLVED);
-                    active.setResolveTime(LocalDateTime.now());
-                    active.setResolvedBy("SYSTEM");
-                    alertRecordMapper.updateById(active);
-                }
-            } catch (Exception e) {
-                log.warn("预警规则评估失败: type={}, error={}", rule.getRuleType(), e.getMessage());
-            }
-        }
-    }
-
-    private AlertRecord findActive(AlertRule rule) {
-        return alertRecordMapper.selectOne(new LambdaQueryWrapper<AlertRecord>()
-                .eq(AlertRecord::getRuleName, rule.getRuleName())
-                .eq(AlertRecord::getStatus, STATUS_ACTIVE)
-                .orderByDesc(AlertRecord::getTriggerTime)
-                .last("LIMIT 1"));
-    }
-
-    private Double readMetric(AlertRule rule) {
-        String type = rule.getRuleType();
-        if (type == null) {
-            return null;
-        }
-        switch (type) {
-            case "high_cpu_usage": {
-                Map<String, Object> cpu = systemMonitorService.getCpuInfo();
-                Object system = cpu.get("systemCpuUsage");
-                Object process = cpu.get("processCpuUsage");
-                return firstNumber(system, process);
-            }
-            case "high_memory_usage":
-                return firstNumber(systemMonitorService.getMemoryInfo().get("heapUsagePercent"));
-            case "high_disk_usage":
-                return firstNumber(systemMonitorService.getDiskInfo().get("usage"));
-            case "frequent_login_failures": {
-                int seconds = rule.getDuration() == null || rule.getDuration() <= 0
-                        ? DEFAULT_DURATION_SECONDS : rule.getDuration();
-                Long count = sysLoginLogMapper.selectCount(new LambdaQueryWrapper<SysLoginLog>()
-                        .eq(SysLoginLog::getLoginResult, 0)
-                        .ge(SysLoginLog::getLoginTime, LocalDateTime.now().minusSeconds(seconds)));
-                return count == null ? 0.0 : count.doubleValue();
-            }
-            default:
-                return null;
-        }
-    }
-
-    private Double firstNumber(Object... values) {
-        for (Object value : values) {
-            if (value instanceof Number n) {
-                return n.doubleValue();
-            }
-        }
-        return null;
-    }
-
-    private String buildMessage(AlertRule rule, double value) {
-        double threshold = rule.getThreshold() == null ? 0 : rule.getThreshold();
-        return switch (rule.getRuleType()) {
-            case "high_cpu_usage" -> String.format("当前 CPU 使用率 %.1f%%，阈值 %.1f%%", value, threshold);
-            case "high_memory_usage" -> String.format("当前内存使用率 %.1f%%，阈值 %.1f%%", value, threshold);
-            case "high_disk_usage" -> String.format("当前磁盘使用率 %.1f%%，阈值 %.1f%%", value, threshold);
-            case "frequent_login_failures" -> String.format("统计窗口内登录失败 %.0f 次，阈值 %.0f 次",
-                    value, threshold);
-            default -> String.format("指标当前值 %.1f，阈值 %.1f", value, threshold);
-        };
-    }
-
-    private String titleOf(String ruleType) {
-        return switch (ruleType == null ? "" : ruleType) {
-            case "high_cpu_usage" -> "CPU 使用率过高";
-            case "high_memory_usage" -> "内存使用率过高";
-            case "high_disk_usage" -> "磁盘使用率过高";
-            case "frequent_login_failures" -> "登录失败次数过多";
-            default -> "系统指标异常";
-        };
-    }
-
-    private String ruleNameOf(String ruleType) {
-        return titleOf(ruleType);
-    }
-
-    private String metricNameOf(String ruleType) {
-        return switch (ruleType == null ? "" : ruleType) {
-            case "high_cpu_usage" -> "systemCpuUsage";
-            case "high_memory_usage" -> "heapUsagePercent";
-            case "high_disk_usage" -> "diskUsage";
-            case "frequent_login_failures" -> "loginFailCount";
-            default -> ruleType;
-        };
-    }
-
-    private double defaultThresholdOf(String ruleType) {
-        return switch (ruleType == null ? "" : ruleType) {
-            case "high_cpu_usage" -> 80.0;
-            case "high_memory_usage" -> 85.0;
-            case "high_disk_usage" -> 90.0;
-            case "frequent_login_failures" -> 5.0;
-            default -> 80.0;
-        };
     }
 
     private String levelOf(String severity) {
