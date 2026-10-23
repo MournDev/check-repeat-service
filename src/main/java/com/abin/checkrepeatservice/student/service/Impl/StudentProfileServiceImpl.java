@@ -4,6 +4,7 @@ import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
 import com.abin.checkrepeatservice.mapper.SysUserMapper;
+import com.abin.checkrepeatservice.pojo.entity.InstantMessage;
 import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
 import com.abin.checkrepeatservice.pojo.entity.SysUser;
 import com.abin.checkrepeatservice.pojo.entity.SystemMessage;
@@ -13,6 +14,8 @@ import com.abin.checkrepeatservice.mapper.FileInfoMapper;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
 import com.abin.checkrepeatservice.student.service.StudentProfileService;
 import com.abin.checkrepeatservice.user.service.MessageService;
+import com.abin.checkrepeatservice.user.mapper.SystemMessageMapper;
+import com.abin.checkrepeatservice.user.mapper.InstantMessageMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -22,7 +25,11 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
 /**
  * 学生个人信息管理服务实现类
@@ -42,6 +49,12 @@ public class StudentProfileServiceImpl implements StudentProfileService {
     
     @Resource
     private MessageService messageService;
+
+    @Resource
+    private SystemMessageMapper systemMessageMapper;
+
+    @Resource
+    private InstantMessageMapper instantMessageMapper;
 
     @Override
     public Result<StudentProfileDTO> getStudentProfile(Long studentId) {
@@ -231,15 +244,70 @@ public class StudentProfileServiceImpl implements StudentProfileService {
                 return Result.error(ResultCode.PARAM_ERROR, "您与该导师无指导关系");
             }
 
-            // 获取消息历史（这里可以调用消息服务获取具体的历史记录）
-            // 暂时返回模拟数据，实际应该调用消息服务
-            List<Object> history = new ArrayList<>();
+            // 分页参数兜底
+            int current = pageNum == null || pageNum < 1 ? 1 : pageNum;
+            int size = pageSize == null || pageSize < 1 ? 10 : pageSize;
+
+            // 真实沟通记录：合并「私信 system_message」与「即时消息 instant_message」两个通道
+            List<Map<String, Object>> combined = new ArrayList<>();
+
+            List<SystemMessage> privateMessages = systemMessageMapper.selectList(
+                    new LambdaQueryWrapper<SystemMessage>()
+                            .eq(SystemMessage::getIsDeleted, 0)
+                            .and(w -> w.and(a -> a.eq(SystemMessage::getSenderId, studentId)
+                                                     .eq(SystemMessage::getReceiverId, advisorId))
+                                        .or(b -> b.eq(SystemMessage::getSenderId, advisorId)
+                                                     .eq(SystemMessage::getReceiverId, studentId)))
+                            .orderByDesc(SystemMessage::getCreateTime)
+                            .last("LIMIT 200"));
+            for (SystemMessage message : privateMessages) {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("id", message.getId() == null ? null : "sys_" + message.getId());
+                item.put("senderId", message.getSenderId() == null ? null : message.getSenderId().toString());
+                item.put("receiverId", message.getReceiverId() == null ? null : message.getReceiverId().toString());
+                item.put("direction", Objects.equals(message.getSenderId(), studentId) ? "student" : "advisor");
+                item.put("title", message.getTitle());
+                item.put("content", message.getContent());
+                item.put("messageType", message.getMessageType());
+                item.put("isRead", message.getIsRead());
+                item.put("createTime", message.getCreateTime());
+                combined.add(item);
+            }
+
+            List<InstantMessage> instantMessages = instantMessageMapper.selectList(
+                    new LambdaQueryWrapper<InstantMessage>()
+                            .eq(InstantMessage::getIsDeleted, 0)
+                            .and(w -> w.and(a -> a.eq(InstantMessage::getSenderId, studentId)
+                                                     .eq(InstantMessage::getReceiverId, advisorId))
+                                        .or(b -> b.eq(InstantMessage::getSenderId, advisorId)
+                                                     .eq(InstantMessage::getReceiverId, studentId)))
+                            .orderByDesc(InstantMessage::getSentTime)
+                            .last("LIMIT 200"));
+            for (InstantMessage message : instantMessages) {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("id", message.getId() == null ? null : "im_" + message.getId());
+                item.put("senderId", message.getSenderId() == null ? null : message.getSenderId().toString());
+                item.put("receiverId", message.getReceiverId() == null ? null : message.getReceiverId().toString());
+                item.put("direction", Objects.equals(message.getSenderId(), studentId) ? "student" : "advisor");
+                item.put("title", "即时消息");
+                item.put("content", message.getContent());
+                item.put("messageType", message.getMessageType());
+                item.put("isRead", null);
+                item.put("createTime", message.getSentTime());
+                combined.add(item);
+            }
+
+            // 按时间倒序合并后内存分页
+            combined.sort(Comparator.comparing(
+                    (Map<String, Object> item) -> (LocalDateTime) item.get("createTime"),
+                    Comparator.nullsLast(Comparator.reverseOrder())));
+            int from = (current - 1) * size;
+            List<Map<String, Object>> history = from >= combined.size()
+                    ? new ArrayList<>()
+                    : new ArrayList<>(combined.subList(from, Math.min(from + size, combined.size())));
             
-            // 可以添加分页参数处理
-            if (pageNum == null) pageNum = 1;
-            if (pageSize == null) pageSize = 10;
-            
-            log.info("获取师生沟通记录成功: studentId={}, advisorId={}", studentId, advisorId);
+            log.info("获取师生沟通记录成功: studentId={}, advisorId={}, count={}",
+                    studentId, advisorId, history.size());
             return Result.success("获取沟通记录成功", history);
         } catch (Exception e) {
             log.error("获取沟通记录失败: studentId={}, advisorId={}", studentId, advisorId, e);
