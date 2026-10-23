@@ -233,8 +233,9 @@ public class AuthServiceImpl implements AuthService {
             }
             log.warn("用户登录失败：用户名={}，原因=用户名或密码错误，剩余尝试次数={}",
                     loginReq.getUsername(), outcome.getRemainingAttempts());
-            String failMsg = "用户名或密码错误（连续再错 " + outcome.getRemainingAttempts()
-                    + " 次账号将临时锁定）";
+            String failMsg = outcome.isLockingEnabled()
+                    ? "用户名或密码错误（连续再错 " + outcome.getRemainingAttempts() + " 次账号将临时锁定）"
+                    : "用户名或密码错误";
             recordLoginLog(null, loginReq.getUsername(), loginIp, loginLocation,
                     loginDevice, 0, failMsg);
             businessMetricsService.record(BusinessMetricsService.Event.USER_LOGIN,

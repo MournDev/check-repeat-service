@@ -1,7 +1,10 @@
 package com.abin.checkrepeatservice.user.service.Impl;
 
+import com.abin.checkrepeatservice.admin.mapper.SystemConfigMapper;
 import com.abin.checkrepeatservice.common.Exception.BusinessException;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
+import com.abin.checkrepeatservice.pojo.entity.SystemConfig;
+import com.alibaba.fastjson2.JSON;
 import jakarta.annotation.Resource;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -9,6 +12,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -52,6 +56,16 @@ public class LoginAttemptService {
     @Value("${login.security.window-seconds:900}")
     private long windowSeconds;
 
+    /** 后台安全配置的缓存有效期：保存后最多 10 秒生效，避免每次登录都查库 */
+    private static final long POLICY_CACHE_MILLIS = 10_000L;
+    private static final String SECURITY_CONFIG_KEY = "security_config";
+
+    private volatile LoginPolicy policyCache;
+    private volatile long policyCachedAt;
+
+    @Resource
+    private SystemConfigMapper systemConfigMapper;
+
     /*
      * 刻意复用 StringRedisTemplate（同 AuthServiceImpl 找回密码限流）：
      * 计数需要 increment 后再 get，JDK 序列化的 RedisTemplate 读不回裸整数。
@@ -64,27 +78,31 @@ public class LoginAttemptService {
      * 避免锁定期间继续消耗 BCrypt 算力）。
      */
     public void assertLoginAllowed(String username, String clientIp) {
+        LoginPolicy policy = currentPolicy();
+        if (!policy.enabled()) {
+            return;
+        }
         try {
             // 1. 账号维度（优先判定：提示对用户最明确）
             long userFails = readCount(USER_KEY_PREFIX + username);
-            if (userFails >= userMaxFailures) {
+            if (userFails >= policy.userMaxFailures()) {
                 log.warn("账号处于登录锁定窗口 - username: {}, fails: {}, ip: {}",
                         username, userFails, clientIp);
                 throw new BusinessException(ResultCode.LOGIN_TOO_MANY_ATTEMPTS,
                         "账号或密码连续错误次数过多，为保护账号安全已临时锁定，请"
-                                + lockMinutesText(ttlOf(USER_KEY_PREFIX + username)) + "后再试",
+                                + lockMinutesText(ttlOf(USER_KEY_PREFIX + username, policy.windowSeconds())) + "后再试",
                         null);
             }
 
             // 2. IP 维度（取不到真实 IP 时跳过，避免把全部来源不明请求聚到一个键）
             if (isRealIp(clientIp)) {
                 long ipFails = readCount(IP_KEY_PREFIX + clientIp);
-                if (ipFails >= ipMaxFailures) {
+                if (ipFails >= policy.ipMaxFailures()) {
                     log.warn("IP 处于登录限流窗口 - ip: {}, fails: {}, username: {}",
                             clientIp, ipFails, username);
                     throw new BusinessException(ResultCode.LOGIN_TOO_MANY_ATTEMPTS,
                             "当前网络登录尝试过于频繁，已临时限制，请"
-                                    + lockMinutesText(ttlOf(IP_KEY_PREFIX + clientIp)) + "后再试",
+                                    + lockMinutesText(ttlOf(IP_KEY_PREFIX + clientIp, policy.windowSeconds())) + "后再试",
                             null);
                 }
             }
@@ -102,34 +120,38 @@ public class LoginAttemptService {
      * @return 本次失败后的计数结果（是否已触发锁定、剩余尝试次数、窗口时长）
      */
     public FailureOutcome recordLoginFailure(String username, String clientIp) {
+        LoginPolicy policy = currentPolicy();
+        if (!policy.enabled()) {
+            return FailureOutcome.notLocked(policy.userMaxFailures(), policy.windowSeconds(), false);
+        }
         long userFails;
         long ipFails = 0;
         try {
-            userFails = incrementWithExpiry(USER_KEY_PREFIX + username);
+            userFails = incrementWithExpiry(USER_KEY_PREFIX + username, policy.windowSeconds());
         } catch (Exception e) {
             log.warn("账号维度登录失败计数写入异常 - username: {}", username, e);
             // fail-open：计数写不进去就当未锁定放行，避免影响正常认证流程
-            return FailureOutcome.notLocked(userMaxFailures, windowSeconds);
+            return FailureOutcome.notLocked(policy.userMaxFailures(), policy.windowSeconds(), true);
         }
         boolean ipLocked = false;
         if (isRealIp(clientIp)) {
             try {
-                ipFails = incrementWithExpiry(IP_KEY_PREFIX + clientIp);
-                ipLocked = ipFails >= ipMaxFailures;
+                ipFails = incrementWithExpiry(IP_KEY_PREFIX + clientIp, policy.windowSeconds());
+                ipLocked = ipFails >= policy.ipMaxFailures();
             } catch (Exception e) {
                 log.warn("IP 维度登录失败计数写入异常 - ip: {}", clientIp, e);
             }
         }
 
-        boolean userLocked = userFails >= userMaxFailures;
+        boolean userLocked = userFails >= policy.userMaxFailures();
         if (userLocked) {
             log.warn("账号已触发登录锁定 - username: {}, fails: {}", username, userFails);
         }
         if (ipLocked) {
             log.warn("IP 已触发登录限流 - ip: {}, fails: {}", clientIp, ipFails);
         }
-        long remaining = Math.max(0, userMaxFailures - userFails);
-        return new FailureOutcome(userLocked || ipLocked, userLocked, remaining, windowSeconds);
+        long remaining = Math.max(0, policy.userMaxFailures() - userFails);
+        return new FailureOutcome(userLocked || ipLocked, userLocked, remaining, policy.windowSeconds(), true);
     }
 
     /**
@@ -163,11 +185,11 @@ public class LoginAttemptService {
      * 失败计数 +1；首次计数（值为 1）时设置窗口 TTL，
      * increment 不会继承任何已有过期时间，必须显式补。
      */
-    private long incrementWithExpiry(String key) {
+    private long incrementWithExpiry(String key, long ttlSeconds) {
         Long count = stringRedisTemplate.opsForValue().increment(key);
         long current = count == null ? 0L : count;
         if (current == 1L) {
-            stringRedisTemplate.expire(key, windowSeconds, TimeUnit.SECONDS);
+            stringRedisTemplate.expire(key, ttlSeconds, TimeUnit.SECONDS);
         }
         return current;
     }
@@ -176,10 +198,10 @@ public class LoginAttemptService {
      * 取键剩余 TTL（秒）。-1（无 TTL）/-2（不存在）等异常结果一律回退为完整窗口时长，
      * 保证给用户的提示不会出现「请 0 分钟后再试」。
      */
-    private long ttlOf(String key) {
+    private long ttlOf(String key, long fallbackSeconds) {
         Long ttl = stringRedisTemplate.getExpire(key, TimeUnit.SECONDS);
         if (ttl == null || ttl <= 0) {
-            return windowSeconds;
+            return fallbackSeconds;
         }
         return ttl;
     }
@@ -195,6 +217,69 @@ public class LoginAttemptService {
     }
 
     /**
+     * 当前生效的登录锁定策略。
+     *
+     * <p>优先读后台安全配置 security_config（loginLockEnabled / maxFailedAttempts /
+     * lockDuration），10 秒缓存；未配置或读取失败时退回 application.yml 的
+     * login.security.* 默认值。</p>
+     */
+    private LoginPolicy currentPolicy() {
+        long now = System.currentTimeMillis();
+        LoginPolicy cached = policyCache;
+        if (cached != null && now - policyCachedAt < POLICY_CACHE_MILLIS) {
+            return cached;
+        }
+        LoginPolicy loaded = loadPolicy();
+        policyCache = loaded;
+        policyCachedAt = now;
+        return loaded;
+    }
+
+    private LoginPolicy loadPolicy() {
+        LoginPolicy fallback = new LoginPolicy(true, userMaxFailures, ipMaxFailures,
+                windowSeconds <= 0 ? 900 : windowSeconds);
+        try {
+            SystemConfig config = systemConfigMapper.selectByConfigKey(SECURITY_CONFIG_KEY);
+            if (config == null || config.getConfigValue() == null || config.getConfigValue().isBlank()) {
+                return fallback;
+            }
+            Map<String, Object> map = JSON.parseObject(config.getConfigValue(), Map.class);
+            boolean enabled = !(map.get("loginLockEnabled") instanceof Boolean b && !b);
+            int maxFailed = asPositiveInt(map.get("maxFailedAttempts"), fallback.userMaxFailures());
+            int lockMinutes = asPositiveInt(map.get("lockDuration"),
+                    (int) Math.max(1, fallback.windowSeconds() / 60));
+            return new LoginPolicy(enabled, maxFailed, fallback.ipMaxFailures(), lockMinutes * 60L);
+        } catch (Exception e) {
+            log.warn("读取安全配置失败，登录锁定沿用 yml 默认值", e);
+            return fallback;
+        }
+    }
+
+    private int asPositiveInt(Object value, int defaultValue) {
+        if (value instanceof Number n && n.intValue() > 0) {
+            return n.intValue();
+        }
+        if (value instanceof String s && !s.isBlank()) {
+            try {
+                int parsed = Integer.parseInt(s.trim());
+                if (parsed > 0) {
+                    return parsed;
+                }
+            } catch (NumberFormatException ignored) {
+                // 非法值走默认值
+            }
+        }
+        return defaultValue;
+    }
+
+    /**
+     * 生效中的登录锁定策略（enabled=false 时完全关闭账号/IP 锁定）。
+     */
+    private record LoginPolicy(boolean enabled, int userMaxFailures, int ipMaxFailures,
+                               long windowSeconds) {
+    }
+
+    /**
      * 登录失败计数结果。
      */
     @Getter
@@ -207,17 +292,20 @@ public class LoginAttemptService {
         private final long remainingAttempts;
         /** 锁定窗口时长（秒），用于拼装提示文案 */
         private final long windowSeconds;
+        /** 当前是否启用登录锁定（后台可关闭，关闭时不再提示"再错 N 次锁定"） */
+        private final boolean lockingEnabled;
 
         public FailureOutcome(boolean locked, boolean userLocked,
-                              long remainingAttempts, long windowSeconds) {
+                              long remainingAttempts, long windowSeconds, boolean lockingEnabled) {
             this.locked = locked;
             this.userLocked = userLocked;
             this.remainingAttempts = remainingAttempts;
             this.windowSeconds = windowSeconds;
+            this.lockingEnabled = lockingEnabled;
         }
 
-        static FailureOutcome notLocked(int userMaxFailures, long windowSeconds) {
-            return new FailureOutcome(false, false, userMaxFailures, windowSeconds);
+        static FailureOutcome notLocked(int userMaxFailures, long windowSeconds, boolean lockingEnabled) {
+            return new FailureOutcome(false, false, userMaxFailures, windowSeconds, lockingEnabled);
         }
     }
 }
