@@ -1826,14 +1826,11 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
                     // 这里简化处理，实际应该根据具体的章节结构解析
                     sectionComparisons = buildSectionComparisons(detailsFrom, detailsTo);
                 } catch (Exception e) {
-                    log.warn("解析章节对比数据失败，使用默认章节列表");
+                    log.warn("解析章节对比数据失败，章节对比将返回空列表");
                 }
             }
             
-            // 如果无法从报告中获取章节数据，使用默认章节列表
-            if (sectionComparisons.isEmpty()) {
-                sectionComparisons = buildDefaultSectionComparisons(fromTask, toTask);
-            }
+            // 报告中没有章节字段时不编造章节对比，如实返回空列表（前端隐藏章节模块）
             
             // 7. 构建响应
             VersionCompareResponseDTO response = new VersionCompareResponseDTO();
@@ -1976,43 +1973,6 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
     }
     
     /**
-     * 构建默认章节对比数据（当无法从报告中提取时使用）
-     */
-    private List<VersionCompareResponseDTO.SectionComparisonDTO> buildDefaultSectionComparisons(
-            CheckTask fromTask, CheckTask toTask) {
-        
-        List<VersionCompareResponseDTO.SectionComparisonDTO> comparisons = new ArrayList<>();
-        String[] sections = {"引言", "文献综述", "研究方法", "实验结果", "结论"};
-        Random random = new Random();
-        
-        // 根据总体变化率计算各章节的变化（简化处理）
-        BigDecimal overallChange = fromTask.getCheckRate().subtract(toTask.getCheckRate());
-        
-        for (String section : sections) {
-            VersionCompareResponseDTO.SectionComparisonDTO sectionDTO = 
-                new VersionCompareResponseDTO.SectionComparisonDTO();
-            sectionDTO.setName(section);
-            
-            // 基于总体变化生成章节数据
-            BigDecimal fromRate = BigDecimal.valueOf(
-                fromTask.getCheckRate().doubleValue() * (0.8 + random.nextDouble() * 0.4)
-            ).setScale(1, BigDecimal.ROUND_HALF_UP);
-            
-            BigDecimal toRate = fromRate.subtract(
-                overallChange.multiply(BigDecimal.valueOf(0.5 + random.nextDouble() * 1.0))
-            ).setScale(1, BigDecimal.ROUND_HALF_UP);
-            
-            sectionDTO.setFrom(fromRate);
-            sectionDTO.setTo(toRate);
-            sectionDTO.setChange(fromRate.subtract(toRate));
-            
-            comparisons.add(sectionDTO);
-        }
-        
-        return comparisons;
-    }
-    
-    /**
      * 生成修改说明
      */
     private String generateChangesDescription(int versionIndex, BigDecimal currentSimilarity,
@@ -2102,56 +2062,9 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
                 }
             }
             
-            // 4. 如果报告中没有章节信息，使用默认章节结构
-            if (sectionChanges.isEmpty()) {
-                sectionChanges = buildDefaultSectionChanges(task);
-            }
-            
+            // 4. 报告中没有章节信息时如实返回空数据，不再按随机波动编造章节
         } catch (Exception e) {
             log.error("从查重报告提取章节变化失败 - taskId: {}", task.getId(), e);
-            // 提取失败时返回默认数据
-            sectionChanges = buildDefaultSectionChanges(task);
-        }
-        
-        return sectionChanges;
-    }
-    
-    /**
-     * 构建默认章节变化数据（当报告中没有明确章节信息时使用）
-     */
-    private Map<String, CheckHistoryDTO.SectionChangeDTO> buildDefaultSectionChanges(CheckTask task) {
-        Map<String, CheckHistoryDTO.SectionChangeDTO> sectionChanges = new HashMap<>();
-        
-        // 定义标准论文章节
-        String[][] sections = {
-            {"introduction", "引言"},
-            {"literature_review", "文献综述"},
-            {"methodology", "研究方法"},
-            {"results", "实验结果"},
-            {"discussion", "讨论"},
-            {"conclusion", "结论"}
-        };
-        
-        BigDecimal overallSimilarity = task.getCheckRate();
-        Random random = new Random();
-        
-        for (String[] section : sections) {
-            String key = section[0]; // 英文 key
-            String displayName = section[1]; // 中文显示名
-            
-            CheckHistoryDTO.SectionChangeDTO sectionChange = new CheckHistoryDTO.SectionChangeDTO();
-            
-            // 基于总体相似度生成各章节的相似度（有一定波动）
-            double fluctuation = 0.7 + random.nextDouble() * 0.6; // 0.7-1.3 倍波动
-            BigDecimal sectionSimilarity = overallSimilarity.multiply(
-                new BigDecimal(String.valueOf(fluctuation))
-            ).setScale(1, java.math.BigDecimal.ROUND_HALF_UP);
-            
-            sectionChange.setFrom(sectionSimilarity);
-            sectionChange.setTo(sectionSimilarity);
-            sectionChange.setChange(BigDecimal.ZERO);
-            
-            sectionChanges.put(key, sectionChange);
         }
         
         return sectionChanges;
