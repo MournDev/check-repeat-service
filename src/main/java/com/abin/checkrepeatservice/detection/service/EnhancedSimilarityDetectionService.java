@@ -8,7 +8,9 @@ import com.abin.checkrepeatservice.common.utils.RiskLevelUtils;
 import com.abin.checkrepeatservice.common.utils.TextSimilarityUtils;
 import com.abin.checkrepeatservice.detection.dto.SimilarityDetectionResult;
 import com.abin.checkrepeatservice.detection.dto.SimilaritySegment;
+import com.abin.checkrepeatservice.admin.mapper.CheckResultMapper;
 import com.abin.checkrepeatservice.mapper.SysUserMapper;
+import com.abin.checkrepeatservice.pojo.entity.CheckResult;
 import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
 import com.abin.checkrepeatservice.pojo.entity.SysUser;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
@@ -19,6 +21,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import jakarta.annotation.Resource;
+import java.time.ZoneId;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.RejectedExecutionException;
@@ -40,6 +43,9 @@ public class EnhancedSimilarityDetectionService {
 
     @Resource
     private SysUserMapper sysUserMapper;
+
+    @Resource
+    private CheckResultMapper checkResultMapper;
     
     @Resource
     private TextSimilarityUtils textSimilarityUtils;
@@ -120,6 +126,53 @@ public class EnhancedSimilarityDetectionService {
         } catch (Exception e) {
             log.error("论文查重检测失败: paperId={}", paperId, e);
             return Result.error(ResultCode.SYSTEM_ERROR, "查重检测失败: " + "系统异常，请稍后重试");
+        }
+    }
+
+    /**
+     * 查询本人论文的真实查重历史（check_result 摘要，按检测时间倒序）。
+     *
+     * <p>历史记录只含整篇指标，不重放句级明细（句级明细需按 task 逐条查询，成本高且页面不需要）。</p>
+     */
+    public Result<List<SimilarityDetectionResult>> getDetectionHistory(Long paperId, Long requesterId) {
+        try {
+            PaperInfo paper = paperInfoMapper.selectById(paperId);
+            if (paper == null) {
+                return Result.error(ResultCode.RESOURCE_NOT_FOUND, "论文不存在");
+            }
+            if (requesterId == null || !Objects.equals(paper.getStudentId(), requesterId)) {
+                return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权查看他人论文的查重历史");
+            }
+
+            List<CheckResult> records = checkResultMapper.selectList(
+                    new LambdaQueryWrapper<CheckResult>()
+                            .eq(CheckResult::getPaperId, paperId)
+                            .isNotNull(CheckResult::getRepeatRate)
+                            .orderByDesc(CheckResult::getCheckTime)
+                            .last("LIMIT 100"));
+            Map<Long, String> authorNames = loadAuthorNames(paper, List.of());
+            String author = getPaperAuthor(paper, authorNames);
+
+            List<SimilarityDetectionResult> history = new ArrayList<>();
+            for (CheckResult record : records) {
+                double rate = record.getRepeatRate().doubleValue();
+                SimilarityDetectionResult item = new SimilarityDetectionResult();
+                item.setTargetPaperId(paper.getId());
+                item.setTargetPaperTitle(paper.getPaperTitle());
+                item.setTargetAuthor(author);
+                item.setTargetCollege(paper.getCollegeName());
+                item.setOverallSimilarity(rate);
+                item.setRiskLevel(evaluateRiskLevel(rate));
+                item.setRecommendations(generateRecommendations(rate));
+                item.setSimilarSegments(new ArrayList<>());
+                item.setDetectionTime(record.getCheckTime() == null ? null
+                        : Date.from(record.getCheckTime().atZone(ZoneId.systemDefault()).toInstant()));
+                history.add(item);
+            }
+            return Result.success("获取查重历史成功", history);
+        } catch (Exception e) {
+            log.error("获取查重历史失败: paperId={}", paperId, e);
+            return Result.error(ResultCode.SYSTEM_ERROR, "获取查重历史失败，系统异常，请稍后重试");
         }
     }
 

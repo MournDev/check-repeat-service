@@ -70,10 +70,8 @@ public class SimilarityDetectionController {
         try {
             Long userId = jwtUtils.getUserIdFromToken(token);
             log.debug("用户获取查重历史: userId={}, paperId={}", userId, paperId);
-            
-            // 这里应该查询数据库获取历史记录
-            // 简化实现，返回空列表
-            return Result.success("获取查重历史成功", java.util.Collections.emptyList());
+
+            return detectionService.getDetectionHistory(paperId, userId);
         } catch (Exception e) {
             log.error("获取查重历史失败: paperId={}", paperId, e);
             return Result.error(ResultCode.SYSTEM_ERROR, "获取查重历史失败: " + "系统异常，请稍后重试");
