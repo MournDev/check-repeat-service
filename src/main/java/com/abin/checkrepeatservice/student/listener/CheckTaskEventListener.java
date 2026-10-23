@@ -354,8 +354,9 @@ public class CheckTaskEventListener {
     private CheckReport createCheckReport(com.abin.checkrepeatservice.pojo.entity.CheckTask checkTask,
                                          BigDecimal checkRate, List<Map<String, Object>> repeatDetails,
                                          BigDecimal maxPerSource, BigDecimal citationRate) {
-        // 1. 生成报告编号
-        String reportNo = "REPORT" + System.currentTimeMillis();
+        // 1. 生成报告编号：基于任务ID（雪花唯一），不再用毫秒时间戳
+        //    —— 批量查重并发完成时同毫秒会撞 uk_report_no，直接导致报告落库失败
+        String reportNo = "REPORT" + checkTask.getId();
 
         // 2. 生成报告路径
         String reportPath = "D:/data/report/" + LocalDateTime.now().format(
