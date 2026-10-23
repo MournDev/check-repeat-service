@@ -3,12 +3,14 @@ package com.abin.checkrepeatservice.user.service.Impl;
 import com.abin.checkrepeatservice.admin.mapper.SystemConfigMapper;
 import com.abin.checkrepeatservice.common.Exception.BusinessException;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
+import com.abin.checkrepeatservice.common.event.SecurityConfigChangedEvent;
 import com.abin.checkrepeatservice.pojo.entity.SystemConfig;
 import com.alibaba.fastjson2.JSON;
 import jakarta.annotation.Resource;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.event.EventListener;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -65,6 +67,16 @@ public class LoginAttemptService {
 
     @Resource
     private SystemConfigMapper systemConfigMapper;
+
+    /**
+     * 安全配置保存/刷新后立即失效，下一次登录即按新阈值判定。
+     */
+    @EventListener
+    public void onSecurityConfigChanged(SecurityConfigChangedEvent event) {
+        policyCache = null;
+        policyCachedAt = 0L;
+        log.info("安全配置已变更（{}），登录锁定策略缓存已失效", event.configKey());
+    }
 
     /*
      * 刻意复用 StringRedisTemplate（同 AuthServiceImpl 找回密码限流）：

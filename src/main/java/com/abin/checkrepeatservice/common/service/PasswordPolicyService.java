@@ -1,10 +1,12 @@
 package com.abin.checkrepeatservice.common.service;
 
 import com.abin.checkrepeatservice.admin.mapper.SystemConfigMapper;
+import com.abin.checkrepeatservice.common.event.SecurityConfigChangedEvent;
 import com.abin.checkrepeatservice.pojo.entity.SystemConfig;
 import com.alibaba.fastjson2.JSON;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -33,6 +35,16 @@ public class PasswordPolicyService {
 
     @Resource
     private SystemConfigMapper systemConfigMapper;
+
+    /**
+     * 安全配置保存/刷新后立即失效，下一次校验即读取新策略。
+     */
+    @EventListener
+    public void onSecurityConfigChanged(SecurityConfigChangedEvent event) {
+        policyCache = null;
+        policyCachedAt = 0L;
+        log.info("安全配置已变更（{}），密码策略缓存已失效", event.configKey());
+    }
 
     /**
      * 校验密码是否符合当前生效策略。

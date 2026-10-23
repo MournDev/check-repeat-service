@@ -6,11 +6,13 @@ import com.abin.checkrepeatservice.admin.service.SystemConfigService;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.cache.DetectionCacheService;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
+import com.abin.checkrepeatservice.common.event.SecurityConfigChangedEvent;
 import com.abin.checkrepeatservice.pojo.entity.SystemConfig;
 import com.alibaba.fastjson2.JSON;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -44,9 +46,13 @@ public class SystemConfigServiceImpl implements SystemConfigService {
      */
     @Autowired
     private DetectionCacheService detectionCacheService;
+
+    @Autowired
+    private ApplicationEventPublisher eventPublisher;
     
     // 配置键常量
     private static final String PERFORMANCE_CONFIG_KEY = "performance";
+    private static final String SECURITY_CONFIG_KEY = "security_config";
     
     @Override
     @Transactional
@@ -246,6 +252,11 @@ public class SystemConfigServiceImpl implements SystemConfigService {
                 systemConfigMapper.insert(newConfig);
             }
             
+            // 安全配置变更后立即通知缓存方失效，避免策略延迟生效
+            if (SECURITY_CONFIG_KEY.equals(configKey)) {
+                eventPublisher.publishEvent(new SecurityConfigChangedEvent(configKey));
+            }
+
             log.info("配置保存成功: configKey={}", configKey);
         } catch (Exception e) {
             log.error("保存配置失败: configKey={}, error={}", configKey, e.getMessage(), e);
@@ -295,7 +306,10 @@ public class SystemConfigServiceImpl implements SystemConfigService {
                 
             // 5. 更新系统监控配置
             updateMonitoringConfig();
-                
+
+            // 6. 安全策略缓存失效：密码强度与登录锁定立即按最新配置生效
+            eventPublisher.publishEvent(new SecurityConfigChangedEvent(SECURITY_CONFIG_KEY));
+
             log.info("配置缓存刷新成功");
         } catch (Exception e) {
             log.error("刷新配置缓存失败：{}", e.getMessage(), e);
