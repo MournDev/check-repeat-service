@@ -1654,8 +1654,10 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
                     currentSimilarity = task.getCheckRate();
                 }
                 
-                // 改进说明（模拟数据）
-                historyDTO.setChanges(generateChangesDescription(i, task.getCheckRate()));
+                // 改进说明：按相邻两版的真实相似度差值生成，不再套固定文案
+                BigDecimal previousSimilarity = (i + 1 < checkTasks.size())
+                        ? checkTasks.get(i + 1).getCheckRate() : null;
+                historyDTO.setChanges(generateChangesDescription(i, task.getCheckRate(), previousSimilarity));
                 
                 // 相比上一版本的改进
                 if (i < checkTasks.size() - 1) {
@@ -1735,12 +1737,8 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
                 similarities.add(task.getCheckRate());
             }
             
-            // 5. 如果没有数据，添加默认数据
-            if (dates.isEmpty()) {
-                dates.add(endDate.toLocalDate().toString());
-                similarities.add(BigDecimal.ZERO);
-            }
-            
+            // 5. 没有数据时如实返回空数组，不再伪造一条 0% 的数据点
+
             SimilarityTrendDTO trendDTO = new SimilarityTrendDTO();
             trendDTO.setDates(dates);
             trendDTO.setSimilarities(similarities);
@@ -2017,18 +2015,23 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
     /**
      * 生成修改说明
      */
-    private String generateChangesDescription(int versionIndex, BigDecimal similarity) {
-        if (versionIndex == 0) return "初次提交查重";
-        
-        String[] changes = {
-            "优化引用格式，调整段落结构",
-            "完善参考文献，修正语法错误",
-            "重新组织论证逻辑，增强论述严谨性",
-            "细化实验数据分析，补充图表说明",
-            "强化理论支撑，增加文献引用"
-        };
-        
-        return changes[Math.min(versionIndex - 1, changes.length - 1)];
+    private String generateChangesDescription(int versionIndex, BigDecimal currentSimilarity,
+                                              BigDecimal previousSimilarity) {
+        if (versionIndex == 0) {
+            return "初次提交查重";
+        }
+        if (currentSimilarity == null || previousSimilarity == null) {
+            return "缺少上一版本查重数据，无法对比";
+        }
+        BigDecimal change = previousSimilarity.subtract(currentSimilarity);
+        int cmp = change.compareTo(BigDecimal.ZERO);
+        if (cmp == 0) {
+            return String.format("与上一版本相似度持平（%.2f%%）", currentSimilarity.doubleValue());
+        }
+        return String.format("相似度由 %.2f%% %s %.2f%%（%s %.2f 个百分点）",
+                previousSimilarity.doubleValue(), cmp > 0 ? "降至" : "升至",
+                currentSimilarity.doubleValue(), cmp > 0 ? "下降" : "上升",
+                change.abs().doubleValue());
     }
     
     /**
