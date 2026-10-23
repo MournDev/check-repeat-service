@@ -2,6 +2,7 @@ package com.abin.checkrepeatservice.teacher.service.Impl;
 
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.common.Exception.BusinessException;
+import com.abin.checkrepeatservice.common.service.AttachmentDownloadService;
 import com.abin.checkrepeatservice.common.service.FileService;
 import com.abin.checkrepeatservice.common.utils.ConversationIdUtils;
 import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
@@ -72,6 +73,9 @@ public class TeacherMessageServiceImpl implements TeacherMessageService {
 
     @Resource
     private FileService fileService;
+
+    @Resource
+    private AttachmentDownloadService attachmentDownloadService;
 
     @Value("${file.upload.base-path}")
     private String uploadBasePath;
@@ -321,6 +325,11 @@ public class TeacherMessageServiceImpl implements TeacherMessageService {
                 files.add(toSharedFileVO(attachment, message));
             }
         }
+        // 下载次数：按 attachment_id 批量聚合，避免逐文件查库
+        Map<Long, Integer> downloadCounts = attachmentDownloadService.countByAttachmentIds(
+                files.stream().map(file -> parseAttachmentId(file.getId())).toList());
+        files.forEach(file -> file.setDownloadCount(
+                downloadCounts.getOrDefault(parseAttachmentId(file.getId()), 0)));
         log.info("获取共享文件列表 - 会话ID: {}, 文件数: {}", sessionId, files.size());
         return files;
     }
@@ -330,6 +339,8 @@ public class TeacherMessageServiceImpl implements TeacherMessageService {
         InstantMessage message = findAttachmentMessage(fileId);
         requireInvolves(message, teacherId);
         writeFileToResponse(fileId, response);
+        // 下载成功才留痕（记录失败不影响下载本身）
+        attachmentDownloadService.record(fileId, teacherId);
     }
 
     @Override
@@ -501,9 +512,18 @@ public class TeacherMessageServiceImpl implements TeacherMessageService {
         vo.setUploader(displayName(sysUserMapper.selectById(message.getSenderId())));
         vo.setUploadTime(message.getSentTime() != null
                 ? message.getSentTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd")) : "");
-        // 下载次数依赖下载记录表，目前没有，保持 0
-        vo.setDownloadCount(0);
         return vo;
+    }
+
+    private Long parseAttachmentId(String id) {
+        if (!StringUtils.hasText(id)) {
+            return null;
+        }
+        try {
+            return Long.parseLong(id);
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     /** 前端传来的附件 ID 列表 → 入库 JSON（形状见 {@link MessageVO#toAttachmentsJson}） */

@@ -1,5 +1,8 @@
 package com.abin.checkrepeatservice.student.service.Impl;
 
+import com.abin.checkrepeatservice.common.Exception.BusinessException;
+import com.abin.checkrepeatservice.common.enums.ResultCode;
+import com.abin.checkrepeatservice.common.service.AttachmentDownloadService;
 import com.abin.checkrepeatservice.common.service.FileService;
 import com.abin.checkrepeatservice.common.utils.ConversationIdUtils;
 import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
@@ -63,6 +66,9 @@ public class StudentMessageServiceImpl implements StudentMessageService {
     
     @Resource
     private PaperInfoMapper paperInfoMapper;
+
+    @Resource
+    private AttachmentDownloadService attachmentDownloadService;
     
     @Value("${file.upload.base-path}")
     private String uploadBasePath;
@@ -334,6 +340,10 @@ public class StudentMessageServiceImpl implements StudentMessageService {
     public void downloadAttachment(Long attachmentId, Long studentId, HttpServletResponse response) {
         try {
             log.info("下载附件 - 学生 ID: {}, 附件 ID: {}", studentId, attachmentId);
+
+            // 归属校验：附件必须出现在该学生参与的会话消息中，防止按 ID 越权下载
+            InstantMessage message = findAttachmentMessage(attachmentId);
+            requireInvolves(message, studentId);
                 
             // 获取文件信息
             FileInfo fileInfo = fileService.getById(attachmentId);
@@ -361,6 +371,8 @@ public class StudentMessageServiceImpl implements StudentMessageService {
                     }
                     
                     log.info("附件下载成功 - 文件名: {}", fileName);
+                    // 下载成功才留痕（记录失败不影响下载本身）
+                    attachmentDownloadService.record(attachmentId, studentId);
                 } else {
                     throw new RuntimeException("附件文件不存在");
                 }
@@ -368,9 +380,48 @@ public class StudentMessageServiceImpl implements StudentMessageService {
                 throw new RuntimeException("附件信息不存在");
             }
             
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             log.error("下载附件失败 - 附件ID: {}", attachmentId, e);
             throw new RuntimeException("附件下载失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 查找包含指定附件的消息（LIKE 粗筛 + 精确解析，避免 JSON 键序/ID 子串误命中）
+     */
+    private InstantMessage findAttachmentMessage(Long fileId) {
+        LambdaQueryWrapper<InstantMessage> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(InstantMessage::getIsDeleted, 0)
+                .isNotNull(InstantMessage::getAttachments)
+                .like(InstantMessage::getAttachments, String.valueOf(fileId));
+
+        return instantMessageMapper.selectList(wrapper).stream()
+                .filter(message -> MessageVO.parseAttachments(message.getAttachments()).stream()
+                        .anyMatch(attachment -> String.valueOf(fileId).equals(attachment.getId())))
+                .findFirst()
+                .orElseThrow(() -> new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "附件不存在"));
+    }
+
+    /**
+     * 附件所在消息必须由当前学生发送或接收
+     */
+    private void requireInvolves(InstantMessage message, Long studentId) {
+        if (!Objects.equals(studentId, message.getSenderId())
+                && !Objects.equals(studentId, message.getReceiverId())) {
+            throw new BusinessException(ResultCode.PERMISSION_NO_ACCESS, "无权下载该附件");
+        }
+    }
+
+    private Long parseAttachmentId(String id) {
+        if (!StringUtils.hasText(id)) {
+            return null;
+        }
+        try {
+            return Long.parseLong(id);
+        } catch (NumberFormatException e) {
+            return null;
         }
     }
 
@@ -486,11 +537,15 @@ public class StudentMessageServiceImpl implements StudentMessageService {
                     fileVO.setUploadTime(message.getSentTime() != null ?
                         message.getSentTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd")) : "");
 
-                    //算计数 TODO:需要下载记录表
-                    fileVO.setDownloadCount(0);
-
                     files.add(fileVO);
                 }
+            }
+
+            // 下载次数：按 attachment_id 批量聚合，避免逐文件查库
+            Map<Long, Integer> downloadCounts = attachmentDownloadService.countByAttachmentIds(
+                    files.stream().map(file -> parseAttachmentId(file.getId())).toList());
+            for (SharedFileVO file : files) {
+                file.setDownloadCount(downloadCounts.getOrDefault(parseAttachmentId(file.getId()), 0));
             }
             
             log.info("获取共享文件列表成功 - 文件数量: {}", files.size());

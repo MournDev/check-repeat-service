@@ -265,6 +265,31 @@ CREATE TABLE `auto_assignment_history` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `attachment_download_record`
+--
+
+DROP TABLE IF EXISTS `attachment_download_record`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `attachment_download_record` (
+  `id` bigint NOT NULL COMMENT '主键（雪花ID）',
+  `attachment_id` bigint NOT NULL COMMENT '附件ID（file_info.id）',
+  `user_id` bigint NOT NULL COMMENT '下载人ID（sys_user.id）',
+  `create_by` bigint DEFAULT NULL COMMENT '创建人ID',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '下载时间',
+  `update_by` bigint DEFAULT NULL COMMENT '更新人ID',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除标记(0-未删除,1-已删除)',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_adr_attachment` (`attachment_id`),
+  KEY `idx_adr_user` (`user_id`),
+  KEY `idx_adr_create_time` (`create_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='附件下载记录表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Table structure for table `category_similarity_threshold`
 --
 

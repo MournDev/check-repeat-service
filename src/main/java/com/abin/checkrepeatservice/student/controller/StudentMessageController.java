@@ -1,5 +1,6 @@
 package com.abin.checkrepeatservice.student.controller;
 
+import com.abin.checkrepeatservice.common.Exception.BusinessException;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
@@ -134,6 +135,8 @@ public class StudentMessageController {
             log.info("下载附件 - 学生 ID: {}, 附件 ID: {}", studentId, attachmentId);
                 
             studentMessageService.downloadAttachment(attachmentId, studentId, response);
+        } catch (BusinessException e) {
+            writeBusinessError(response, e);
         } catch (Exception e) {
             log.error("下载附件失败 - 附件ID: {}", attachmentId, e);
             try {
@@ -240,6 +243,8 @@ public class StudentMessageController {
             log.info("下载共享文件 - 学生 ID: {}, 文件 ID: {}", studentId, fileId);
                 
             studentMessageService.downloadSharedFile(fileId, studentId, response);
+        } catch (BusinessException e) {
+            writeBusinessError(response, e);
         } catch (Exception e) {
             log.error("下载共享文件失败 - 文件ID: {}", fileId, e);
             try {
@@ -248,6 +253,18 @@ public class StudentMessageController {
             } catch (Exception ex) {
                 log.error("设置错误响应失败", ex);
             }
+        }
+    }
+
+    /**
+     * 下载接口的业务异常按 ResultCode 映射 HTTP 状态（403/404），其余异常仍按 500 处理。
+     */
+    private void writeBusinessError(HttpServletResponse response, BusinessException e) {
+        try {
+            response.setStatus(e.getResultCode().getHttpStatus().value());
+            response.getWriter().write(e.getMessage());
+        } catch (Exception ex) {
+            log.error("设置业务错误响应失败", ex);
         }
     }
 

@@ -1927,6 +1927,35 @@ EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
 -- ============================================================================
+-- 段 1.26：附件下载记录表（共享文件下载次数统计）
+--
+-- 背景：学生/教师端共享文件列表的 downloadCount 一直是 0（代码 TODO：需要下载记录表），
+--   下载行为本身也没有留痕。本段新增 attachment_download_record，下载成功时写一条记录，
+--   列表按 attachment_id 聚合计数。审计字段（create_by/update_by）由 BaseEntity 自动填充，
+--   所以表必须包含这些列；is_deleted 显式 NOT NULL DEFAULT '0'，避免历史 NULL 过滤坑。
+-- 部署顺序：必须「先跑本段，再部署后端 jar」。
+-- 幂等性：CREATE TABLE IF NOT EXISTS，重复执行无副作用。
+-- 执行后自检：见段 5.20。
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS `attachment_download_record` (
+  `id` bigint NOT NULL COMMENT '主键（雪花ID）',
+  `attachment_id` bigint NOT NULL COMMENT '附件ID（file_info.id）',
+  `user_id` bigint NOT NULL COMMENT '下载人ID（sys_user.id）',
+  `create_by` bigint DEFAULT NULL COMMENT '创建人ID',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '下载时间',
+  `update_by` bigint DEFAULT NULL COMMENT '更新人ID',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除标记(0-未删除,1-已删除)',
+  `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_adr_attachment` (`attachment_id`),
+  KEY `idx_adr_user` (`user_id`),
+  KEY `idx_adr_create_time` (`create_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='附件下载记录表';
+
+-- ============================================================================
 -- 段 2：similarity_threshold 系列表的 is_deleted 历史 NULL 归零
 --
 -- 背景：category_similarity_threshold.is_deleted 在 init.sql 里一度是 DEFAULT NULL，
@@ -2427,6 +2456,12 @@ SELECT (SELECT COUNT(*) FROM information_schema.TABLES
 SELECT (SELECT COUNT(*) FROM information_schema.COLUMNS
          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sys_role'
            AND COLUMN_NAME = 'data_scope')                                          AS sys_role_data_scope_col;
+
+-- 5.20 段 1.26 附件下载记录表执行后：
+--   期望：attachment_download_record_tbl=1
+SELECT (SELECT COUNT(*) FROM information_schema.TABLES
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = 'attachment_download_record')                           AS attachment_download_record_tbl;
 
 
 -- ============================================================================
