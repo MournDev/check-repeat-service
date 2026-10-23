@@ -36,6 +36,10 @@ public class TeacherInfoServiceImpl implements TeacherInfoService{
     @Resource
     private com.abin.checkrepeatservice.common.jwt.TokenRevocationService tokenRevocationService;
 
+    // 安全配置驱动的密码强度策略
+    @Resource
+    private com.abin.checkrepeatservice.common.service.PasswordPolicyService passwordPolicyService;
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Result<String> updateInfo(UpdateTeacherInfoReq updateReq){
@@ -181,6 +185,11 @@ public class TeacherInfoServiceImpl implements TeacherInfoService{
         // 添加密码长度验证
         if (newPassword.length() < 6 || newPassword.length() > 50) {
             return Result.error(ResultCode.PARAM_ERROR, "密码长度必须在6-50位之间");
+        }
+        // 密码强度：按后台安全配置校验
+        String passwordPolicyError = passwordPolicyService.validate(newPassword);
+        if (passwordPolicyError != null) {
+            return Result.error(ResultCode.PARAM_ERROR, passwordPolicyError);
         }
         
         SysUser user = sysUserMapper.selectById(userId);

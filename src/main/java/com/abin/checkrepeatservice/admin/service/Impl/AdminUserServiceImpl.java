@@ -52,6 +52,10 @@ public class AdminUserServiceImpl implements AdminUserService {
     @Resource
     private DataScopeResolver dataScopeResolver;
 
+    // 安全配置驱动的密码强度策略（建用户/重置密码共用）
+    @Resource
+    private com.abin.checkrepeatservice.common.service.PasswordPolicyService passwordPolicyService;
+
     // 安全修复（S7）：管理员重置密码后吊销目标用户全部旧令牌
     @Resource
     private com.abin.checkrepeatservice.common.jwt.TokenRevocationService tokenRevocationService;
@@ -104,6 +108,11 @@ public class AdminUserServiceImpl implements AdminUserService {
             }
             if (createReq.getPassword() == null || createReq.getPassword().length() < 6) {
                 return Result.error(ResultCode.PARAM_ERROR,"密码长度不能少于6位");
+            }
+            // 密码强度：按后台安全配置校验
+            String passwordPolicyError = passwordPolicyService.validate(createReq.getPassword());
+            if (passwordPolicyError != null) {
+                return Result.error(ResultCode.PARAM_ERROR, passwordPolicyError);
             }
             
             // 检查用户名是否已存在
@@ -341,6 +350,12 @@ public class AdminUserServiceImpl implements AdminUserService {
         }
         if (!dataScopeResolver.canAccessUser(user)) {
             return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权操作该用户");
+        }
+
+        // 密码强度：按后台安全配置校验
+        String passwordPolicyError = passwordPolicyService.validate(resetReq.getNewPassword());
+        if (passwordPolicyError != null) {
+            return Result.error(ResultCode.PARAM_ERROR, passwordPolicyError);
         }
 
         // 守护栏（P0）：不可动超管；管理员密码只有超管能重置（改密 = 接管账号）

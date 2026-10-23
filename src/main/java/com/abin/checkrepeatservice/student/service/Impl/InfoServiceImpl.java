@@ -115,6 +115,10 @@ public class InfoServiceImpl implements InfoService {
     @Resource
     private PasswordEncoder passwordEncoder;
 
+    // 安全配置驱动的密码强度策略
+    @Resource
+    private com.abin.checkrepeatservice.common.service.PasswordPolicyService passwordPolicyService;
+
     @Resource
     private RedisTemplate<String, String> redisTemplate;
 
@@ -442,6 +446,12 @@ public class InfoServiceImpl implements InfoService {
             // 4. 校验新密码不能与原密码相同
             if (updatePasswordReq.getNewPassword().equals(updatePasswordReq.getOldPassword())) {
                 return Result.error(ResultCode.PARAM_ERROR, "新密码不能与原密码相同");
+            }
+
+            // 4.1 密码强度：按后台安全配置校验
+            String passwordPolicyError = passwordPolicyService.validate(updatePasswordReq.getNewPassword());
+            if (passwordPolicyError != null) {
+                return Result.error(ResultCode.PARAM_ERROR, passwordPolicyError);
             }
 
             // 5. 更新密码（加密存储）

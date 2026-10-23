@@ -100,6 +100,10 @@ public class AuthServiceImpl implements AuthService {
     @Resource
     private LoginAttemptService loginAttemptService;
 
+    // 安全配置驱动的密码强度策略（注册/找回密码共用）
+    @Resource
+    private com.abin.checkrepeatservice.common.service.PasswordPolicyService passwordPolicyService;
+
     // 安全修复（S7）：JWT 登出黑名单与改密后旧令牌吊销
     @Resource
     private com.abin.checkrepeatservice.common.jwt.TokenRevocationService tokenRevocationService;
@@ -124,6 +128,11 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Result<String> register(RegisterReq registerReq) {
+        // 0. 密码强度：按后台安全配置校验（未配置时保持最少 6 位的原行为）
+        String passwordPolicyError = passwordPolicyService.validate(registerReq.getPassword());
+        if (passwordPolicyError != null) {
+            return Result.error(ResultCode.PARAM_ERROR, passwordPolicyError);
+        }
         // 1. 校验用户名唯一性（避免重复注册）
         try {
             SysUser existingUser = sysUserMapper.selectOne(
@@ -487,6 +496,12 @@ public class AuthServiceImpl implements AuthService {
                     storedCode.getBytes(StandardCharsets.UTF_8),
                     forgotPasswordReq.getVerificationCode().getBytes(StandardCharsets.UTF_8))) {
                 return verifyCodeFailed(username, codeKey, storedCode != null);
+            }
+
+            // 3.1 密码强度：按后台安全配置校验
+            String passwordPolicyError = passwordPolicyService.validate(forgotPasswordReq.getNewPassword());
+            if (passwordPolicyError != null) {
+                return Result.error(ResultCode.PARAM_ERROR, passwordPolicyError);
             }
 
             // 4. 更新密码（加密存储）
