@@ -78,9 +78,10 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
         try {
             Map<String, Object> stats = new HashMap<>();
             
-            // 用户统计（系统级口径：用户数量不按论文数据范围裁剪）
+            // 用户统计（按当前登录人数据范围裁剪；ALL/超管不加条件）
             // S14：原「总数 + 管理员/学生/教师」共 4 次 count 合并为一条 GROUP BY
-            List<Map<String, Object>> userTypeRows = sysUserMapper.selectUserTypeStats();
+            List<Map<String, Object>> userTypeRows =
+                    sysUserMapper.selectUserTypeStats(dataScopeResolver.currentFilterOrNull());
             long totalUsers = 0L;
             Map<String, Long> usersByType = new HashMap<>();
             for (Map<String, Object> row : userTypeRows) {
@@ -197,8 +198,10 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
 
             // 7.1 今日访问：仪表盘"今日访问"卡片读顶层 todayVisits，语义取今日登录日志条数
             // （此前接口未输出该字段，前端恒显示 0）
-            Long todayVisits = sysLoginLogMapper.selectCount(new LambdaQueryWrapper<SysLoginLog>()
-                    .ge(SysLoginLog::getLoginTime, todayStart));
+            LambdaQueryWrapper<SysLoginLog> todayVisitWrapper = new LambdaQueryWrapper<SysLoginLog>()
+                    .ge(SysLoginLog::getLoginTime, todayStart);
+            dataScopeResolver.applyUserLogScope(todayVisitWrapper);
+            Long todayVisits = sysLoginLogMapper.selectCount(todayVisitWrapper);
             stats.put("todayVisits", todayVisits);
 
             // 7.2 最后备份时间：取 sys_backup_log 最新一条（含失败记录，备份页本身也展示全部记录）。
@@ -259,10 +262,12 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
         Long weekReviews = checkResultMapper.selectCount(weekReviewWrapper);
         stats.put("weekReviews", weekReviews);
         
-        // 在线用户数（最近1小时内登录）
+        // 在线用户数（最近1小时内登录，按数据范围裁剪）
         LocalDateTime oneHourAgo = LocalDateTime.now().minusHours(1);
-        Long onlineUsers = sysLoginLogMapper.selectCount(new LambdaQueryWrapper<SysLoginLog>()
-                .ge(SysLoginLog::getLoginTime, oneHourAgo));
+        LambdaQueryWrapper<SysLoginLog> onlineWrapper = new LambdaQueryWrapper<SysLoginLog>()
+                .ge(SysLoginLog::getLoginTime, oneHourAgo);
+        dataScopeResolver.applyUserLogScope(onlineWrapper);
+        Long onlineUsers = sysLoginLogMapper.selectCount(onlineWrapper);
         stats.put("onlineUsers", onlineUsers);
         
         // 系统CPU使用率（从数据库查询）
@@ -518,29 +523,37 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
             LocalDateTime weekStart = now.minusDays(7);
             LocalDateTime monthStart = now.minusDays(30);
             
-            // 今日登录次数
-            Long todayLogins = sysLoginLogMapper.selectCount(new LambdaQueryWrapper<SysLoginLog>()
-                    .ge(SysLoginLog::getLoginTime, todayStart));
+            // 今日登录次数（以下登录类指标均按当前登录人数据范围裁剪）
+            LambdaQueryWrapper<SysLoginLog> todayLoginWrapper = new LambdaQueryWrapper<SysLoginLog>()
+                    .ge(SysLoginLog::getLoginTime, todayStart);
+            dataScopeResolver.applyUserLogScope(todayLoginWrapper);
+            Long todayLogins = sysLoginLogMapper.selectCount(todayLoginWrapper);
             auditStats.put("todayLogins", todayLogins);
             
             // 本周操作日志数
-            Long weekOperations = sysLoginLogMapper.selectCount(new LambdaQueryWrapper<SysLoginLog>()
-                    .ge(SysLoginLog::getLoginTime, weekStart));
+            LambdaQueryWrapper<SysLoginLog> weekOperationWrapper = new LambdaQueryWrapper<SysLoginLog>()
+                    .ge(SysLoginLog::getLoginTime, weekStart);
+            dataScopeResolver.applyUserLogScope(weekOperationWrapper);
+            Long weekOperations = sysLoginLogMapper.selectCount(weekOperationWrapper);
             auditStats.put("weekOperations", weekOperations);
             
             // 本月异常登录尝试
-            Long monthFailedLogins = sysLoginLogMapper.selectCount(new LambdaQueryWrapper<SysLoginLog>()
+            LambdaQueryWrapper<SysLoginLog> monthFailedWrapper = new LambdaQueryWrapper<SysLoginLog>()
                     .eq(SysLoginLog::getLoginResult, 0) // 登录失败
-                    .ge(SysLoginLog::getLoginTime, monthStart));
+                    .ge(SysLoginLog::getLoginTime, monthStart);
+            dataScopeResolver.applyUserLogScope(monthFailedWrapper);
+            Long monthFailedLogins = sysLoginLogMapper.selectCount(monthFailedWrapper);
             auditStats.put("monthFailedLogins", monthFailedLogins);
             
             // 活跃用户数（最近一周）
             // 使用子查询方式获取活跃用户数
-            List<Long> activeUserIds = sysLoginLogMapper.selectList(new LambdaQueryWrapper<SysLoginLog>()
+            LambdaQueryWrapper<SysLoginLog> activeUserWrapper = new LambdaQueryWrapper<SysLoginLog>()
                     .select(SysLoginLog::getUserId)
                     .ge(SysLoginLog::getLoginTime, weekStart)
                     .isNotNull(SysLoginLog::getUserId)
-                    .groupBy(SysLoginLog::getUserId))
+                    .groupBy(SysLoginLog::getUserId);
+            dataScopeResolver.applyUserLogScope(activeUserWrapper);
+            List<Long> activeUserIds = sysLoginLogMapper.selectList(activeUserWrapper)
                     .stream()
                     .map(SysLoginLog::getUserId)
                     .distinct()
@@ -760,10 +773,10 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
     private Integer getConcurrentUsers() {
         try {
             LocalDateTime fiveMinutesAgo = LocalDateTime.now().minusMinutes(5);
-            Long activeUsers = sysLoginLogMapper.selectCount(
-                new LambdaQueryWrapper<SysLoginLog>()
-                    .ge(SysLoginLog::getLoginTime, fiveMinutesAgo)
-            );
+            LambdaQueryWrapper<SysLoginLog> concurrentWrapper = new LambdaQueryWrapper<SysLoginLog>()
+                    .ge(SysLoginLog::getLoginTime, fiveMinutesAgo);
+            dataScopeResolver.applyUserLogScope(concurrentWrapper);
+            Long activeUsers = sysLoginLogMapper.selectCount(concurrentWrapper);
             return activeUsers.intValue();
         } catch (Exception e) {
             log.warn("获取并发用户数失败: {}", e.getMessage());

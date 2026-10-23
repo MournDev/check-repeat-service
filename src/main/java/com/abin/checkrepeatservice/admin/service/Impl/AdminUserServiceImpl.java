@@ -7,6 +7,7 @@ import com.abin.checkrepeatservice.admin.vo.UserUpdateReq;
 import com.abin.checkrepeatservice.admin.vo.BatchDeleteReq;
 import com.abin.checkrepeatservice.admin.vo.ResetPasswordReq;
 import com.abin.checkrepeatservice.common.Result;
+import com.abin.checkrepeatservice.common.datascope.DataScopeResolver;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
 import com.abin.checkrepeatservice.pojo.entity.SysUser;
@@ -46,6 +47,10 @@ public class AdminUserServiceImpl implements AdminUserService {
 
     @Resource
     private SysRoleMapper sysRoleMapper;
+
+    // 数据范围治理：用户列表/统计/按 ID 操作均按当前登录人范围过滤
+    @Resource
+    private DataScopeResolver dataScopeResolver;
 
     // 安全修复（S7）：管理员重置密码后吊销目标用户全部旧令牌
     @Resource
@@ -166,6 +171,9 @@ public class AdminUserServiceImpl implements AdminUserService {
         // 注意：删除/禁用/重置密码/角色分配等高危操作各有专用接口，守护栏在那些路径上
         // 照旧生效，本例外只覆盖本接口的资料字段（DTO 本身不含 roleId/username/password）。
         boolean isSelfUpdate = userId.equals(UserBusinessInfoUtils.getCurrentUserId());
+        if (!isSelfUpdate && !dataScopeResolver.canAccessUser(user)) {
+            return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权操作该用户");
+        }
         if (!isSelfUpdate) {
             // 守护栏（P0）：不可动超管；管理员账号只有超管能改
             String guardMsg = UserBusinessInfoUtils.checkCanManageUser(user);
@@ -230,6 +238,9 @@ public class AdminUserServiceImpl implements AdminUserService {
         if (user == null || user.getIsDeleted() == 1) {
             return Result.error(ResultCode.SYSTEM_ERROR,"用户不存在");
         }
+        if (!dataScopeResolver.canAccessUser(user)) {
+            return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权操作该用户");
+        }
 
         // 守护栏（P0）：不可动超管；管理员账号只有超管能删；且不可删掉最后一个启用的管理员
         String guardMsg = UserBusinessInfoUtils.checkCanManageUser(user);
@@ -262,6 +273,9 @@ public class AdminUserServiceImpl implements AdminUserService {
         for (SysUser user : users) {
             if (user == null || user.getIsDeleted() == 1) {
                 continue;
+            }
+            if (!dataScopeResolver.canAccessUser(user)) {
+                return Result.error(ResultCode.PERMISSION_NO_ACCESS, "存在超出数据范围的用户，无法批量删除");
             }
             String guardMsg = UserBusinessInfoUtils.checkCanManageUser(user);
             if (guardMsg != null) {
@@ -297,6 +311,9 @@ public class AdminUserServiceImpl implements AdminUserService {
         if (user == null || user.getIsDeleted() == 1) {
             return Result.error(ResultCode.PARAM_ERROR,"用户不存在");
         }
+        if (!dataScopeResolver.canAccessUser(user)) {
+            return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权操作该用户");
+        }
 
         // 守护栏（P0）：不可动超管；管理员账号只有超管能禁用；且不可禁用最后一个启用的管理员
         String guardMsg = UserBusinessInfoUtils.checkCanManageUser(user);
@@ -322,6 +339,9 @@ public class AdminUserServiceImpl implements AdminUserService {
         if (user == null || user.getIsDeleted() == 1) {
             return Result.error(ResultCode.PARAM_ERROR,"用户不存在");
         }
+        if (!dataScopeResolver.canAccessUser(user)) {
+            return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权操作该用户");
+        }
 
         // 守护栏（P0）：不可动超管；管理员密码只有超管能重置（改密 = 接管账号）
         String guardMsg = UserBusinessInfoUtils.checkCanManageUser(user);
@@ -346,6 +366,10 @@ public class AdminUserServiceImpl implements AdminUserService {
         if (user == null || user.getIsDeleted() == 1) {
             return Result.error(ResultCode.SYSTEM_ERROR,"用户不存在");
         }
+        if (!dataScopeResolver.canAccessUser(user)
+                && !userId.equals(UserBusinessInfoUtils.getCurrentUserId())) {
+            return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权查看该用户");
+        }
         
         UserInfoDTO userInfoDTO = convertToDTO(user, loadRoleNames());
         return Result.success("用户详情获取成功", userInfoDTO);
@@ -353,6 +377,15 @@ public class AdminUserServiceImpl implements AdminUserService {
 
     @Override
     public Result<Page<SysLoginLog>> getUserLoginHistory(Long userId, Integer page, Integer size) {
+        SysUser target = sysUserService.getById(userId);
+        if (target == null || target.getIsDeleted() == 1) {
+            return Result.error(ResultCode.PARAM_ERROR, "用户不存在");
+        }
+        if (!dataScopeResolver.canAccessUser(target)
+                && !userId.equals(UserBusinessInfoUtils.getCurrentUserId())) {
+            return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权查看该用户的登录历史");
+        }
+
         Page<SysLoginLog> loginLogPage = new Page<>(page, size);
         LambdaQueryWrapper<SysLoginLog> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(SysLoginLog::getUserId, userId)
@@ -373,39 +406,38 @@ public class AdminUserServiceImpl implements AdminUserService {
     @Override
     public Map<String, Object> getUserStatistics() {
         Map<String, Object> stats = new HashMap<>();
-        
-        // 总用户数
-        Long totalUsers = sysUserService.count(new LambdaQueryWrapper<SysUser>()
-                .eq(SysUser::getIsDeleted, 0));
+
+        // 统计口径与用户列表一致：受当前登录人数据范围约束
+        Long totalUsers = sysUserService.count(scopedUserWrapper());
         stats.put("totalUsers", totalUsers);
-        
+
         // 各类型用户统计
-        Long adminCount = sysUserService.count(new LambdaQueryWrapper<SysUser>()
-                .eq(SysUser::getUserType, 0)
-                .eq(SysUser::getIsDeleted, 0));
-        Long studentCount = sysUserService.count(new LambdaQueryWrapper<SysUser>()
-                .eq(SysUser::getUserType, 1)
-                .eq(SysUser::getIsDeleted, 0));
-        Long teacherCount = sysUserService.count(new LambdaQueryWrapper<SysUser>()
-                .eq(SysUser::getUserType, 2)
-                .eq(SysUser::getIsDeleted, 0));
-        
+        Long adminCount = sysUserService.count(scopedUserWrapper().eq(SysUser::getUserType, 0));
+        Long studentCount = sysUserService.count(scopedUserWrapper().eq(SysUser::getUserType, 1));
+        Long teacherCount = sysUserService.count(scopedUserWrapper().eq(SysUser::getUserType, 2));
+
         stats.put("admins", adminCount);
         stats.put("students", studentCount);
         stats.put("teachers", teacherCount);
-        
+
         // 启用/禁用用户统计
-        Long enabledUsers = sysUserService.count(new LambdaQueryWrapper<SysUser>()
-                .eq(SysUser::getStatus, 1)
-                .eq(SysUser::getIsDeleted, 0));
-        Long disabledUsers = sysUserService.count(new LambdaQueryWrapper<SysUser>()
-                .eq(SysUser::getStatus, 0)
-                .eq(SysUser::getIsDeleted, 0));
-        
+        Long enabledUsers = sysUserService.count(scopedUserWrapper().eq(SysUser::getStatus, 1));
+        Long disabledUsers = sysUserService.count(scopedUserWrapper().eq(SysUser::getStatus, 0));
+
         stats.put("enabledUsers", enabledUsers);
         stats.put("disabledUsers", disabledUsers);
-        
+
         return stats;
+    }
+
+    /**
+     * 带数据范围的用户查询条件（统计与列表口径保持一致）
+     */
+    private LambdaQueryWrapper<SysUser> scopedUserWrapper() {
+        LambdaQueryWrapper<SysUser> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(SysUser::getIsDeleted, 0);
+        dataScopeResolver.applyUserScope(wrapper);
+        return wrapper;
     }
 
     /**
@@ -436,7 +468,10 @@ public class AdminUserServiceImpl implements AdminUserService {
         
         // 按创建时间倒序
         wrapper.orderByDesc(SysUser::getCreateTime);
-        
+
+        // 数据范围：学院/专业管理员只看本范围用户，超管与 ALL 角色不加条件
+        dataScopeResolver.applyUserScope(wrapper);
+
         return wrapper;
     }
 

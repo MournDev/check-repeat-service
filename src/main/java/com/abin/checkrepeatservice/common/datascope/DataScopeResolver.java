@@ -3,9 +3,11 @@ package com.abin.checkrepeatservice.common.datascope;
 import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
 import com.abin.checkrepeatservice.mapper.SysRoleMapper;
 import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
+import com.abin.checkrepeatservice.pojo.entity.SysLoginLog;
 import com.abin.checkrepeatservice.pojo.entity.SysRole;
 import com.abin.checkrepeatservice.pojo.entity.SysUser;
 import com.abin.checkrepeatservice.pojo.entity.ThesisArchive;
+import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import jakarta.annotation.Resource;
 import org.springframework.stereotype.Component;
@@ -31,6 +33,9 @@ public class DataScopeResolver {
 
     @Resource
     private SysRoleMapper sysRoleMapper;
+
+    @Resource
+    private PaperInfoMapper paperInfoMapper;
 
     /**
      * 当前登录人的数据范围
@@ -86,6 +91,84 @@ public class DataScopeResolver {
             case DataScope.SELF -> Objects.equals(paper.getStudentId(), user.getId());
             default -> true;
         };
+    }
+
+    /**
+     * 把数据范围条件附加到用户查询（用户管理列表/统计）。
+     *
+     * <p>COLLEGE → 本学院；MAJOR → 本专业；TEACHER → 本人指导过的学生；
+     * SELF → 本人；ALL/超管 → 不加条件。</p>
+     */
+    public void applyUserScope(LambdaQueryWrapper<SysUser> wrapper) {
+        DataScopeSqlFilter filter = currentFilter();
+        if (filter.isDenyAll()) {
+            wrapper.apply("1 = 0");
+        } else if (filter.getCollegeId() != null) {
+            wrapper.apply("college_id = {0}", filter.getCollegeId());
+        } else if (filter.getMajorId() != null) {
+            wrapper.apply("major_id = {0}", filter.getMajorId());
+        } else if (filter.getTeacherId() != null) {
+            wrapper.apply("id IN (SELECT student_id FROM paper_info WHERE is_deleted = 0 AND teacher_id = {0})",
+                    filter.getTeacherId());
+        } else if (filter.getStudentId() != null) {
+            wrapper.apply("id = {0}", filter.getStudentId());
+        }
+    }
+
+    /**
+     * 单个用户是否在当前登录人的数据范围内（详情/编辑/删除/重置密码/登录历史等按 ID 直达的入口使用）
+     */
+    public boolean canAccessUser(SysUser user) {
+        if (user == null) {
+            return false;
+        }
+        DataScopeSqlFilter filter = currentFilter();
+        if (filter.isUnrestricted()) {
+            return true;
+        }
+        if (filter.isDenyAll()) {
+            return false;
+        }
+        if (filter.getCollegeId() != null) {
+            return Objects.equals(filter.getCollegeId(), user.getCollegeId());
+        }
+        if (filter.getMajorId() != null) {
+            return Objects.equals(filter.getMajorId(), user.getMajorId());
+        }
+        if (filter.getTeacherId() != null) {
+            if (Objects.equals(filter.getTeacherId(), user.getId())) {
+                return true;
+            }
+            return paperInfoMapper.selectCount(new LambdaQueryWrapper<PaperInfo>()
+                    .eq(PaperInfo::getTeacherId, filter.getTeacherId())
+                    .eq(PaperInfo::getStudentId, user.getId())
+                    .eq(PaperInfo::getIsDeleted, 0)) > 0;
+        }
+        return Objects.equals(filter.getStudentId(), user.getId());
+    }
+
+    /**
+     * 把数据范围条件附加到登录日志查询（按日志 user_id 关联到范围内的用户）。
+     */
+    public void applyUserLogScope(LambdaQueryWrapper<SysLoginLog> wrapper) {
+        DataScopeSqlFilter filter = currentFilter();
+        if (filter.isUnrestricted()) {
+            return;
+        }
+        if (filter.isDenyAll()) {
+            wrapper.apply("1 = 0");
+        } else if (filter.getCollegeId() != null) {
+            wrapper.apply("user_id IN (SELECT id FROM sys_user WHERE is_deleted = 0 AND college_id = {0})",
+                    filter.getCollegeId());
+        } else if (filter.getMajorId() != null) {
+            wrapper.apply("user_id IN (SELECT id FROM sys_user WHERE is_deleted = 0 AND major_id = {0})",
+                    filter.getMajorId());
+        } else if (filter.getTeacherId() != null) {
+            wrapper.apply("user_id IN (SELECT student_id FROM paper_info WHERE is_deleted = 0 AND teacher_id = {0})",
+                    filter.getTeacherId());
+        } else {
+            wrapper.apply("user_id = {0}", filter.getStudentId());
+        }
     }
 
     /**

@@ -1,5 +1,6 @@
 package com.abin.checkrepeatservice.mapper;
 
+import com.abin.checkrepeatservice.common.datascope.DataScopeSqlFilter;
 import com.abin.checkrepeatservice.pojo.entity.SysUser;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
@@ -55,8 +56,24 @@ public  interface SysUserMapper extends BaseMapper<SysUser> {
     /**
      * S14：用户按类型聚合（单条 GROUP BY），替代仪表盘原先总数+三类共 4 次 selectCount。
      * user_type 为 NULL 的账号单独成组（其 cnt 仍计入总用户数，由调用方对所有行求和）。
+     *
+     * <p>数据范围：scope 为 null（ALL/超管）时不加条件，SQL 与接入范围前一致；
+     * 学院/专业/教师/本人范围按对应列过滤。</p>
      */
-    @Select("SELECT user_type AS userType, COUNT(*) AS cnt " +
-            "FROM sys_user WHERE is_deleted = 0 GROUP BY user_type")
-    List<Map<String, Object>> selectUserTypeStats();
+    @Select("<script>" +
+            "SELECT user_type AS userType, COUNT(*) AS cnt FROM sys_user WHERE is_deleted = 0 " +
+            "<if test='scope != null'>" +
+            "<choose>" +
+            "<when test='scope.denyAll'> AND 1 = 0 </when>" +
+            "<when test='scope.collegeId != null'> AND college_id = #{scope.collegeId} </when>" +
+            "<when test='scope.majorId != null'> AND major_id = #{scope.majorId} </when>" +
+            "<when test='scope.teacherId != null'>" +
+            " AND id IN (SELECT student_id FROM paper_info WHERE is_deleted = 0 AND teacher_id = #{scope.teacherId})" +
+            "</when>" +
+            "<when test='scope.studentId != null'> AND id = #{scope.studentId} </when>" +
+            "</choose>" +
+            "</if>" +
+            " GROUP BY user_type" +
+            "</script>")
+    List<Map<String, Object>> selectUserTypeStats(@Param("scope") DataScopeSqlFilter scope);
 }
