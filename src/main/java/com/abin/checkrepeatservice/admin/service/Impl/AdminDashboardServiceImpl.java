@@ -1,6 +1,8 @@
 package com.abin.checkrepeatservice.admin.service.Impl;
 
+import com.abin.checkrepeatservice.admin.mapper.AlertRecordMapper;
 import com.abin.checkrepeatservice.admin.mapper.CheckResultMapper;
+import com.abin.checkrepeatservice.admin.mapper.SysOperationLogMapper;
 import com.abin.checkrepeatservice.admin.service.AdminDashboardService;
 import com.abin.checkrepeatservice.admin.service.SysBackupService;
 import com.abin.checkrepeatservice.admin.vo.CollegePaperStatsVO;
@@ -13,10 +15,12 @@ import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.monitor.service.DatabaseMonitorService;
 import com.abin.checkrepeatservice.monitor.service.ResponseTimeStore;
 import com.abin.checkrepeatservice.monitor.service.SystemMonitorService;
+import com.abin.checkrepeatservice.pojo.entity.AlertRecord;
 import com.abin.checkrepeatservice.pojo.entity.CheckResult;
 import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
 import com.abin.checkrepeatservice.pojo.entity.SysBackupLog;
 import com.abin.checkrepeatservice.pojo.entity.SysLoginLog;
+import com.abin.checkrepeatservice.pojo.entity.SysOperationLog;
 import com.abin.checkrepeatservice.pojo.entity.SysUser;
 import com.abin.checkrepeatservice.user.mapper.SysLoginLogMapper;
 import com.abin.checkrepeatservice.user.service.SysUserService;
@@ -72,6 +76,12 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
 
     @Resource
     private DetectionCacheService detectionCacheService;
+
+    @Resource
+    private SysOperationLogMapper sysOperationLogMapper;
+
+    @Resource
+    private AlertRecordMapper alertRecordMapper;
 
     @Override
     public Result<Map<String, Object>> getSystemStats() {
@@ -561,15 +571,30 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
             Long activeUsers = (long) activeUserIds.size();
             auditStats.put("activeUsers", activeUsers);
             
-            // 系统错误日志数（最近一天）
-            Long todayErrors = 0L; // 需要从系统日志表查询
+            // 系统错误日志数（最近一天）：取操作日志中失败记录
+            Long todayErrors = sysOperationLogMapper.selectCount(
+                    new LambdaQueryWrapper<SysOperationLog>()
+                            .eq(SysOperationLog::getStatus, 0)
+                            .ge(SysOperationLog::getOperationTime, todayStart));
             auditStats.put("todayErrors", todayErrors);
             
-            // 安全事件统计
+            // 安全事件统计：活跃预警取 alert_record，可疑活动取本月失败登录的来源 IP 数
+            Long activeAlerts = alertRecordMapper.selectCount(
+                    new LambdaQueryWrapper<AlertRecord>()
+                            .eq(AlertRecord::getStatus, "ACTIVE"));
+            LambdaQueryWrapper<SysLoginLog> suspiciousWrapper = new LambdaQueryWrapper<SysLoginLog>()
+                    .select(SysLoginLog::getLoginIp)
+                    .eq(SysLoginLog::getLoginResult, 0)
+                    .ge(SysLoginLog::getLoginTime, monthStart)
+                    .isNotNull(SysLoginLog::getLoginIp)
+                    .groupBy(SysLoginLog::getLoginIp);
+            dataScopeResolver.applyUserLogScope(suspiciousWrapper);
+            long suspiciousActivities = sysLoginLogMapper.selectList(suspiciousWrapper).size();
+
             Map<String, Object> securityEvents = new HashMap<>();
             securityEvents.put("failedLogins", monthFailedLogins);
-            securityEvents.put("suspiciousActivities", 0L); // 需要额外的日志分析
-            securityEvents.put("securityAlerts", 0L);
+            securityEvents.put("suspiciousActivities", suspiciousActivities);
+            securityEvents.put("securityAlerts", activeAlerts);
             auditStats.put("securityEvents", securityEvents);
             
         } catch (Exception e) {
@@ -580,6 +605,11 @@ public class AdminDashboardServiceImpl implements AdminDashboardService {
             auditStats.put("monthFailedLogins", 0L);
             auditStats.put("activeUsers", 0L);
             auditStats.put("todayErrors", 0L);
+            Map<String, Object> emptySecurityEvents = new HashMap<>();
+            emptySecurityEvents.put("failedLogins", 0L);
+            emptySecurityEvents.put("suspiciousActivities", 0L);
+            emptySecurityEvents.put("securityAlerts", 0L);
+            auditStats.put("securityEvents", emptySecurityEvents);
         }
         
         return auditStats;
