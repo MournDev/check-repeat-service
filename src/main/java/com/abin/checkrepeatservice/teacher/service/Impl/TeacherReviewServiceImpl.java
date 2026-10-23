@@ -26,6 +26,7 @@ import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
 import com.abin.checkrepeatservice.user.mapper.PaperStatusLogMapper;
 import com.abin.checkrepeatservice.user.service.InstantMessageService;
 import com.abin.checkrepeatservice.user.service.MessageService;
+import com.abin.checkrepeatservice.user.service.Impl.NotificationFacadeService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -36,6 +37,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
+import org.springframework.util.StringUtils;
 
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -89,6 +91,9 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
 
     @Resource
     private MessageService messageService;
+
+    @Resource
+    private NotificationFacadeService notificationFacadeService;
 
     @Resource
     private InstantMessageService instantMessageService;
@@ -730,6 +735,13 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
                 contactDTO.setStudentId(paper.getStudentId().toString());
             }
 
+            // 归属校验：显式传 studentId 时也必须确认该学生在本教师名下，
+            // 否则可向任意学生发送消息（原先仅在缺省 studentId 时才校验论文归属）
+            Result<Map<String, Object>> targetError = validateContactTarget(contactDTO);
+            if (targetError != null) {
+                return targetError;
+            }
+
             switch (contactDTO.getMessageType().toLowerCase()) {
                 case "chat":
                     return sendInstantMessage(contactDTO, result);
@@ -803,10 +815,88 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
         return Result.error(ResultCode.SYSTEM_ERROR, "系统消息发送失败: " + sendResult.getMessage());
     }
 
+    /**
+     * 校验教师是否有权联系目标学生：有 paperId 时按论文归属校验，无 paperId 时要求
+     * 该教师名下至少有一篇该学生的论文。
+     */
+    private Result<Map<String, Object>> validateContactTarget(ContactStudentDTO contactDTO) {
+        Long studentId;
+        try {
+            studentId = Long.parseLong(contactDTO.getStudentId());
+        } catch (NumberFormatException e) {
+            return Result.error(ResultCode.PARAM_ERROR, "学生ID格式不正确");
+        }
+        Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
+
+        if (StringUtils.hasText(contactDTO.getPaperId())) {
+            Long paperId;
+            try {
+                paperId = Long.parseLong(contactDTO.getPaperId());
+            } catch (NumberFormatException e) {
+                return Result.error(ResultCode.PARAM_ERROR, "论文ID格式不正确");
+            }
+            PaperInfo paper = paperInfoMapper.selectById(paperId);
+            if (paper == null || Integer.valueOf(1).equals(paper.getIsDeleted())) {
+                return Result.error(ResultCode.RESOURCE_NOT_FOUND, "论文不存在");
+            }
+            if (!Objects.equals(paper.getTeacherId(), teacherId)) {
+                return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权限联系该学生");
+            }
+            if (!Objects.equals(paper.getStudentId(), studentId)) {
+                return Result.error(ResultCode.PARAM_ERROR, "学生与论文不匹配");
+            }
+            return null;
+        }
+
+        Long relationCount = paperInfoMapper.selectCount(new LambdaQueryWrapper<PaperInfo>()
+                .eq(PaperInfo::getTeacherId, teacherId)
+                .eq(PaperInfo::getStudentId, studentId)
+                .eq(PaperInfo::getIsDeleted, 0));
+        if (relationCount == null || relationCount == 0) {
+            return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权限联系该学生");
+        }
+        return null;
+    }
+
     private Result<Map<String, Object>> sendEmailMessage(ContactStudentDTO contactDTO, Map<String, Object> result) {
-        // 邮件服务尚未接入，保留与旧实现一致的占位返回
-        log.info("准备发送邮件: studentId={}, message={}", contactDTO.getStudentId(), contactDTO.getMessage());
-        result.put("messageId", "email_" + System.currentTimeMillis());
+        Long studentId;
+        try {
+            studentId = Long.parseLong(contactDTO.getStudentId());
+        } catch (NumberFormatException e) {
+            return Result.error(ResultCode.PARAM_ERROR, "学生ID格式不正确");
+        }
+
+        SysUser student = sysUserMapper.selectById(studentId);
+        if (student == null || Integer.valueOf(1).equals(student.getIsDeleted())) {
+            return Result.error(ResultCode.RESOURCE_NOT_FOUND, "学生不存在");
+        }
+        if (!StringUtils.hasText(student.getEmail())) {
+            return Result.error(ResultCode.PARAM_ERROR, "学生未填写邮箱，无法发送邮件");
+        }
+        // 尊重学生邮件偏好（关闭后只保留站内信通道）
+        if (!Integer.valueOf(1).equals(student.getNotifyEmail())) {
+            return Result.error(ResultCode.BUSINESS_ILLEGAL, "学生已关闭邮件通知，请改用站内信");
+        }
+
+        String paperTitle = null;
+        if (StringUtils.hasText(contactDTO.getPaperId())) {
+            PaperInfo paper = paperInfoMapper.selectById(Long.parseLong(contactDTO.getPaperId()));
+            paperTitle = paper == null ? null : paper.getPaperTitle();
+        }
+        SysUser teacher = sysUserMapper.selectById(UserBusinessInfoUtils.getCurrentUserId());
+        String teacherName = teacher != null && StringUtils.hasText(teacher.getRealName())
+                ? teacher.getRealName() : "指导老师";
+
+        boolean sent = notificationFacadeService.sendTeacherContactEmail(
+                studentId, teacherName, paperTitle, contactDTO.getMessage());
+        if (!sent) {
+            log.warn("教师邮件联系学生失败: teacherId={}, studentId={}",
+                    teacher == null ? null : teacher.getId(), studentId);
+            return Result.error(ResultCode.SYSTEM_ERROR, "邮件发送失败，请检查学生邮箱或邮件服务配置");
+        }
+
+        log.info("教师邮件联系学生成功: studentId={}", studentId);
+        result.put("channel", "email");
         result.put("sendTime", LocalDateTime.now().toString());
         return Result.success("邮件消息发送成功", result);
     }

@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import org.springframework.web.util.HtmlUtils;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
@@ -597,6 +598,33 @@ public class NotificationFacadeService {
         } catch (Exception e) {
             log.error("发送导师评价催评异常：paperId={}，studentId={}", paperId, studentId, e);
         }
+    }
+
+    /**
+     * 教师通过邮件联系学生（业务邮件，遵循学生 notify_email 开关）。
+     *
+     * <p>留言内容与姓名均做 HTML 转义后再拼进模板，防止教师输入注入邮件 HTML。</p>
+     *
+     * @return true-已提交 SMTP 且发送成功；false-学生不存在/邮箱为空/已关闭邮件或发送失败
+     */
+    public boolean sendTeacherContactEmail(Long studentId, String teacherName, String paperTitle, String message) {
+        SysUser student = userQueryService.getUserById(studentId);
+        if (!canSendEmail(student)) {
+            log.info("学生未开启邮件通知或邮箱为空，跳过教师联系邮件 - studentId: {}", studentId);
+            return false;
+        }
+        String safeTeacher = HtmlUtils.htmlEscape(
+                StringUtils.hasText(teacherName) ? teacherName : "指导老师");
+        String safePaper = StringUtils.hasText(paperTitle)
+                ? "关于论文《" + HtmlUtils.htmlEscape(paperTitle) + "》，" : "";
+        String studentName = StringUtils.hasText(student.getRealName())
+                ? student.getRealName() : student.getUsername();
+        String content = "<p>您好，" + HtmlUtils.htmlEscape(studentName) + "：</p>"
+                + "<p>" + safePaper + "指导老师留言如下：</p>"
+                + "<p style=\"white-space:pre-wrap;\">" + HtmlUtils.htmlEscape(message) + "</p>"
+                + "<p>—— " + safeTeacher + "</p>";
+        return emailService.sendNoticeEmail(student.getEmail(),
+                safeTeacher + "老师给您留言", content, "TEACHER_CONTACT", null, "PAPER");
     }
 
     /**
