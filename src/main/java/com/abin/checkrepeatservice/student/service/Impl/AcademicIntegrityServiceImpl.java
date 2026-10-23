@@ -12,6 +12,10 @@ import com.abin.checkrepeatservice.student.dto.AcademicResourceDTO;
 import com.abin.checkrepeatservice.student.dto.ChecklistItemDTO;
 import com.abin.checkrepeatservice.student.dto.PersonalAdviceDTO;
 import com.abin.checkrepeatservice.pojo.entity.CheckSentenceHit;
+import com.abin.checkrepeatservice.pojo.entity.KnowledgeArticle;
+import com.abin.checkrepeatservice.pojo.entity.KnowledgeCategory;
+import com.abin.checkrepeatservice.knowledge.mapper.KnowledgeArticleMapper;
+import com.abin.checkrepeatservice.knowledge.mapper.KnowledgeCategoryMapper;
 import com.abin.checkrepeatservice.student.mapper.AcademicChecklistMapper;
 import com.abin.checkrepeatservice.student.mapper.CheckSentenceHitMapper;
 import com.abin.checkrepeatservice.student.service.AcademicIntegrityService;
@@ -28,6 +32,8 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -48,6 +54,12 @@ public class AcademicIntegrityServiceImpl implements AcademicIntegrityService {
 
     @Resource
     private CheckSentenceHitMapper checkSentenceHitMapper;
+
+    @Resource
+    private KnowledgeArticleMapper knowledgeArticleMapper;
+
+    @Resource
+    private KnowledgeCategoryMapper knowledgeCategoryMapper;
     
     @Override
     public PersonalAdviceDTO getPersonalAdvice(Long studentId) {
@@ -102,21 +114,45 @@ public class AcademicIntegrityServiceImpl implements AcademicIntegrityService {
     public List<AcademicResourceDTO> getRecommendedResources(Long studentId, String resourceType) {
         try {
             log.info("获取推荐学习资源 - 学生ID: {}, 资源类型: {}", studentId, resourceType);
-            
-            // 1. 获取学生最新论文信息，用于个性化推荐
-            PaperInfo latestPaper = paperInfoMapper.selectLatestPaper(studentId);
-            String subjectArea = latestPaper != null ? latestPaper.getSubjectCode() : "general";
-            
-            // 2. 根据学科领域和资源类型筛选资源
-            List<AcademicResourceDTO> allResources = getAllAcademicResources();
-            List<AcademicResourceDTO> filteredResources = allResources.stream()
-                    .filter(resource -> resourceType == null || resource.getType().equals(resourceType))
-                    .filter(resource -> "general".equals(subjectArea) || resource.getCategory().contains(subjectArea.toLowerCase()))
-                    .limit(10)
-                    .collect(Collectors.toList());
-            
-            log.info("推荐学习资源获取成功 - 学生ID: {}, 返回资源数: {}", studentId, filteredResources.size());
-            return filteredResources;
+
+            // 知识库目前只有文章形态；前端传其他类型时如实返回空，不再返回硬编码假资源
+            String type = resourceType == null ? "" : resourceType.trim().toLowerCase();
+            if (!type.isEmpty() && !List.of("article", "online", "document").contains(type)) {
+                return new ArrayList<>();
+            }
+
+            List<KnowledgeArticle> articles = knowledgeArticleMapper.selectList(
+                    new LambdaQueryWrapper<KnowledgeArticle>()
+                            .eq(KnowledgeArticle::getStatus, "PUBLISHED")
+                            .orderByAsc(KnowledgeArticle::getSort)
+                            .orderByDesc(KnowledgeArticle::getViewCount)
+                            .last("LIMIT 30"));
+            if (articles.isEmpty()) {
+                return new ArrayList<>();
+            }
+
+            Set<Long> categoryIds = articles.stream()
+                    .map(KnowledgeArticle::getCategoryId)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toSet());
+            Map<Long, String> categoryNames = categoryIds.isEmpty() ? Map.of()
+                    : knowledgeCategoryMapper.selectBatchIds(categoryIds).stream()
+                        .collect(Collectors.toMap(KnowledgeCategory::getId, KnowledgeCategory::getName));
+
+            List<AcademicResourceDTO> resources = articles.stream().limit(10).map(article -> {
+                AcademicResourceDTO resource = new AcademicResourceDTO();
+                resource.setResourceId(article.getId());
+                resource.setTitle(article.getTitle());
+                resource.setType("article");
+                resource.setDescription(article.getSummary());
+                resource.setUrl("/api/knowledge/articles/" + article.getId());
+                resource.setCategory(article.getCategoryId() == null
+                        ? "未分类" : categoryNames.getOrDefault(article.getCategoryId(), "未分类"));
+                return resource;
+            }).collect(Collectors.toList());
+
+            log.info("推荐学习资源获取成功 - 学生ID: {}, 返回资源数: {}", studentId, resources.size());
+            return resources;
             
         } catch (Exception e) {
             log.error("获取推荐学习资源失败 - 学生ID: {}", studentId, e);
@@ -352,57 +388,4 @@ public class AcademicIntegrityServiceImpl implements AcademicIntegrityService {
         return tips;
     }
     
-    /**
-     * 获取所有学术资源（模拟数据）
-     */
-    private List<AcademicResourceDTO> getAllAcademicResources() {
-        List<AcademicResourceDTO> resources = new ArrayList<>();
-        
-        // 图书资源
-        resources.add(createResource(1L, "《学术写作规范手册》", "book", 
-            "详细介绍学术写作的各项规范和标准", "/resources/handbook.pdf", "writing"));
-        resources.add(createResource(2L, "《文献检索与利用》", "book", 
-            "系统介绍文献检索方法和技巧", "/resources/literature-search.pdf", "research"));
-        
-        // 在线资源
-        resources.add(createResource(3L, "学校图书馆引用格式指南", "online", 
-            "官方发布的各类引用格式标准", "https://library.university.edu/citation", "general"));
-        resources.add(createResource(4L, "学术诚信政策解读", "online", 
-            "详细解读学校的学术诚信相关政策", "https://academic-integrity.university.edu", "policy"));
-        
-        // 视频教程
-        resources.add(createResource(5L, "EndNote文献管理软件教程", "video", 
-            "从入门到精通的文献管理软件使用教程", "/videos/endnote-tutorial.mp4", "tools"));
-        resources.add(createResource(6L, "学术写作技巧系列课程", "video", 
-            "涵盖选题、文献综述、论文结构等完整写作指导", "/videos/academic-writing-series.mp4", "writing"));
-        
-        // 文档资料
-        resources.add(createResource(7L, "查重系统使用说明", "document", 
-            "详细的操作指南和注意事项", "/documents/plagiarism-check-guide.docx", "tools"));
-        resources.add(createResource(8L, "常见引用格式模板", "document", 
-            "APA、MLA、Chicago等主流格式的模板文件", "/documents/citation-templates.zip", "writing"));
-        
-        // 课程资源
-        resources.add(createResource(9L, "学术道德与规范课程", "course", 
-            "系统的学术诚信教育在线课程", "https://mooc.university.edu/academic-integrity", "ethics"));
-        resources.add(createResource(10L, "研究生学术写作工作坊", "course", 
-            "面向研究生的学术写作实践课程", "https://workshop.university.edu/grad-writing", "advanced"));
-        
-        return resources;
-    }
-    
-    /**
-     * 创建资源对象
-     */
-    private AcademicResourceDTO createResource(Long id, String title, String type, 
-                                             String description, String url, String category) {
-        AcademicResourceDTO resource = new AcademicResourceDTO();
-        resource.setResourceId(id);
-        resource.setTitle(title);
-        resource.setType(type);
-        resource.setDescription(description);
-        resource.setUrl(url);
-        resource.setCategory(category);
-        return resource;
-    }
 }
