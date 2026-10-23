@@ -662,10 +662,11 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
             // 获取学生信息
             SysUser student = sysUserMapper.selectById(paperInfo.getStudentId());
                     
-            // 获取管理员信息
+            // 获取管理员信息：按角色编码查询，超管同样需要收到严重告警
+            // （此前硬编码 roleId=4001，角色 ID 变动或超管都会漏收）
             List<SysUser> admins = sysUserMapper.selectList(
                 new LambdaQueryWrapper<SysUser>()
-                    .eq(SysUser::getRoleId, 4001) // 假设角色ID 4001 是管理员
+                    .apply("role_id IN (SELECT id FROM sys_role WHERE is_deleted = 0 AND role_code IN ('ADMIN', 'SUPER_ADMIN'))")
                     .eq(SysUser::getIsDeleted, 0)
             );
                     
