@@ -82,6 +82,45 @@ public class StudentMessageServiceImpl implements StudentMessageService {
     private Long generateConversationId(Long userId1, Long userId2) {
         return ConversationIdUtils.of(userId1, userId2);
     }
+
+    /**
+     * 校验会话号确实属于当前学生，并返回对方（教师）的用户 ID。
+     *
+     * <p>会话号是两个用户 ID 的对称哈希，猜中概率低但不等于可跳过校验；
+     * 归属依据与 getMessageSessions 一致：存在一条把学生与教师连起来的论文记录。</p>
+     */
+    private Long requireMyConversation(Long studentId, Long sessionId) {
+        if (sessionId == null) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "会话 ID 不能为空", null);
+        }
+        Long teacherId = resolveCounterpartId(studentId, sessionId);
+        if (teacherId == null) {
+            throw new BusinessException(ResultCode.PERMISSION_NO_ACCESS, "该会话不属于当前学生", null);
+        }
+        return teacherId;
+    }
+
+    /** 会话号能反推出的对方（教师）用户 ID；不属于当前学生时返回 null */
+    private Long resolveCounterpartId(Long studentId, Long sessionId) {
+        if (studentId == null) {
+            return null;
+        }
+        LambdaQueryWrapper<PaperInfo> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(PaperInfo::getStudentId, studentId)
+                .eq(PaperInfo::getIsDeleted, 0)
+                .isNotNull(PaperInfo::getTeacherId);
+        List<Long> teacherIds = paperInfoMapper.selectList(wrapper).stream()
+                .map(PaperInfo::getTeacherId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+        for (Long teacherId : teacherIds) {
+            if (ConversationIdUtils.of(studentId, teacherId).equals(sessionId)) {
+                return teacherId;
+            }
+        }
+        return null;
+    }
     
     /**
      * 根据用户 ID 获取会话 ID（用于查询现有会话）
@@ -203,6 +242,8 @@ public class StudentMessageServiceImpl implements StudentMessageService {
 
     @Override
     public Page<MessageVO> getMessageList(Long studentId, Long sessionId, Integer pageNum, Integer pageSize) {
+        // 归属校验：会话号必须属于当前学生（对称哈希，猜中概率低但不等于可跳过校验）
+        requireMyConversation(studentId, sessionId);
         try {
             log.info("获取消息列表 -学生ID: {}, 会话ID: {}, 页码: {}, 页大小: {}", 
                     studentId, sessionId, pageNum, pageSize);
@@ -221,7 +262,7 @@ public class StudentMessageServiceImpl implements StudentMessageService {
             
             //为VO
             List<MessageVO> messageVOs = dbPage.getRecords().stream()
-                .map(this::convertToMessageVO)
+                .map(message -> convertToMessageVO(message, studentId))
                 .collect(Collectors.toList());
             
             Page<MessageVO> page = new Page<>(pageNum, pageSize);
@@ -243,15 +284,21 @@ public class StudentMessageServiceImpl implements StudentMessageService {
         try {
             // 使用当前登录用户 ID，而不是参数中的 studentId
             Long currentUserId = UserBusinessInfoUtils.getCurrentUserId();
+
+            // 归属校验：会话必须属于当前学生，且接收者必须是该会话对应的教师
+            Long teacherId = requireMyConversation(currentUserId, sendDTO.getSessionId());
+            if (sendDTO.getReceiverId() != null && !sendDTO.getReceiverId().equals(teacherId)) {
+                throw new BusinessException(ResultCode.PARAM_ERROR, "接收者与会话不匹配", null);
+            }
                     
             log.info("发送消息 - 当前用户 ID: {}, 会话 ID: {},接收者 ID: {}", 
-                    currentUserId, sendDTO.getSessionId(), sendDTO.getReceiverId());
+                    currentUserId, sendDTO.getSessionId(), teacherId);
                     
             // 【关键】确保 conversation_id 正确设置（使用前端传递的会话 ID）
             // 前端传递的 sessionId 现在应该是真正的会话 ID（conversation_id）
             InstantMessage message = new InstantMessage();
             message.setSenderId(currentUserId); // 使用当前登录用户 ID
-            message.setReceiverId(sendDTO.getReceiverId());
+            message.setReceiverId(teacherId);
             message.setConversationId(sendDTO.getSessionId()); // ✅ 直接使用前端传递的会话 ID
             message.setContent(sendDTO.getContent());
             message.setMessageType(sendDTO.getMessageType());
@@ -302,6 +349,9 @@ public class StudentMessageServiceImpl implements StudentMessageService {
                 throw new RuntimeException("消息发送失败: 数据库插入返回值为 " + result);
             }
             
+        } catch (BusinessException e) {
+            // 归属/参数校验异常原样抛出，交给全局异常处理映射状态码
+            throw e;
         } catch (Exception e) {
             log.error("发送消息失败", e);
             throw new RuntimeException("消息发送失败: " + e.getMessage());
@@ -427,6 +477,7 @@ public class StudentMessageServiceImpl implements StudentMessageService {
 
     @Override
     public void clearMessages(Long studentId, Long sessionId) {
+        requireMyConversation(studentId, sessionId);
         try {
             log.info("清空消息 -学生ID: {}, 会话ID: {}", studentId, sessionId);
             
@@ -458,6 +509,7 @@ public class StudentMessageServiceImpl implements StudentMessageService {
 
     @Override
     public void exportChatRecords(Long studentId, ChatExportDTO exportDTO, HttpServletResponse response) {
+        requireMyConversation(studentId, exportDTO == null ? null : exportDTO.getSessionId());
         try {
             log.info("导出聊天记录 - 学生ID: {}, 会话ID: {},格: {}", 
                     studentId, exportDTO.getSessionId(), exportDTO.getFormat());
@@ -498,6 +550,7 @@ public class StudentMessageServiceImpl implements StudentMessageService {
 
     @Override
     public List<SharedFileVO> getSharedFiles(Long studentId, Long sessionId) {
+        requireMyConversation(studentId, sessionId);
         try {
             log.info("获取共享文件列表 -学生ID: {}, 会话ID: {}", studentId, sessionId);
             
@@ -574,6 +627,7 @@ public class StudentMessageServiceImpl implements StudentMessageService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void markMessagesRead(Long studentId, Long sessionId) {
+        requireMyConversation(studentId, sessionId);
         try {
             log.info("标记消息已读 - 学生 ID: {}, 会话 ID: {}", studentId, sessionId);
                     
@@ -811,12 +865,17 @@ public class StudentMessageServiceImpl implements StudentMessageService {
     /**
      *将 InstantMessage 转换为 MessageVO
      */
-    private MessageVO convertToMessageVO(InstantMessage message) {
+    private MessageVO convertToMessageVO(InstantMessage message, Long studentId) {
         MessageVO messageVO = new MessageVO();
         messageVO.setId(message.getId());
         messageVO.setSenderId(message.getSenderId());
         messageVO.setSenderName(message.getSenderName() != null ? message.getSenderName() : "未知用户");
-        messageVO.setSenderRole(message.getSenderId() != null ? "STUDENT" : "TEACHER"); //简化处理
+        // 发送者角色按会话参与者判定：本人=STUDENT，对方教师=TEACHER，系统消息无发送者
+        if (message.getSenderId() == null) {
+            messageVO.setSenderRole("SYSTEM");
+        } else {
+            messageVO.setSenderRole(message.getSenderId().equals(studentId) ? "STUDENT" : "TEACHER");
+        }
         messageVO.setContent(message.getContent());
             
         if (message.getSentTime() != null) {

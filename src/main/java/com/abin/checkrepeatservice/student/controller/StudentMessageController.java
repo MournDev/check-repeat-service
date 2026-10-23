@@ -77,6 +77,8 @@ public class StudentMessageController {
             
             Page<MessageVO> messages = studentMessageService.getMessageList(studentId, sessionId, pageNum, pageSize);
             return Result.success("获取消息列表成功", messages);
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             log.error("获取消息列表失败", e);
             return Result.error(ResultCode.SYSTEM_ERROR, "获取消息列表失败: " + "系统异常，请稍后重试");
@@ -97,6 +99,8 @@ public class StudentMessageController {
             
             MessageVO message = studentMessageService.sendMessage(studentId, sendDTO);
             return Result.success("消息发送成功", message);
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             log.error("发送消息失败", e);
             return Result.error(ResultCode.SYSTEM_ERROR, "消息发送失败: " + "系统异常，请稍后重试");
@@ -174,6 +178,8 @@ public class StudentMessageController {
             
             studentMessageService.clearMessages(studentId, sessionIdLong);
             return Result.success("清空消息成功");
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             log.error("清空消息失败", e);
             return Result.error(ResultCode.SYSTEM_ERROR, "清空消息失败: " + "系统异常，请稍后重试");
@@ -201,6 +207,8 @@ public class StudentMessageController {
                     studentId, exportDTO.getSessionId(), exportDTO.getFormat());
             
             studentMessageService.exportChatRecords(studentId, exportDTO, response);
+        } catch (BusinessException e) {
+            writeBusinessError(response, e);
         } catch (Exception e) {
             log.error("导出聊天记录失败", e);
             try {
@@ -225,6 +233,8 @@ public class StudentMessageController {
             
             List<SharedFileVO> files = studentMessageService.getSharedFiles(studentId, sessionId);
             return Result.success("获取共享文件列表成功", files);
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             log.error("获取共享文件列表失败", e);
             return Result.error(ResultCode.SYSTEM_ERROR, "获取共享文件列表失败: " + "系统异常，请稍后重试");
@@ -294,6 +304,8 @@ public class StudentMessageController {
             
             studentMessageService.markMessagesRead(studentId, sessionIdLong);
             return Result.success("标记消息已读成功");
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             log.error("标记消息已读失败", e);
             return Result.error(ResultCode.SYSTEM_ERROR, "标记消息已读失败: " + "系统异常，请稍后重试");
