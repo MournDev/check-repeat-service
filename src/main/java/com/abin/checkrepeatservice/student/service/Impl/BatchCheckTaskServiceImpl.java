@@ -66,6 +66,13 @@ public class BatchCheckTaskServiceImpl {
     private ThreadPoolTaskExecutor asyncExecutor;
 
     /**
+     * 查重任务线程池（AsyncConfig.checkTaskExecutor）。
+     * 负载系数与等待预估按该池的真实最大并发计算，不再假设“最大并发 10”。
+     */
+    @Resource(name = "checkTaskExecutor")
+    private ThreadPoolTaskExecutor checkTaskExecutor;
+
+    /**
      * 批量创建查重任务
      * 
      * @param request 批量请求参数
@@ -264,10 +271,39 @@ public class BatchCheckTaskServiceImpl {
 
     /**
      * 预估等待时间（秒）
+     * 单任务耗时取最近已完成任务的真实 duration_seconds 均值，无历史样本时才退回 60 秒。
      */
     private int estimateWaitTime(int queuePosition) {
-        // 假设每个任务平均需要 60 秒
-        return queuePosition * 60;
+        Integer averageSeconds = getAverageDurationSeconds();
+        int perTaskSeconds = averageSeconds != null ? averageSeconds : 60;
+        return queuePosition * perTaskSeconds;
+    }
+
+    /**
+     * 最近已完成任务的平均耗时（秒）。
+     * 取最近 100 条有 start/end 记录的任务的 duration_seconds；无样本返回 null。
+     */
+    private Integer getAverageDurationSeconds() {
+        try {
+            List<CheckTask> recent = checkTaskMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<CheckTask>()
+                    .isNotNull(CheckTask::getDurationSeconds)
+                    .gt(CheckTask::getDurationSeconds, 0)
+                    .eq(CheckTask::getCheckStatus, "COMPLETED")
+                    .eq(CheckTask::getIsDeleted, 0)
+                    .orderByDesc(CheckTask::getEndTime)
+                    .last("LIMIT 100")
+                    .select(CheckTask::getDurationSeconds)
+            );
+            if (recent.isEmpty()) {
+                return null;
+            }
+            long sum = recent.stream().mapToLong(CheckTask::getDurationSeconds).sum();
+            return (int) Math.max(1, sum / recent.size());
+        } catch (Exception e) {
+            log.warn("获取历史平均耗时失败，等待预估退回默认值", e);
+            return null;
+        }
     }
 
     /**
@@ -293,7 +329,9 @@ public class BatchCheckTaskServiceImpl {
      */
     private int estimateDuration(Integer wordCount) {
         if (wordCount == null || wordCount == 0) {
-            return 60; // 默认 60 秒
+            // 无字数时优先用历史真实均值，仍无样本才退回 60 秒
+            Integer averageSeconds = getAverageDurationSeconds();
+            return averageSeconds != null ? averageSeconds : 60;
         }
 
         // 分段预估算法
@@ -335,8 +373,8 @@ public class BatchCheckTaskServiceImpl {
                     .eq(com.abin.checkrepeatservice.pojo.entity.CheckTask::getIsDeleted, 0)
             );
             
-            // 假设最大并发为 10
-            int maxConcurrent = 10;
+            // 最大并发取查重线程池的真实配置
+            int maxConcurrent = Math.max(1, checkTaskExecutor.getMaxPoolSize());
             double loadFactor = Math.min((double)runningCount / maxConcurrent, 1.0);
             
             log.debug("当前系统负载：{}/{}={}, 负载系数：{}", 

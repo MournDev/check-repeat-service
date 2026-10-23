@@ -162,15 +162,42 @@ public class CheckTaskValidationService {
     
     /**
      * 预估等待时间（分钟）
+     * 单任务耗时取最近已完成任务的真实 duration_seconds 均值，无历史样本时才退回 3 分钟。
      */
     private int estimateWaitTime(long runningCount) {
-        // 假设每个任务平均耗时 3 分钟
-        int avgDurationMinutes = 3;
+        int avgDurationMinutes = getAverageDurationMinutes();
         int availableSlots = maxConcurrentTasks - (int)runningCount;
         if (availableSlots <= 0) {
             return avgDurationMinutes;
         }
         return (int)(runningCount / availableSlots) * avgDurationMinutes;
+    }
+
+    /**
+     * 最近已完成任务的平均耗时（分钟）。
+     * 取最近 100 条真实 duration_seconds 的均值；无样本返回 3 分钟兜底。
+     */
+    private int getAverageDurationMinutes() {
+        try {
+            List<CheckTask> recent = checkTaskMapper.selectList(
+                new LambdaQueryWrapper<CheckTask>()
+                    .isNotNull(CheckTask::getDurationSeconds)
+                    .gt(CheckTask::getDurationSeconds, 0)
+                    .eq(CheckTask::getCheckStatus, DictConstants.CheckStatus.COMPLETED)
+                    .eq(CheckTask::getIsDeleted, 0)
+                    .orderByDesc(CheckTask::getEndTime)
+                    .last("LIMIT 100")
+                    .select(CheckTask::getDurationSeconds)
+            );
+            if (recent.isEmpty()) {
+                return 3;
+            }
+            long sum = recent.stream().mapToLong(CheckTask::getDurationSeconds).sum();
+            return Math.max(1, (int) Math.ceil(sum / 100.0 / recent.size()));
+        } catch (Exception e) {
+            log.warn("获取历史平均耗时失败，等待预估退回 3 分钟", e);
+            return 3;
+        }
     }
     
     /**
