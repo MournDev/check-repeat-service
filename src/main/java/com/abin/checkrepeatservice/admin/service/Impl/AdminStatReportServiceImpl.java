@@ -117,6 +117,24 @@ public class AdminStatReportServiceImpl implements AdminStatReportService {
 
     @Override
     public void exportStatReport(HttpServletResponse response) {
+        try {
+            response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+            response.setCharacterEncoding("utf-8");
+            String fileName = "全校查重统计报表_" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+            response.setHeader("Content-disposition", "attachment;filename=" + fileName + ".xlsx");
+            exportStatReportToStream(response.getOutputStream());
+        } catch (Exception e) {
+            log.error("导出全校查重统计报表失败", e);
+            try {
+                response.getWriter().write("{\"code\":500,\"message\":\"导出失败：" + e.getMessage() + "\"}");
+            } catch (Exception ex) {
+                log.error("设置错误响应失败", ex);
+            }
+        }
+    }
+
+    @Override
+    public int exportStatReportToStream(java.io.OutputStream outputStream) {
         // 三个 sheet 的行数据（复用三个查询接口的组装逻辑）
         List<SimilarityDistributionExcelVO> distRows = getSimilarityDistribution().getData().stream()
                 .map(vo -> {
@@ -147,32 +165,19 @@ public class AdminStatReportServiceImpl implements AdminStatReportService {
                 })
                 .collect(Collectors.toList());
 
-        try {
-            response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-            response.setCharacterEncoding("utf-8");
-            String fileName = "全校查重统计报表_" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
-            response.setHeader("Content-disposition", "attachment;filename=" + fileName + ".xlsx");
-
-            try (ExcelWriter excelWriter = EasyExcel.write(response.getOutputStream()).build()) {
-                WriteSheet distSheet = EasyExcel.writerSheet(0, "查重结果分布")
-                        .head(SimilarityDistributionExcelVO.class).build();
-                excelWriter.write(distRows, distSheet);
-                WriteSheet collegeSheet = EasyExcel.writerSheet(1, "学院对比")
-                        .head(CollegeCompareExcelVO.class).build();
-                excelWriter.write(collegeRows, collegeSheet);
-                WriteSheet trendSheet = EasyExcel.writerSheet(2, "月度趋势")
-                        .head(MonthlyTrendExcelVO.class).build();
-                excelWriter.write(trendRows, trendSheet);
-            }
-            log.info("导出全校查重统计报表成功: 分布={}行, 学院对比={}行, 月度趋势={}行",
-                    distRows.size(), collegeRows.size(), trendRows.size());
-        } catch (Exception e) {
-            log.error("导出全校查重统计报表失败", e);
-            try {
-                response.getWriter().write("{\"code\":500,\"message\":\"导出失败：" + e.getMessage() + "\"}");
-            } catch (Exception ex) {
-                log.error("设置错误响应失败", ex);
-            }
+        try (ExcelWriter excelWriter = EasyExcel.write(outputStream).build()) {
+            WriteSheet distSheet = EasyExcel.writerSheet(0, "查重结果分布")
+                    .head(SimilarityDistributionExcelVO.class).build();
+            excelWriter.write(distRows, distSheet);
+            WriteSheet collegeSheet = EasyExcel.writerSheet(1, "学院对比")
+                    .head(CollegeCompareExcelVO.class).build();
+            excelWriter.write(collegeRows, collegeSheet);
+            WriteSheet trendSheet = EasyExcel.writerSheet(2, "月度趋势")
+                    .head(MonthlyTrendExcelVO.class).build();
+            excelWriter.write(trendRows, trendSheet);
         }
+        log.info("导出台账统计报表成功: 分布={}行, 学院对比={}行, 月度趋势={}行",
+                distRows.size(), collegeRows.size(), trendRows.size());
+        return distRows.size() + collegeRows.size() + trendRows.size();
     }
 }

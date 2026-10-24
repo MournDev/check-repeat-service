@@ -6,6 +6,7 @@ import com.abin.checkrepeatservice.admin.dto.SimilarityDistributionVO;
 import com.abin.checkrepeatservice.common.Result;
 import jakarta.servlet.http.HttpServletResponse;
 
+import java.io.OutputStream;
 import java.util.List;
 
 /**
@@ -32,4 +33,9 @@ public interface AdminStatReportService {
      * 导出三 sheet 报表（分布/学院对比/月度趋势）为一个 xlsx
      */
     void exportStatReport(HttpServletResponse response);
+
+    /**
+     * Wave 3：把三 sheet 统计报表写入任意输出流，返回总数据行数（学期包 ZIP 复用）。
+     */
+    int exportStatReportToStream(OutputStream outputStream);
 }
