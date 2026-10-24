@@ -6,8 +6,10 @@ import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.apache.poi.hssf.usermodel.HSSFWorkbook;
+import com.abin.checkrepeatservice.mapper.SysRoleMapper;
 import com.abin.checkrepeatservice.mapper.SysUserMapper;
 import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
+import com.abin.checkrepeatservice.pojo.entity.SysRole;
 import com.abin.checkrepeatservice.pojo.entity.SysUser;
 import com.abin.checkrepeatservice.pojo.entity.SystemMessage;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
@@ -19,12 +21,15 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -44,6 +49,55 @@ public class TeacherStudentManagementServiceImpl implements TeacherStudentManage
 
     @Autowired
     private MessageService messageService;
+
+    // P0-6：建号必须补齐 role_id / password / email —— 三列在 sys_user 上均 NOT NULL
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private SysRoleMapper sysRoleMapper;
+
+    private static final SecureRandom PASSWORD_RANDOM = new SecureRandom();
+    /** 去掉易混淆字符（0/O、1/l/I）的初始密码字符集 */
+    private static final String PASSWORD_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+    private static final String STUDENT_ROLE_CODE = "STUDENT";
+    private static final int INITIAL_PASSWORD_LENGTH = 12;
+
+    /**
+     * 解析学生角色 ID。角色编码是鉴权锚点，不能硬编码角色 ID。
+     */
+    private Long resolveStudentRoleId() {
+        SysRole role = sysRoleMapper.selectOne(new LambdaQueryWrapper<SysRole>()
+                .eq(SysRole::getRoleCode, STUDENT_ROLE_CODE)
+                .eq(SysRole::getIsDeleted, 0)
+                .last("LIMIT 1"));
+        if (role == null) {
+            throw new IllegalStateException("学生角色未初始化，无法创建学生账号");
+        }
+        return role.getId();
+    }
+
+    /**
+     * 生成随机初始密码（管理员建号/批量导入后下发给学生，后续可走改密流程）。
+     */
+    private String generateInitialPassword() {
+        StringBuilder sb = new StringBuilder(INITIAL_PASSWORD_LENGTH);
+        for (int i = 0; i < INITIAL_PASSWORD_LENGTH; i++) {
+            sb.append(PASSWORD_CHARS.charAt(PASSWORD_RANDOM.nextInt(PASSWORD_CHARS.length())));
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 未填邮箱时的占位邮箱。sys_user.email 为 NOT NULL 且唯一，不能留空；
+     * username 本身唯一，因此占位邮箱也唯一。
+     */
+    private String resolveStudentEmail(String email, String username) {
+        if (email != null && !email.trim().isEmpty()) {
+            return email.trim();
+        }
+        return username + "@student.placeholder.local";
+    }
 
     @Override
     public Result<Object> getStudentList(StudentListRequestDTO requestDTO) {
@@ -446,26 +500,40 @@ public class TeacherStudentManagementServiceImpl implements TeacherStudentManage
                 return Result.error(ResultCode.PARAM_ERROR, "学号已存在");
             }
             
-            // 创建新学生用户
+            // 创建新学生用户（P0-6：补齐 roleId / BCrypt 密码 / 邮箱三个 NOT NULL 字段）
+            Long studentRoleId = resolveStudentRoleId();
+            String initialPassword = generateInitialPassword();
+            String username = addStudentDTO.getUsername().trim();
+
             SysUser newUser = new SysUser();
-            newUser.setUsername(addStudentDTO.getUsername().trim());
+            newUser.setUsername(username);
             newUser.setRealName(addStudentDTO.getStudentName().trim());
             newUser.setCollegeName(addStudentDTO.getCollegeName().trim());
             newUser.setMajor(addStudentDTO.getMajor().trim());
             newUser.setGrade(addStudentDTO.getGrade().trim());
-            newUser.setEmail(addStudentDTO.getEmail() != null ? addStudentDTO.getEmail().trim() : null);
+            newUser.setEmail(resolveStudentEmail(addStudentDTO.getEmail(), username));
             newUser.setPhone(addStudentDTO.getPhone() != null ? addStudentDTO.getPhone().trim() : null);
             newUser.setUserType("STUDENT");
+            newUser.setRoleId(studentRoleId);
+            newUser.setPassword(passwordEncoder.encode(initialPassword));
+            newUser.setStatus(1);
             newUser.setIsDeleted(0);
             newUser.setCreateTime(LocalDateTime.now());
             newUser.setUpdateTime(LocalDateTime.now());
-            
-            int insertResult = sysUserMapper.insert(newUser);
+
+            int insertResult;
+            try {
+                insertResult = sysUserMapper.insert(newUser);
+            } catch (DataIntegrityViolationException e) {
+                // 唯一索引并发兜底：username 或 email 已被占用
+                log.warn("添加学生唯一键冲突: username={}", username);
+                return Result.error(ResultCode.PARAM_ERROR, "学号或邮箱已存在");
+            }
             if (insertResult > 0) {
                 log.info("成功添加学生: username={}, studentName={}", 
                         addStudentDTO.getUsername(), addStudentDTO.getStudentName());
                 
-                // 构建返回数据
+                // 构建返回数据（初始密码仅本次返回给管理员，库中只存 BCrypt 密文）
                 Map<String, Object> responseData = new HashMap<>();
                 responseData.put("studentId", newUser.getId());
                 responseData.put("username", newUser.getUsername());
@@ -474,6 +542,7 @@ public class TeacherStudentManagementServiceImpl implements TeacherStudentManage
                 responseData.put("major", newUser.getMajor());
                 responseData.put("grade", newUser.getGrade());
                 responseData.put("createTime", newUser.getCreateTime());
+                responseData.put("initialPassword", initialPassword);
                 
                 return Result.success("学生添加成功", responseData);
             } else {
@@ -490,11 +559,14 @@ public class TeacherStudentManagementServiceImpl implements TeacherStudentManage
     public ImportResultDTO importStudents(MultipartFile file) {
         ImportResultDTO result = new ImportResultDTO();
         List<ImportResultDTO.ImportFailure> failures = new ArrayList<>();
+        Map<String, String> initialPasswords = new LinkedHashMap<>();
         int successCount = 0;
 
         try {
             // 解析Excel文件
             List<Map<String, Object>> importData = parseExcel(file.getInputStream());
+            // P0-6：角色一次性解析，避免每行查库；角色编码锚定 STUDENT
+            Long studentRoleId = resolveStudentRoleId();
             
             for (int i = 0; i < importData.size(); i++) {
                 try {
@@ -511,6 +583,7 @@ public class TeacherStudentManagementServiceImpl implements TeacherStudentManage
                         failures.add(failure);
                         continue;
                     }
+                    username = username.trim();
 
                     // 检查学号是否已存在
                     LambdaQueryWrapper<SysUser> userWrapper = new LambdaQueryWrapper<>();
@@ -526,21 +599,37 @@ public class TeacherStudentManagementServiceImpl implements TeacherStudentManage
                         continue;
                     }
 
-                    // 创建新学生用户
+                    // 创建新学生用户（P0-6：补齐 roleId / BCrypt 密码 / 邮箱）
+                    String initialPassword = generateInitialPassword();
                     SysUser newUser = new SysUser();
                     newUser.setUsername(username);
                     newUser.setRealName(studentName);
                     newUser.setCollegeName((String) rowData.get("学院"));
                     newUser.setMajor((String) rowData.get("专业"));
                     newUser.setGrade((String) rowData.get("年级"));
+                    newUser.setEmail(resolveStudentEmail((String) rowData.get("邮箱"), username));
                     newUser.setUserType("STUDENT");
+                    newUser.setRoleId(studentRoleId);
+                    newUser.setPassword(passwordEncoder.encode(initialPassword));
+                    newUser.setStatus(1);
                     newUser.setIsDeleted(0);
                     newUser.setCreateTime(LocalDateTime.now());
                     newUser.setUpdateTime(LocalDateTime.now());
 
-                    int insertResult = sysUserMapper.insert(newUser);
+                    int insertResult;
+                    try {
+                        insertResult = sysUserMapper.insert(newUser);
+                    } catch (DataIntegrityViolationException e) {
+                        ImportResultDTO.ImportFailure failure = new ImportResultDTO.ImportFailure();
+                        failure.setRow(i + 2);
+                        failure.setReason("学号或邮箱已存在");
+                        failures.add(failure);
+                        continue;
+                    }
                     if (insertResult > 0) {
                         successCount++;
+                        // 初始密码只回传给管理员，库中仅存 BCrypt 密文
+                        initialPasswords.put(username, initialPassword);
                     } else {
                         ImportResultDTO.ImportFailure failure = new ImportResultDTO.ImportFailure();
                         failure.setRow(i + 2);
@@ -558,6 +647,7 @@ public class TeacherStudentManagementServiceImpl implements TeacherStudentManage
             result.setSuccessCount(successCount);
             result.setFailCount(failures.size());
             result.setFailures(failures);
+            result.setInitialPasswords(initialPasswords);
             
             log.info("导入学生数据完成: success={}, fail={}", successCount, failures.size());
             return result;

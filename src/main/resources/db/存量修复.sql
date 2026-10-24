@@ -2658,3 +2658,36 @@ SELECT (SELECT COUNT(*) FROM information_schema.COLUMNS
 -- 建议回滚前先跑一次：
 --   SELECT id, user_type, research_direction FROM sys_user
 --    WHERE user_type = 'TEACHER' AND research_direction IS NOT NULL;
+
+
+-- ============================================================================
+-- 6. 阶段 1 止血（2026-10）：sys_user.username 唯一约束
+--
+-- 背景：username 是登录标识，此前只有 email 唯一索引。匿名注册是「先查后插」，
+--       并发同名注册可同时通过校验；产生重复账号后 selectOne 抛
+--       TooManyResultsException，该用户名此后永久无法登录（并被兜底成 500）。
+--
+-- 顺序：先跑 6.0 前置检查；若有重复，先按 6.1 人工处理，再执行 6.2 建索引。
+-- ============================================================================
+
+-- 6.0 前置检查：同名账号（期望 0 行）
+SELECT `username`, COUNT(*) AS dup_count
+  FROM `sys_user`
+ GROUP BY `username`
+HAVING COUNT(*) > 1;
+
+-- 6.1 若 6.0 有结果：人工确认保留哪个 id，其余改名（保留审计可追溯）后重跑 6.0
+-- UPDATE sys_user SET username = CONCAT(username, '_dup_', id)
+--  WHERE id IN (...);
+
+-- 6.2 建唯一索引（已存在会报 1061 Duplicate key name，属预期，可忽略）
+ALTER TABLE `sys_user`
+  ADD UNIQUE KEY `uk_su_username_deleted` (`username`,`is_deleted`);
+
+-- 6.3 执行后自检：期望 uk_index = 1
+SELECT COUNT(*) AS uk_index
+  FROM information_schema.statistics
+ WHERE table_schema = DATABASE()
+   AND table_name = 'sys_user'
+   AND index_name = 'uk_su_username_deleted';
+

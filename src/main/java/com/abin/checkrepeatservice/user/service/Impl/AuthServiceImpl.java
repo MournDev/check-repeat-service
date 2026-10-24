@@ -28,6 +28,7 @@ import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -179,7 +180,14 @@ public class AuthServiceImpl implements AuthService {
         newUser.setIsDeleted(0); // 默认为未删除
 
         // 4. 插入数据库（审计字段由MyBatis-Plus自动填充：createTime、createUserId等）
-        sysUserMapper.insert(newUser);
+        // P0-7：username / email 的唯一性最终由数据库保证。并发注册时前置 selectOne
+        // 可能同时通过，这里捕获唯一键冲突，返回明确的「用户名已存在」而非 500。
+        try {
+            sysUserMapper.insert(newUser);
+        } catch (DataIntegrityViolationException e) {
+            log.warn("注册唯一键冲突：用户名={}", registerReq.getUsername());
+            return Result.error(ResultCode.PARAM_ERROR, "用户名或邮箱已存在");
+        }
         log.info("用户注册成功：用户名={}，角色={}", registerReq.getUsername(), sysRole.getRoleCode());
         businessMetricsService.record(BusinessMetricsService.Event.USER_REGISTER,
                 BusinessMetricsService.Outcome.SUCCESS);

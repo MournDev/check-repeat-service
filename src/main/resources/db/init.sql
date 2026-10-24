@@ -2041,6 +2041,7 @@ CREATE TABLE `sys_user` (
   `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
   `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
   PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_su_username_deleted` (`username`,`is_deleted`) COMMENT '登录账号唯一（软删除后允许复用）',
   UNIQUE KEY `idx_sys_user_email` (`email`),
   KEY `idx_sys_user_major_id` (`major_id`),
   KEY `idx_sys_user_delete_by` (`delete_by`)
