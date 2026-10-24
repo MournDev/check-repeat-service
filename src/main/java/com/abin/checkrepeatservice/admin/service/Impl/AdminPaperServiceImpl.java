@@ -1,12 +1,21 @@
 package com.abin.checkrepeatservice.admin.service.Impl;
 
 import com.abin.checkrepeatservice.admin.service.AdminPaperService;
+import com.abin.checkrepeatservice.admin.dto.OverdueRemindReq;
+import com.abin.checkrepeatservice.admin.mapper.PaperReminderLogMapper;
+import com.abin.checkrepeatservice.admin.vo.OverduePaperPageVO;
+import com.abin.checkrepeatservice.admin.vo.OverduePaperVO;
+import com.abin.checkrepeatservice.admin.vo.OverdueRemindResultVO;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.Exception.BusinessException;
 import com.abin.checkrepeatservice.common.component.PaperStageGate;
 import com.abin.checkrepeatservice.common.constant.DictConstants;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
+import com.abin.checkrepeatservice.common.utils.SemesterUtils;
 import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
+import com.abin.checkrepeatservice.notification.service.NotificationService;
+import com.abin.checkrepeatservice.user.service.Impl.EmailService;
+import com.abin.checkrepeatservice.user.mapper.PaperStatusLogMapper;
 import com.abin.checkrepeatservice.user.service.PaperStatusLogService;
 import com.abin.checkrepeatservice.common.enums.CheckStatusFilterEnum;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
@@ -14,6 +23,7 @@ import com.abin.checkrepeatservice.student.mapper.CheckTaskMapper;
 import com.abin.checkrepeatservice.mapper.SysUserMapper;
 import com.abin.checkrepeatservice.pojo.entity.CheckTask;
 import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
+import com.abin.checkrepeatservice.pojo.entity.PaperReminderLog;
 import com.abin.checkrepeatservice.pojo.entity.ReviewRecord;
 import com.abin.checkrepeatservice.pojo.entity.SysUser;
 import com.abin.checkrepeatservice.teacher.mapper.ReviewRecordMapper;
@@ -28,9 +38,11 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.Resource;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -38,6 +50,7 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -80,6 +93,23 @@ public class AdminPaperServiceImpl implements AdminPaperService {
 
     @Resource
     private CheckTaskMapper checkTaskMapper;
+
+    // Wave 3：超期催办留痕与站内信/邮件通道
+    @Resource
+    private PaperReminderLogMapper paperReminderLogMapper;
+
+    @Resource
+    private PaperStatusLogMapper paperStatusLogMapper;
+
+    @Resource
+    private NotificationService notificationService;
+
+    @Resource
+    private EmailService emailService;
+
+    /** Wave 3：超期判定 SLA（小时），默认 72h */
+    @Value("${review.overdue.sla-hours:72}")
+    private int overdueSlaHours;
 
     /** 审核来源：导师审核 */
     private static final String AUDIT_SOURCE_TEACHER = "TEACHER";
@@ -504,6 +534,18 @@ public class AdminPaperServiceImpl implements AdminPaperService {
             LambdaQueryWrapper<PaperInfo> wrapper = new LambdaQueryWrapper<>();
             wrapper.ne(PaperInfo::getPaperStatus, DictConstants.PaperStatus.WITHDRAWN);
 
+            // Wave 3：学期/时间范围过滤（startDate/endDate 优先于 semester）
+            SemesterUtils.Range range = SemesterUtils.resolve(
+                    strParam(params.get("semester")),
+                    strParam(params.get("startDate")),
+                    strParam(params.get("endDate")));
+            if (range.start() != null) {
+                wrapper.ge(PaperInfo::getSubmitTime, range.start());
+            }
+            if (range.endExclusive() != null) {
+                wrapper.lt(PaperInfo::getSubmitTime, range.endExclusive());
+            }
+
             String paperStatus = strParam(params.get("paperStatus"));
             if (hasText(paperStatus)) {
                 wrapper.eq(PaperInfo::getPaperStatus, paperStatus);
@@ -543,47 +585,37 @@ public class AdminPaperServiceImpl implements AdminPaperService {
             enhancePaperList(papers);
 
             // 状态列字典中文化，缺失回退原码；论文类型走固定映射
-            Map<String, String> statusLabels = dictService.getDictValueMap(DictConstants.DICT_PAPER_STATUS);
-            List<PaperExportExcelVO> rows = papers.stream().map(p -> {
-                PaperExportExcelVO row = new PaperExportExcelVO();
-                row.setPaperTitle(p.getPaperTitle());
-                row.setStudentName(p.getStudentName());
-                row.setStudentUsername(p.getStudentUsername());
-                row.setStudentMajor(p.getStudentMajor());
-                row.setStudentGrade(p.getStudentGrade());
-                row.setTeacherName(p.getTeacherRealName());
-                row.setPaperType(p.getPaperType() == null ? null
-                        : PAPER_TYPE_LABELS.getOrDefault(p.getPaperType(), p.getPaperType()));
-                row.setPaperStatus(p.getPaperStatus() == null ? null
-                        : statusLabels.getOrDefault(p.getPaperStatus(), p.getPaperStatus()));
-                row.setSimilarityRate(p.getSimilarityRate() == null ? null : p.getSimilarityRate().toPlainString());
-                row.setCheckResult(p.getCheckResult());
-                row.setAuditComment(p.getAuditComment());
-                row.setSubmitTime(p.getSubmitTime() == null ? null : p.getSubmitTime().format(EXPORT_TIME_FORMATTER));
-                return row;
-            }).toList();
+            List<PaperExportExcelVO> rows = toPaperExcelRows(papers);
 
             response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
             response.setCharacterEncoding("utf-8");
-            String fileName = "论文列表_" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
-            response.setHeader("Content-disposition", "attachment;filename=" + fileName + ".xlsx");
+            String semesterSuffix = hasText(range.semester()) ? "_" + range.semester() : "";
+            String fileName = "论文清单" + semesterSuffix + "_"
+                    + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss")) + ".xlsx";
+            String encodedFileName = java.net.URLEncoder.encode(fileName, java.nio.charset.StandardCharsets.UTF_8)
+                    .replace("+", "%20");
+            response.setHeader("Content-disposition", "attachment; filename*=UTF-8''" + encodedFileName);
             EasyExcel.write(response.getOutputStream(), PaperExportExcelVO.class)
                     .sheet("论文列表")
                     .doWrite(rows);
             log.info("导出论文列表成功: {}行", rows.size());
+        } catch (BusinessException e) {
+            // 参数校验失败发生在写流之前：按 Result 错误码返回 JSON，不写文件头
+            log.warn("导出论文列表参数校验失败: {}", e.getMessage());
+            writeExportError(response, e.getResultCode().getCode(), e.getMessage());
         } catch (Exception e) {
             log.error("导出论文列表失败", e);
-            writeExportError(response, "导出失败：" + e.getMessage());
+            writeExportError(response, 500, "导出失败：" + e.getMessage());
         }
     }
 
     /**
      * 导出失败时按既有范式写 JSON 错误响应（response 可能已部分写入，只能尽力提示）。
      */
-    private void writeExportError(HttpServletResponse response, String message) {
+    private void writeExportError(HttpServletResponse response, int code, String message) {
         try {
             response.setContentType("application/json;charset=utf-8");
-            response.getWriter().write("{\"code\":500,\"message\":\"" + message + "\"}");
+            response.getWriter().write("{\"code\":" + code + ",\"message\":\"" + message + "\"}");
         } catch (Exception ex) {
             log.error("写导出错误响应失败", ex);
         }
@@ -596,6 +628,51 @@ public class AdminPaperServiceImpl implements AdminPaperService {
 
     private static boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    @Override
+    public List<PaperExportExcelVO> buildPaperExportRows(String semester, String startDate, String endDate) {
+        SemesterUtils.Range range = SemesterUtils.resolve(semester, startDate, endDate);
+        LambdaQueryWrapper<PaperInfo> wrapper = new LambdaQueryWrapper<>();
+        wrapper.ne(PaperInfo::getPaperStatus, DictConstants.PaperStatus.WITHDRAWN)
+                .eq(PaperInfo::getIsDeleted, 0);
+        if (range.start() != null) {
+            wrapper.ge(PaperInfo::getSubmitTime, range.start());
+        }
+        if (range.endExclusive() != null) {
+            wrapper.lt(PaperInfo::getSubmitTime, range.endExclusive());
+        }
+        wrapper.orderByDesc(PaperInfo::getCreateTime).last(" LIMIT " + EXPORT_MAX_ROWS);
+
+        List<PaperInfo> papers = paperInfoMapper.selectList(wrapper);
+        enhancePaperList(papers);
+        return toPaperExcelRows(papers);
+    }
+
+    /**
+     * 论文实体 -> 导出行（管理员导出与学期包 ZIP 共用，避免两套列映射漂移）。
+     */
+    private List<PaperExportExcelVO> toPaperExcelRows(List<PaperInfo> papers) {
+        // 状态列字典中文化，缺失回退原码；论文类型走固定映射
+        Map<String, String> statusLabels = dictService.getDictValueMap(DictConstants.DICT_PAPER_STATUS);
+        return papers.stream().map(p -> {
+            PaperExportExcelVO row = new PaperExportExcelVO();
+            row.setPaperTitle(p.getPaperTitle());
+            row.setStudentName(p.getStudentName());
+            row.setStudentUsername(p.getStudentUsername());
+            row.setStudentMajor(p.getStudentMajor());
+            row.setStudentGrade(p.getStudentGrade());
+            row.setTeacherName(p.getTeacherRealName());
+            row.setPaperType(p.getPaperType() == null ? null
+                    : PAPER_TYPE_LABELS.getOrDefault(p.getPaperType(), p.getPaperType()));
+            row.setPaperStatus(p.getPaperStatus() == null ? null
+                    : statusLabels.getOrDefault(p.getPaperStatus(), p.getPaperStatus()));
+            row.setSimilarityRate(p.getSimilarityRate() == null ? null : p.getSimilarityRate().toPlainString());
+            row.setCheckResult(p.getCheckResult());
+            row.setAuditComment(p.getAuditComment());
+            row.setSubmitTime(p.getSubmitTime() == null ? null : p.getSubmitTime().format(EXPORT_TIME_FORMATTER));
+            return row;
+        }).toList();
     }
     
     @Override
@@ -1049,5 +1126,275 @@ public class AdminPaperServiceImpl implements AdminPaperService {
         }
         
         log.debug("添加相似度范围筛选条件: min={}, max={}", minSimilarity, maxSimilarity);
+    }
+
+    // ==================== Wave 3：超期预警 / 催办 / 生命周期漏斗 ====================
+
+    @Override
+    public Result<OverduePaperPageVO> getOverduePapers(String bucket, Integer page, Integer size, String keyword) {
+        try {
+            int current = (page == null || page < 1) ? 1 : page;
+            int pageSize = (size == null || size < 1) ? 10 : Math.min(size, 100);
+            String normalizedBucket = normalizeOverdueBucket(bucket);
+            String normalizedKeyword = (keyword == null || keyword.isBlank()) ? null : keyword.trim();
+
+            Page<OverduePaperVO> result = paperInfoMapper.selectOverduePapers(
+                    new Page<>(current, pageSize), overdueSlaHours, normalizedBucket, normalizedKeyword);
+
+            Map<String, Long> bucketCounts = new LinkedHashMap<>();
+            bucketCounts.put("1", 0L);
+            bucketCounts.put("3", 0L);
+            bucketCounts.put("7", 0L);
+            for (Map<String, Object> row : paperInfoMapper.countOverdueBuckets(overdueSlaHours)) {
+                // JDBC 返回的列标签大小写因驱动/容器而异，按不区分大小写读取
+                String key = null;
+                Object count = null;
+                for (Map.Entry<String, Object> entry : row.entrySet()) {
+                    if ("bucketKey".equalsIgnoreCase(entry.getKey())) {
+                        key = row.get(entry.getKey()) == null ? null : String.valueOf(row.get(entry.getKey()));
+                    } else if ("cnt".equalsIgnoreCase(entry.getKey())) {
+                        count = row.get(entry.getKey());
+                    }
+                }
+                if (key != null && count instanceof Number) {
+                    bucketCounts.put(key, ((Number) count).longValue());
+                }
+            }
+
+            OverduePaperPageVO vo = new OverduePaperPageVO();
+            vo.setRecords(result.getRecords());
+            vo.setTotal(result.getTotal());
+            vo.setBucketCounts(bucketCounts);
+            return Result.success("查询成功", vo);
+        } catch (Exception e) {
+            log.error("查询超期论文失败", e);
+            return Result.error(ResultCode.SYSTEM_ERROR, "查询超期论文失败：系统异常，请稍后重试");
+        }
+    }
+
+    @Override
+    public Result<OverdueRemindResultVO> remindOverduePapers(OverdueRemindReq req) {
+        if (req == null || req.getPaperIds() == null || req.getPaperIds().isEmpty()) {
+            return Result.error(ResultCode.PARAM_ERROR, "paperIds 不能为空");
+        }
+        List<Long> paperIds = req.getPaperIds().stream().filter(Objects::nonNull).distinct().toList();
+        if (paperIds.isEmpty()) {
+            return Result.error(ResultCode.PARAM_ERROR, "paperIds 不能为空");
+        }
+        if (paperIds.size() > 100) {
+            return Result.error(ResultCode.PARAM_ERROR,
+                    "单次最多催办100篇，当前选择" + paperIds.size() + "篇");
+        }
+
+        String channel = req.getChannel() == null || req.getChannel().isBlank()
+                ? "IN_APP" : req.getChannel().trim().toUpperCase();
+        if (!List.of("IN_APP", "EMAIL", "BOTH").contains(channel)) {
+            return Result.error(ResultCode.PARAM_ERROR, "channel 仅支持 IN_APP / EMAIL / BOTH");
+        }
+        String customMessage = req.getMessage() == null ? null : req.getMessage().trim();
+        if (customMessage != null && customMessage.length() > 200) {
+            return Result.error(ResultCode.PARAM_ERROR, "催办文案不能超过200字");
+        }
+
+        Long operatorId = UserBusinessInfoUtils.getCurrentUserId();
+        String operatorRole = UserBusinessInfoUtils.getCurrentUserRoleCode();
+        LocalDateTime now = LocalDateTime.now();
+        List<String> failReasons = new ArrayList<>();
+        List<OverdueRemindResultVO.RemindRecord> records = new ArrayList<>();
+        int successCount = 0;
+
+        for (Long paperId : paperIds) {
+            try {
+                PaperInfo paper = paperInfoMapper.selectById(paperId);
+                if (paper == null || Integer.valueOf(1).equals(paper.getIsDeleted())) {
+                    failReasons.add("论文ID：" + paperId + "，原因：论文不存在或已删除");
+                    continue;
+                }
+                Long teacherId = paper.getTeacherId();
+                if (teacherId == null) {
+                    failReasons.add("论文ID：" + paperId + "，原因：该论文当前无指导教师");
+                    continue;
+                }
+                SysUser teacher = sysUserMapper.selectById(teacherId);
+                if (teacher == null) {
+                    failReasons.add("论文ID：" + paperId + "，原因：指导教师账号不存在");
+                    continue;
+                }
+
+                int overdueDays = computeOverdueDays(paper.getSubmitTime());
+                String content = buildRemindMessage(customMessage, paper.getPaperTitle(), overdueDays);
+
+                boolean inAppOk = true;
+                boolean emailOk = true;
+                if ("IN_APP".equals(channel) || "BOTH".equals(channel)) {
+                    Result<Boolean> noticeResult = notificationService.sendSystemNotice(
+                            teacherId, "论文审核超期提醒", content, "PAPER_OVERDUE", paperId);
+                    inAppOk = noticeResult != null && noticeResult.isSuccess()
+                            && Boolean.TRUE.equals(noticeResult.getData());
+                }
+                if ("EMAIL".equals(channel) || "BOTH".equals(channel)) {
+                    emailOk = teacher.getEmail() != null && !teacher.getEmail().isBlank()
+                            && emailService.sendNoticeEmail(teacher.getEmail(),
+                                    "论文审核超期提醒", content, "PAPER_OVERDUE", paperId, "PAPER");
+                }
+
+                if (!inAppOk || !emailOk) {
+                    failReasons.add("论文ID：" + paperId + "，原因：通知发送失败（"
+                            + (!inAppOk ? "站内信" : "") + (!emailOk ? (inAppOk ? "" : "、") + "邮件" : "")
+                            + "）");
+                    OverdueRemindResultVO.RemindRecord failed = new OverdueRemindResultVO.RemindRecord();
+                    failed.setPaperId(paperId);
+                    failed.setTeacherId(teacherId);
+                    failed.setSuccess(false);
+                    records.add(failed);
+                    continue;
+                }
+
+                PaperReminderLog reminderLog = new PaperReminderLog();
+                reminderLog.setPaperId(paperId);
+                reminderLog.setTeacherId(teacherId);
+                reminderLog.setOperatorId(operatorId);
+                reminderLog.setOperatorRole(operatorRole);
+                reminderLog.setRemindChannel(channel);
+                reminderLog.setRemindMessage(content.length() > 500 ? content.substring(0, 500) : content);
+                reminderLog.setOverdueDays(overdueDays);
+                reminderLog.setCreateTime(now);
+                paperReminderLogMapper.insert(reminderLog);
+                successCount++;
+
+                OverdueRemindResultVO.RemindRecord successRecord = new OverdueRemindResultVO.RemindRecord();
+                successRecord.setPaperId(paperId);
+                successRecord.setTeacherId(teacherId);
+                successRecord.setSuccess(true);
+                successRecord.setReminderLogId(reminderLog.getId());
+                records.add(successRecord);
+            } catch (Exception e) {
+                log.error("催办论文失败: paperId={}", paperId, e);
+                failReasons.add("论文ID：" + paperId + "，原因：系统异常");
+            }
+        }
+
+        OverdueRemindResultVO vo = new OverdueRemindResultVO();
+        vo.setTotal(paperIds.size());
+        vo.setSuccess(successCount);
+        vo.setFailed(paperIds.size() - successCount);
+        vo.setFailReasons(failReasons);
+        vo.setRemindedAt(now);
+        vo.setRecords(records);
+        return Result.success("催办完成", vo);
+    }
+
+    @Override
+    public Result<Map<String, Object>> getLifecycleFunnel(String semester) {
+        try {
+            SemesterUtils.Range range = SemesterUtils.resolve(semester, null, null);
+
+            long submitted = paperInfoMapper.selectCount(buildPaperRangeWrapper(range));
+
+            String[][] stages = {
+                    {"checking", "查重阶段", DictConstants.PaperStatus.CHECKING},
+                    {"auditing", "导师审核", DictConstants.PaperStatus.AUDITING},
+                    {"mid", "中期答辩", DictConstants.PaperStatus.MID_DEFENSE},
+                    {"final", "终期答辩", DictConstants.PaperStatus.FINAL_DEFENSE},
+                    {"finalized", "定稿", DictConstants.PaperStatus.FINALIZED},
+                    {"archived", "归档", DictConstants.PaperStatus.ARCHIVED}
+            };
+
+            long[] counts = new long[stages.length];
+            boolean logHasData = false;
+            for (int i = 0; i < stages.length; i++) {
+                Long reached = paperStatusLogMapper.countPapersReachedStatus(
+                        stages[i][2], range.start(), range.endExclusive());
+                counts[i] = reached == null ? 0L : reached;
+                if (counts[i] > 0) {
+                    logHasData = true;
+                }
+            }
+
+            // 状态日志为空（历史/未启用阶段门）时，回退为当前状态快照计数
+            if (!logHasData) {
+                for (int i = 0; i < stages.length; i++) {
+                    LambdaQueryWrapper<PaperInfo> wrapper = buildPaperRangeWrapper(range)
+                            .eq(PaperInfo::getPaperStatus, stages[i][2]);
+                    counts[i] = paperInfoMapper.selectCount(wrapper);
+                }
+            }
+
+            List<Map<String, Object>> stageList = new ArrayList<>();
+            Map<String, Object> submittedStage = new LinkedHashMap<>();
+            submittedStage.put("key", "submitted");
+            submittedStage.put("label", "提交论文");
+            submittedStage.put("status", "");
+            submittedStage.put("count", submitted);
+            submittedStage.put("conversionRate", submitted > 0 ? 100.0 : 0.0);
+            stageList.add(submittedStage);
+
+            long previous = submitted;
+            for (int i = 0; i < stages.length; i++) {
+                Map<String, Object> stage = new LinkedHashMap<>();
+                stage.put("key", stages[i][0]);
+                stage.put("label", stages[i][1]);
+                stage.put("status", stages[i][2]);
+                stage.put("count", counts[i]);
+                double rate = previous <= 0 ? 0.0 : round1(counts[i] * 100.0 / previous);
+                stage.put("conversionRate", rate);
+                stageList.add(stage);
+                previous = counts[i];
+            }
+
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("semester", semester);
+            data.put("stages", stageList);
+            return Result.success("查询成功", data);
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("查询生命周期漏斗失败: semester={}", semester, e);
+            return Result.error(ResultCode.SYSTEM_ERROR, "查询生命周期漏斗失败：系统异常，请稍后重试");
+        }
+    }
+
+    private LambdaQueryWrapper<PaperInfo> buildPaperRangeWrapper(SemesterUtils.Range range) {
+        LambdaQueryWrapper<PaperInfo> wrapper = new LambdaQueryWrapper<PaperInfo>()
+                .eq(PaperInfo::getIsDeleted, 0);
+        if (range.start() != null) {
+            wrapper.ge(PaperInfo::getSubmitTime, range.start());
+        }
+        if (range.endExclusive() != null) {
+            wrapper.lt(PaperInfo::getSubmitTime, range.endExclusive());
+        }
+        return wrapper;
+    }
+
+    private String normalizeOverdueBucket(String bucket) {
+        if (bucket == null || bucket.isBlank() || "all".equalsIgnoreCase(bucket)) {
+            return null;
+        }
+        String value = bucket.trim();
+        return switch (value) {
+            case "1", "3", "7" -> value;
+            default -> null;
+        };
+    }
+
+    private int computeOverdueDays(LocalDateTime submitTime) {
+        if (submitTime == null) {
+            return 0;
+        }
+        long days = Duration.between(submitTime.plusHours(overdueSlaHours), LocalDateTime.now()).toDays();
+        return (int) Math.max(0L, days);
+    }
+
+    private String buildRemindMessage(String customMessage, String paperTitle, int overdueDays) {
+        if (customMessage != null && !customMessage.isBlank()) {
+            return customMessage;
+        }
+        String title = paperTitle == null || paperTitle.isBlank() ? "未命名论文" : paperTitle;
+        String days = overdueDays > 0 ? "已超期" + overdueDays + "天，" : "";
+        return "您的论文《" + title + "》审核" + days + "请尽快处理。";
+    }
+
+    private double round1(double value) {
+        return Math.round(value * 10.0) / 10.0;
     }
 }

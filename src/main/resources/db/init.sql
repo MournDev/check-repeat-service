@@ -1206,6 +1206,26 @@ CREATE TABLE `paper_info` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `paper_reminder_log`（Wave 3 超期催办留痕）
+--
+
+DROP TABLE IF EXISTS `paper_reminder_log`;
+CREATE TABLE `paper_reminder_log` (
+  `id` bigint NOT NULL COMMENT '主键ID（雪花）',
+  `paper_id` bigint NOT NULL COMMENT '论文ID（paper_info.id）',
+  `teacher_id` bigint DEFAULT NULL COMMENT '被催办导师ID',
+  `operator_id` bigint NOT NULL COMMENT '操作管理员ID',
+  `operator_role` varchar(20) NOT NULL COMMENT 'ADMIN / SUPER_ADMIN',
+  `remind_channel` varchar(20) NOT NULL DEFAULT 'IN_APP' COMMENT 'IN_APP / EMAIL / BOTH',
+  `remind_message` varchar(500) DEFAULT NULL COMMENT '催办文案',
+  `overdue_days` int DEFAULT NULL COMMENT '催办时超期天数快照',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '催办时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_prl_paper_id` (`paper_id`),
+  KEY `idx_prl_create_time` (`create_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='论文超期催办记录';
+
+--
 -- Table structure for table `thesis_archive`
 --
 

@@ -262,6 +262,9 @@ report:
 
 # 教师审核模块配置
 review:
+  # 超期判定口径（Wave 3）：submit_time + sla-hours 仍未出结论即视为超期
+  overdue:
+    sla-hours: 72
   attach:
     base-path: ${REVIEW_ATTACH_PATH:/data/review-attach/}
     max-size: 50MB

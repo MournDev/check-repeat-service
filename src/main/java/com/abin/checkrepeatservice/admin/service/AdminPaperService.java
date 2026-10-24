@@ -1,5 +1,9 @@
 package com.abin.checkrepeatservice.admin.service;
 
+import com.abin.checkrepeatservice.admin.dto.OverdueRemindReq;
+import com.abin.checkrepeatservice.admin.vo.OverduePaperPageVO;
+import com.abin.checkrepeatservice.admin.vo.OverdueRemindResultVO;
+import com.abin.checkrepeatservice.admin.vo.PaperExportExcelVO;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -73,4 +77,24 @@ public interface AdminPaperService {
      * 批量第三方查重检测
      */
     Result<String> batchThirdPartyCheckPaper(List<Long> paperIds);
+
+    /**
+     * Wave 3：超期论文分页列表（含全量分桶计数）。
+     */
+    Result<OverduePaperPageVO> getOverduePapers(String bucket, Integer page, Integer size, String keyword);
+
+    /**
+     * Wave 3：超期论文一键催办（逐篇结果 + paper_reminder_log 留痕）。
+     */
+    Result<OverdueRemindResultVO> remindOverduePapers(OverdueRemindReq req);
+
+    /**
+     * Wave 3：论文生命周期漏斗（按到达过阶段统计）。
+     */
+    Result<Map<String, Object>> getLifecycleFunnel(String semester);
+
+    /**
+     * Wave 3：生成论文清单导出行（学期包 ZIP 复用，按 submit_time 过滤）。
+     */
+    List<PaperExportExcelVO> buildPaperExportRows(String semester, String startDate, String endDate);
 }

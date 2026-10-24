@@ -2,11 +2,13 @@ package com.abin.checkrepeatservice.student.mapper;
 
 import com.abin.checkrepeatservice.admin.vo.CollegePaperStatsVO;
 import com.abin.checkrepeatservice.admin.vo.MajorPaperStatsVO;
+import com.abin.checkrepeatservice.admin.vo.OverduePaperVO;
 import com.abin.checkrepeatservice.common.datascope.DataScopeSqlFilter;
 import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
 import com.abin.checkrepeatservice.teacher.vo.CollegeDistributionVO;
 import com.abin.checkrepeatservice.teacher.vo.SimilarityDistributionVO;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -112,4 +114,17 @@ public interface PaperInfoMapper extends BaseMapper<PaperInfo> {
                                                      @Param("weekStart") LocalDateTime weekStart,
                                                      @Param("monthStart") LocalDateTime monthStart,
                                                      @Param("scope") DataScopeSqlFilter scope);
+
+    /**
+     * Wave 3：管理端超期论文分页查询（超期口径 submit_time + slaHours）。
+     */
+    Page<OverduePaperVO> selectOverduePapers(Page<OverduePaperVO> page,
+                                             @Param("slaHours") int slaHours,
+                                             @Param("bucket") String bucket,
+                                             @Param("keyword") String keyword);
+
+    /**
+     * Wave 3：超期论文全量分桶计数（不受 bucket/keyword 筛选影响）。
+     */
+    List<Map<String, Object>> countOverdueBuckets(@Param("slaHours") int slaHours);
 }

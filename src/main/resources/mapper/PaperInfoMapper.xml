@@ -109,6 +109,72 @@
           AND is_deleted = 0
     </select>
     
+    <!-- Wave 3：管理端超期论文分页列表（submit_time + SLA 口径） -->
+    <select id="selectOverduePapers" resultType="com.abin.checkrepeatservice.admin.vo.OverduePaperVO">
+        SELECT
+            p.id AS paperId,
+            p.paper_title AS paperTitle,
+            u.real_name AS studentName,
+            u.username AS studentNo,
+            COALESCE(p.teacher_name, tu.real_name) AS advisorName,
+            p.teacher_id AS teacherId,
+            TIMESTAMPDIFF(DAY, DATE_ADD(p.submit_time, INTERVAL #{slaHours} HOUR), NOW()) AS overdueDays,
+            DATE_ADD(p.submit_time, INTERVAL #{slaHours} HOUR) AS deadline,
+            p.paper_status AS paperStatus,
+            CASE WHEN r.last_remind_time &gt;= DATE_SUB(NOW(), INTERVAL 24 HOUR) THEN 1 ELSE 0 END AS reminded,
+            r.last_remind_time AS lastRemindTime
+        FROM paper_info p
+        LEFT JOIN sys_user u ON u.id = p.student_id AND u.is_deleted = 0
+        LEFT JOIN sys_user tu ON tu.id = p.teacher_id AND tu.is_deleted = 0
+        LEFT JOIN (
+            SELECT paper_id, MAX(create_time) AS last_remind_time
+            FROM paper_reminder_log
+            GROUP BY paper_id
+        ) r ON r.paper_id = p.id
+        WHERE p.is_deleted = 0
+          AND p.submit_time IS NOT NULL
+          AND DATE_ADD(p.submit_time, INTERVAL #{slaHours} HOUR) &lt; NOW()
+          AND TIMESTAMPDIFF(DAY, DATE_ADD(p.submit_time, INTERVAL #{slaHours} HOUR), NOW()) &gt;= 1
+          AND p.paper_status IN ('checking','auditing','reviewing','mid_defense','final_defense')
+        <if test="bucket == '1'">
+          AND TIMESTAMPDIFF(DAY, DATE_ADD(p.submit_time, INTERVAL #{slaHours} HOUR), NOW()) BETWEEN 1 AND 2
+        </if>
+        <if test="bucket == '3'">
+          AND TIMESTAMPDIFF(DAY, DATE_ADD(p.submit_time, INTERVAL #{slaHours} HOUR), NOW()) BETWEEN 3 AND 6
+        </if>
+        <if test="bucket == '7'">
+          AND TIMESTAMPDIFF(DAY, DATE_ADD(p.submit_time, INTERVAL #{slaHours} HOUR), NOW()) &gt;= 7
+        </if>
+        <if test="keyword != null and keyword != ''">
+          AND (
+            p.paper_title LIKE CONCAT('%', #{keyword}, '%')
+            OR u.real_name LIKE CONCAT('%', #{keyword}, '%')
+            OR u.username LIKE CONCAT('%', #{keyword}, '%')
+            OR COALESCE(p.teacher_name, tu.real_name) LIKE CONCAT('%', #{keyword}, '%')
+          )
+        </if>
+        ORDER BY overdueDays DESC, deadline ASC
+    </select>
+
+    <!-- Wave 3：超期论文全量分桶计数（不受 bucket/keyword 筛选影响） -->
+    <select id="countOverdueBuckets" resultType="java.util.Map">
+        SELECT t.bucketKey, COUNT(*) AS cnt
+        FROM (
+            SELECT CASE
+                     WHEN TIMESTAMPDIFF(DAY, DATE_ADD(p.submit_time, INTERVAL #{slaHours} HOUR), NOW()) BETWEEN 1 AND 2 THEN '1'
+                     WHEN TIMESTAMPDIFF(DAY, DATE_ADD(p.submit_time, INTERVAL #{slaHours} HOUR), NOW()) BETWEEN 3 AND 6 THEN '3'
+                     ELSE '7'
+                   END AS bucketKey
+            FROM paper_info p
+            WHERE p.is_deleted = 0
+              AND p.submit_time IS NOT NULL
+              AND DATE_ADD(p.submit_time, INTERVAL #{slaHours} HOUR) &lt; NOW()
+              AND TIMESTAMPDIFF(DAY, DATE_ADD(p.submit_time, INTERVAL #{slaHours} HOUR), NOW()) &gt;= 1
+              AND p.paper_status IN ('checking','auditing','reviewing','mid_defense','final_defense')
+        ) t
+        GROUP BY t.bucketKey
+    </select>
+
     <!-- 管理员学院论文分布统计 -->
     <select id="selectCollegePaperStats" resultType="com.abin.checkrepeatservice.admin.vo.CollegePaperStatsVO">
         SELECT

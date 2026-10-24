@@ -2712,3 +2712,33 @@ SELECT COUNT(*) AS version_cols
    AND column_name = 'version';
 
 
+-- ============================================================================
+-- 8. Wave 3（2026-10）：论文超期催办留痕表
+--
+-- 幂等建表，可重复执行。超期判定采用 submit_time + review.overdue.sla-hours（默认 72h），
+-- 不需要给 paper_info 加 review_deadline 列。
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS `paper_reminder_log` (
+  `id` bigint NOT NULL COMMENT '主键ID（雪花）',
+  `paper_id` bigint NOT NULL COMMENT '论文ID（paper_info.id）',
+  `teacher_id` bigint DEFAULT NULL COMMENT '被催办导师ID',
+  `operator_id` bigint NOT NULL COMMENT '操作管理员ID',
+  `operator_role` varchar(20) NOT NULL COMMENT 'ADMIN / SUPER_ADMIN',
+  `remind_channel` varchar(20) NOT NULL DEFAULT 'IN_APP' COMMENT 'IN_APP / EMAIL / BOTH',
+  `remind_message` varchar(500) DEFAULT NULL COMMENT '催办文案',
+  `overdue_days` int DEFAULT NULL COMMENT '催办时超期天数快照',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '催办时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_prl_paper_id` (`paper_id`),
+  KEY `idx_prl_create_time` (`create_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='论文超期催办记录';
+
+-- 8.1 执行后自检：期望 reminder_table = 1
+SELECT COUNT(*) AS reminder_table
+  FROM information_schema.tables
+ WHERE table_schema = DATABASE()
+   AND table_name = 'paper_reminder_log';
+
+
+

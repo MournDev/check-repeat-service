@@ -1,6 +1,9 @@
 package com.abin.checkrepeatservice.admin.controller;
 
 import com.abin.checkrepeatservice.admin.service.AdminPaperService;
+import com.abin.checkrepeatservice.admin.dto.OverdueRemindReq;
+import com.abin.checkrepeatservice.admin.vo.OverduePaperPageVO;
+import com.abin.checkrepeatservice.admin.vo.OverdueRemindResultVO;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.annotation.OperationLog;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
@@ -212,6 +215,38 @@ public class AdminPaperController {
     public void exportPaperList(@RequestParam Map<String, Object> params, HttpServletResponse response) {
         log.info("接收导出论文列表请求: params={}", params);
         adminPaperService.exportPaperList(params, response);
+    }
+
+    /**
+     * Wave 3：超期论文列表（bucket: all/1/3/7）
+     */
+    @GetMapping("/overdue")
+    public Result<OverduePaperPageVO> getOverduePapers(
+            @RequestParam(required = false) String bucket,
+            @RequestParam(defaultValue = "1") Integer page,
+            @RequestParam(defaultValue = "10") Integer size,
+            @RequestParam(required = false) String keyword) {
+        log.info("接收超期论文查询请求: bucket={}, page={}, size={}, keyword={}", bucket, page, size, keyword);
+        return adminPaperService.getOverduePapers(bucket, page, size, keyword);
+    }
+
+    /**
+     * Wave 3：超期论文一键催办（逐篇结果 + 留痕）
+     */
+    @PostMapping("/overdue/remind")
+    @OperationLog(type = "admin_overdue_remind", description = "管理员催办超期论文", recordResult = true)
+    public Result<OverdueRemindResultVO> remindOverduePapers(@RequestBody OverdueRemindReq req) {
+        log.info("接收超期论文催办请求: paperIds={}, channel={}", req.getPaperIds(), req.getChannel());
+        return adminPaperService.remindOverduePapers(req);
+    }
+
+    /**
+     * Wave 3：论文生命周期漏斗
+     */
+    @GetMapping("/lifecycle-funnel")
+    public Result<Map<String, Object>> getLifecycleFunnel(@RequestParam(required = false) String semester) {
+        log.info("接收生命周期漏斗查询请求: semester={}", semester);
+        return adminPaperService.getLifecycleFunnel(semester);
     }
     
     /**
