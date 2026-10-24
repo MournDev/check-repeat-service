@@ -1,6 +1,7 @@
 package com.abin.checkrepeatservice.student.service.Impl;
 
 import com.abin.checkrepeatservice.admin.mapper.PaperSubmitMapper;
+import com.abin.checkrepeatservice.admin.mapper.SystemConfigMapper;
 import com.abin.checkrepeatservice.common.Exception.BusinessException;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.constant.DictConstants;
@@ -15,6 +16,7 @@ import com.abin.checkrepeatservice.pojo.entity.*;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
 import com.abin.checkrepeatservice.student.mapper.CheckTaskMapper;
 import com.abin.checkrepeatservice.student.mapper.CheckReportMapper;
+import com.abin.checkrepeatservice.student.mapper.CheckRuleMapper;
 import com.abin.checkrepeatservice.student.event.PaperSubmittedEvent;
 import com.abin.checkrepeatservice.student.service.CheckTaskService;
 import com.abin.checkrepeatservice.student.service.PaperInfoService;
@@ -41,7 +43,9 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -92,6 +96,12 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
     
     @Resource
     private CheckReportMapper checkReportMapper;
+
+    @Resource
+    private CheckRuleMapper checkRuleMapper;
+
+    @Resource
+    private SystemConfigMapper systemConfigMapper;
 
     @Resource
     private PaperAttachmentMapper paperAttachmentMapper;
@@ -164,12 +174,128 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
             LambdaQueryWrapper<PaperInfo> queryWrapper = buildQueryWrapper(request);
             // 分页查询
             Page<PaperInfo> page = new Page<>(request.getPageNum(), request.getPageSize());
-            // 返回分页结果
-            return page(page,queryWrapper);
+            Page<PaperInfo> resultPage = page(page, queryWrapper);
+            // 重提闭环字段由服务端计算，前端直接用 paper.canResubmit 判定，不再猜状态
+            enrichResubmitInfo(resultPage.getRecords());
+            return resultPage;
         }  catch (Exception e) {
             log.error("论文列表分页查询失败，学生ID：{}", request.getStudentId(), e);
             throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "论文列表查询失败");
         }
+    }
+
+    @Override
+    public void enrichResubmitInfo(List<PaperInfo> papers) {
+        if (papers == null || papers.isEmpty()) {
+            return;
+        }
+        Integer maxRound = resolveMaxRevisionRound();
+        LocalDateTime deadline = resolveResubmitDeadline();
+        LocalDateTime now = LocalDateTime.now();
+        for (PaperInfo paper : papers) {
+            fillResubmitInfo(paper, maxRound, deadline, now);
+        }
+    }
+
+    @Override
+    public void enrichResubmitInfo(PaperInfo paper) {
+        if (paper == null) {
+            return;
+        }
+        fillResubmitInfo(paper, resolveMaxRevisionRound(), resolveResubmitDeadline(), LocalDateTime.now());
+    }
+
+    /**
+     * 计算单篇论文的重提资格与下一步动作：
+     * canResubmit = 状态 rejected 且未超重提上限、未过截止、且不存在更新的版本。
+     */
+    private void fillResubmitInfo(PaperInfo paper, Integer maxRound,
+                                  LocalDateTime deadline, LocalDateTime now) {
+        int round = paper.getVersion() == null ? 0 : Math.max(0, paper.getVersion() - 1);
+        paper.setRevisionRound(round);
+        paper.setMaxRevisionRound(maxRound);
+        paper.setResubmitDeadline(deadline);
+
+        boolean rejected = DictConstants.PaperStatus.REJECTED.equals(paper.getPaperStatus());
+        boolean withinLimit = maxRound == null || round < maxRound;
+        boolean beforeDeadline = deadline == null || !now.isAfter(deadline);
+        boolean noNewerVersion = !hasNewerVersion(paper);
+        boolean canResubmit = rejected && withinLimit && beforeDeadline && noNewerVersion;
+        paper.setCanResubmit(canResubmit);
+        paper.setNextAction(buildNextAction(paper, canResubmit));
+    }
+
+    /**
+     * 是否已存在同根链上更高版本的论文（重提会生成 version+1 的新记录，
+     * 旧被驳回版本不应再次允许重提）。
+     */
+    private boolean hasNewerVersion(PaperInfo paper) {
+        if (paper.getId() == null || paper.getVersion() == null) {
+            return false;
+        }
+        Long rootId = paper.getParentPaperId() != null ? paper.getParentPaperId() : paper.getId();
+        Long count = paperInfoMapper.selectCount(new LambdaQueryWrapper<PaperInfo>()
+                .eq(PaperInfo::getIsDeleted, 0)
+                .gt(PaperInfo::getVersion, paper.getVersion())
+                .and(w -> w.eq(PaperInfo::getId, rootId)
+                        .or()
+                        .eq(PaperInfo::getParentPaperId, rootId)));
+        return count != null && count > 0;
+    }
+
+    /** 重提上限：取默认查重规则；无默认则取最新一条；未配置返回 null（不限） */
+    private Integer resolveMaxRevisionRound() {
+        CheckRule rule = checkRuleMapper.selectOne(new LambdaQueryWrapper<CheckRule>()
+                .eq(CheckRule::getIsDefault, 1)
+                .orderByDesc(CheckRule::getId)
+                .last("LIMIT 1"));
+        if (rule == null) {
+            rule = checkRuleMapper.selectOne(new LambdaQueryWrapper<CheckRule>()
+                    .orderByDesc(CheckRule::getId)
+                    .last("LIMIT 1"));
+        }
+        return rule == null ? null : rule.getMaxReSubmitCount();
+    }
+
+    /** 重提截止：system_config.resubmit_deadline（yyyy-MM-dd HH:mm:ss 或 yyyy-MM-dd）；未配置返回 null */
+    private LocalDateTime resolveResubmitDeadline() {
+        SystemConfig config = systemConfigMapper.selectByConfigKey("resubmit_deadline");
+        if (config == null || !StringUtils.hasText(config.getConfigValue())) {
+            return null;
+        }
+        String value = config.getConfigValue().trim();
+        try {
+            return LocalDateTime.parse(value, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+        } catch (Exception ignored) {
+            try {
+                return LocalDate.parse(value, DateTimeFormatter.ofPattern("yyyy-MM-dd")).atTime(23, 59, 59);
+            } catch (Exception e) {
+                log.warn("system_config.resubmit_deadline 格式非法：{}", value);
+                return null;
+            }
+        }
+    }
+
+    /** 下一步动作要素：前端按 actionCode 做路由映射，bizId 直接定位论文 */
+    private Map<String, Object> buildNextAction(PaperInfo paper, boolean canResubmit) {
+        Map<String, Object> action = new LinkedHashMap<>();
+        action.put("bizType", "PAPER");
+        // 雪花ID超出 JS 安全整数范围，按字符串下发避免精度丢失
+        action.put("bizId", paper.getId() == null ? null : String.valueOf(paper.getId()));
+        if (canResubmit) {
+            action.put("type", "REVISION_REQUIRED");
+            action.put("actionCode", "REVISE_PAPER");
+        } else if (DictConstants.PaperStatus.REJECTED.equals(paper.getPaperStatus())) {
+            action.put("type", "REVISION_REQUIRED");
+            action.put("actionCode", "VIEW_PAPER");
+        } else if (DictConstants.PaperStatus.AUDITING.equals(paper.getPaperStatus())) {
+            action.put("type", "REVIEW_PENDING");
+            action.put("actionCode", "VIEW_PAPER");
+        } else {
+            action.put("type", "VIEW_PAPER");
+            action.put("actionCode", "VIEW_PAPER");
+        }
+        return action;
     }
     /**
      * 构建查询条件包装器

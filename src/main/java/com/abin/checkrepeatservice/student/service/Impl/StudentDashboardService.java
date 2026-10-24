@@ -1,6 +1,7 @@
 package com.abin.checkrepeatservice.student.service.Impl;
 
 import com.abin.checkrepeatservice.admin.mapper.SystemConfigMapper;
+import com.abin.checkrepeatservice.common.constant.DictConstants;
 import com.abin.checkrepeatservice.mapper.FileInfoMapper;
 import com.abin.checkrepeatservice.mapper.SysUserMapper;
 import com.abin.checkrepeatservice.pojo.entity.CheckTask;
@@ -13,6 +14,7 @@ import com.abin.checkrepeatservice.pojo.entity.SystemMessage;
 import com.abin.checkrepeatservice.student.dto.*;
 import com.abin.checkrepeatservice.student.mapper.CheckTaskMapper;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
+import com.abin.checkrepeatservice.student.service.PaperInfoService;
 import com.abin.checkrepeatservice.teacher.mapper.ReviewRecordMapper;
 import com.abin.checkrepeatservice.user.mapper.SystemMessageMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -58,6 +60,9 @@ public class StudentDashboardService {
 
     @jakarta.annotation.Resource
     private SystemMessageMapper systemMessageMapper;
+
+    @jakarta.annotation.Resource
+    private PaperInfoService paperInfoService;
 
     public StudentDashboardStatsDTO getDashboardStats(Long studentId) {
         StudentDashboardStatsDTO stats = new StudentDashboardStatsDTO();
@@ -622,83 +627,83 @@ public class StudentDashboardService {
     }
 
     /**
-     * 获取待办事项列表（全部基于论文真实状态生成，不再返回硬编码待办）
+     * 获取待办事项列表（全部基于论文真实状态生成，不再返回硬编码待办）。
+     *
+     * <p>每条待办都带 type/bizType/bizId/actionCode，前端 goTodo 直接按 actionCode
+     * 做枚举映射即可定位路由与实体，不再依赖标题正则或 paperId/relatedId/bizId 猜测链。</p>
      */
     public List<TodoItemDTO> getTodoList(Long studentId) {
         List<TodoItemDTO> todoList = new ArrayList<>();
         Date reviewDeadline = parseConfigDate("review_deadline");
         Date submissionDeadline = parseConfigDate("submission_deadline");
 
-        // 1. 查重中的论文
-        Long checkingCount = paperInfoMapper.selectCount(
+        List<PaperInfo> papers = paperInfoMapper.selectList(
             new LambdaQueryWrapper<PaperInfo>()
                 .eq(PaperInfo::getStudentId, studentId)
-                .eq(PaperInfo::getPaperStatus, "checking")
                 .eq(PaperInfo::getIsDeleted, 0)
+                .orderByDesc(PaperInfo::getCreateTime)
         );
-        if (checkingCount > 0) {
-            TodoItemDTO todo = new TodoItemDTO();
-            todo.setId((long) (todoList.size() + 1));
-            todo.setTitle("论文正在查重中");
-            todo.setDescription("您有 " + checkingCount + " 篇论文正在查重检测，请耐心等待结果");
-            todo.setPriority("normal");
-            todo.setCompleted(false);
-            todoList.add(todo);
+        // 复用论文服务已收口的 canResubmit 口径，避免待办与详情页判定不一致
+        paperInfoService.enrichResubmitInfo(papers);
+
+        for (PaperInfo paper : papers) {
+            String status = paper.getPaperStatus();
+            String title = paper.getPaperTitle() == null ? "未命名论文" : paper.getPaperTitle();
+
+            if (DictConstants.PaperStatus.CHECKING.equals(status)) {
+                todoList.add(buildTodo(paper.getId(), "CHECK_COMPLETED", "PAPER", paper.getId(),
+                        "VIEW_PAPER",
+                        "论文《" + title + "》正在查重中",
+                        "查重检测进行中，请耐心等待结果",
+                        "normal", null));
+            } else if (DictConstants.PaperStatus.AUDITING.equals(status)) {
+                todoList.add(buildTodo(paper.getId(), "REVIEW_PENDING", "PAPER", paper.getId(),
+                        "VIEW_PAPER",
+                        "论文《" + title + "》等待审核结果",
+                        "论文正在等待导师审核，请留意通知",
+                        "normal", reviewDeadline));
+            } else if (DictConstants.PaperStatus.REJECTED.equals(status)) {
+                boolean canResubmit = Boolean.TRUE.equals(paper.getCanResubmit());
+                String description = paper.getAuditComment() != null && !paper.getAuditComment().isBlank()
+                        ? "导师意见：" + Jsoup.parse(paper.getAuditComment()).text()
+                        : "请根据导师意见修改后重新提交";
+                Date dueDate = paper.getResubmitDeadline() == null
+                        ? null : localDateTimeToDate(paper.getResubmitDeadline());
+                todoList.add(buildTodo(paper.getId(), "REVISION_REQUIRED", "PAPER", paper.getId(),
+                        canResubmit ? "REVISE_PAPER" : "VIEW_PAPER",
+                        "论文《" + title + "》被退回，请修改后重提",
+                        description,
+                        "high", dueDate));
+            }
         }
 
-        // 2. 待审核的论文
-        Long auditingCount = paperInfoMapper.selectCount(
-            new LambdaQueryWrapper<PaperInfo>()
-                .eq(PaperInfo::getStudentId, studentId)
-                .eq(PaperInfo::getPaperStatus, "auditing")
-                .eq(PaperInfo::getIsDeleted, 0)
-        );
-        if (auditingCount > 0) {
-            TodoItemDTO todo = new TodoItemDTO();
-            todo.setId((long) (todoList.size() + 1));
-            todo.setTitle("等待论文审核结果");
-            todo.setDescription("您有 " + auditingCount + " 篇论文正在等待导师审核");
-            todo.setPriority("normal");
-            todo.setCompleted(false);
-            todo.setDueDate(reviewDeadline);
-            todoList.add(todo);
-        }
-
-        // 3. 被退回需修改的论文
-        Long rejectedCount = paperInfoMapper.selectCount(
-            new LambdaQueryWrapper<PaperInfo>()
-                .eq(PaperInfo::getStudentId, studentId)
-                .eq(PaperInfo::getPaperStatus, "rejected")
-                .eq(PaperInfo::getIsDeleted, 0)
-        );
-        if (rejectedCount > 0) {
-            TodoItemDTO todo = new TodoItemDTO();
-            todo.setId((long) (todoList.size() + 1));
-            todo.setTitle("修改被退回的论文");
-            todo.setDescription("您有 " + rejectedCount + " 篇论文被退回，请根据导师意见修改后重新提交");
-            todo.setPriority("high");
-            todo.setCompleted(false);
-            todoList.add(todo);
-        }
-
-        // 4. 还没有任何论文时提醒提交
-        Long totalCount = paperInfoMapper.selectCount(
-            new LambdaQueryWrapper<PaperInfo>()
-                .eq(PaperInfo::getStudentId, studentId)
-                .eq(PaperInfo::getIsDeleted, 0)
-        );
-        if (totalCount == 0) {
-            TodoItemDTO todo = new TodoItemDTO();
-            todo.setId((long) (todoList.size() + 1));
-            todo.setTitle("提交毕业论文");
-            todo.setDescription("您还未提交任何论文，请在截止日期前完成提交");
-            todo.setPriority("high");
-            todo.setCompleted(false);
-            todo.setDueDate(submissionDeadline);
-            todoList.add(todo);
+        // 还没有任何论文时提醒提交
+        if (papers.isEmpty()) {
+            todoList.add(buildTodo(0L, "DEADLINE_REMINDER", "PAPER", null,
+                    null,
+                    "提交毕业论文",
+                    "您还未提交任何论文，请在截止日期前完成提交",
+                    "high", submissionDeadline));
         }
 
         return todoList;
+    }
+
+    /** 组装带路由要素的待办项 */
+    private TodoItemDTO buildTodo(Long id, String type, String bizType, Long bizId, String actionCode,
+                                  String title, String description, String priority, Date dueDate) {
+        TodoItemDTO todo = new TodoItemDTO();
+        todo.setId(id);
+        todo.setType(type);
+        todo.setBizType(bizType);
+        todo.setBizId(bizId);
+        todo.setActionCode(actionCode);
+        todo.setTitle(title);
+        todo.setDescription(description);
+        todo.setPriority(priority);
+        todo.setCompleted(false);
+        todo.setDueDate(dueDate);
+        return todo;
     }
 
     /**

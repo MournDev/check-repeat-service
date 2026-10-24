@@ -22,6 +22,17 @@ public interface PaperInfoService extends IService<PaperInfo> {
     Page<PaperInfo> getStudentPaperPage(PaperQueryRequest request);
 
     /**
+     * 补充重提闭环回传字段（revisionRound / maxRevisionRound / canResubmit /
+     * resubmitDeadline / nextAction）。学生端列表与详情共用，避免前端靠状态猜。
+     */
+    void enrichResubmitInfo(List<PaperInfo> papers);
+
+    /**
+     * 单篇论文的重提闭环字段补充（详情页使用）。
+     */
+    void enrichResubmitInfo(PaperInfo paper);
+
+    /**
      * 删除论文接口
      * @param paperId 论文ID
      * @return 删除结果

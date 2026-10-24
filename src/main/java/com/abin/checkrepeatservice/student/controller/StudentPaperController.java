@@ -156,7 +156,8 @@ public class StudentPaperController {
         if (paperInfo == null || paperInfo.getIsDeleted() == 1) {
             return Result.error(ResultCode.RESOURCE_NOT_FOUND, "论文不存在或已删除");
         }
-        // 2. 返回论文详情
+        // 2. 重提闭环字段由服务端计算（canResubmit / nextAction），前端不再猜状态
+        paperInfoService.enrichResubmitInfo(paperInfo);
         return Result.success("论文详情查询成功", paperInfo);
     }
 
