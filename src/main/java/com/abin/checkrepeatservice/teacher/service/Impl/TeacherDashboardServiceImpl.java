@@ -3,6 +3,8 @@ package com.abin.checkrepeatservice.teacher.service.Impl;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.admin.vo.PaperExportExcelVO;
+import com.abin.checkrepeatservice.pojo.entity.PaperCheckSignoff;
+import com.abin.checkrepeatservice.teacher.mapper.PaperCheckSignoffMapper;
 import com.alibaba.excel.EasyExcel;
 import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
 import com.abin.checkrepeatservice.pojo.entity.SysUser;
@@ -21,6 +23,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -39,6 +42,9 @@ public class TeacherDashboardServiceImpl implements TeacherDashboardService {
     
     @Resource
     private SysUserService sysUserService;
+
+    @Resource
+    private PaperCheckSignoffMapper paperCheckSignoffMapper;
 
     @Override
     public Result<Map<String, Object>> getDashboardStats(Long teacherId) {
@@ -100,12 +106,35 @@ public class TeacherDashboardServiceImpl implements TeacherDashboardService {
                    .orderByDesc(PaperInfo::getSubmitTime);
             
             Page<PaperInfo> resultPage = paperInfoMapper.selectPage(paperPage, wrapper);
+            List<PaperInfo> papers = resultPage.getRecords();
+
+            // Wave 3：学生信息与签核状态都按页批量预载，避免逐条 selectById
+            List<Long> studentIds = papers.stream()
+                    .map(PaperInfo::getStudentId)
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .collect(Collectors.toList());
+            Map<Long, SysUser> studentMap = studentIds.isEmpty() ? new HashMap<>()
+                    : sysUserService.listByIds(studentIds).stream()
+                            .collect(Collectors.toMap(SysUser::getId, s -> s));
+
+            List<Long> paperIds = papers.stream().map(PaperInfo::getId).collect(Collectors.toList());
+            Map<Long, PaperCheckSignoff> signoffMap = new HashMap<>();
+            if (!paperIds.isEmpty()) {
+                List<PaperCheckSignoff> signoffs = paperCheckSignoffMapper.selectList(
+                        new LambdaQueryWrapper<PaperCheckSignoff>()
+                                .in(PaperCheckSignoff::getPaperId, paperIds)
+                                .orderByDesc(PaperCheckSignoff::getSignTime));
+                for (PaperCheckSignoff signoff : signoffs) {
+                    signoffMap.putIfAbsent(signoff.getPaperId(), signoff);
+                }
+            }
             
             // 构造符合需求的数据结构
             Map<String, Object> responseData = new HashMap<>();
             List<Map<String, Object>> records = new ArrayList<>();
             
-            for (PaperInfo paper : resultPage.getRecords()) {
+            for (PaperInfo paper : papers) {
                 Map<String, Object> record = new HashMap<>();
                 record.put("id", paper.getId());
                 
@@ -114,11 +143,25 @@ public class TeacherDashboardServiceImpl implements TeacherDashboardService {
                 paperBaseInfo.put("paperId", paper.getId());
                 paperBaseInfo.put("paperTitle", paper.getPaperTitle());
                 
-                // 获取学生信息
-                SysUser student = sysUserService.getById(paper.getStudentId());
+                SysUser student = studentMap.get(paper.getStudentId());
                 if (student != null) {
                     paperBaseInfo.put("studentName", student.getRealName());
+                    paperBaseInfo.put("studentNo", student.getUsername());
+                    paperBaseInfo.put("college", student.getCollegeName());
                 }
+
+                // Wave 3：签核状态（顶层 + paperBaseInfo 双写，兼容现有前端结构）
+                PaperCheckSignoff signoff = signoffMap.get(paper.getId());
+                boolean qualified = signoff != null && Integer.valueOf(1).equals(signoff.getQualified());
+                String signoffId = signoff == null ? null : String.valueOf(signoff.getId());
+                boolean canBatchReview = qualified
+                        && "auditing".equals(paper.getPaperStatus());
+                record.put("signoffQualified", qualified);
+                record.put("signoffId", signoffId);
+                record.put("canBatchReview", canBatchReview);
+                paperBaseInfo.put("signoffQualified", qualified);
+                paperBaseInfo.put("signoffId", signoffId);
+                paperBaseInfo.put("canBatchReview", canBatchReview);
                 
                 record.put("paperBaseInfo", paperBaseInfo);
                 
@@ -128,7 +171,7 @@ public class TeacherDashboardServiceImpl implements TeacherDashboardService {
                 record.put("taskBaseInfo", taskBaseInfo);
                 
                 // 版本号
-                record.put("version", paper.getFileId() != null ? 1 : 0);
+                record.put("version", paper.getVersion() == null ? 1 : paper.getVersion());
                 
                 records.add(record);
             }
@@ -294,8 +337,10 @@ public class TeacherDashboardServiceImpl implements TeacherDashboardService {
             List<PaperInfo> papers = paperInfoMapper.selectList(wrapper);
             fillExportNames(papers);
 
-            List<PaperExportExcelVO> rows = papers.stream().map(this::toExportRow).toList();
-            String timestamp = LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+            List<PaperExportExcelVO> rows = papers.stream()
+                    .map(p -> toExportRow(p))
+                    .collect(Collectors.toList());
+            String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
 
             if ("csv".equals(format)) {
                 writeCsv(response, rows, "教师数据统计_" + timestamp + ".csv");

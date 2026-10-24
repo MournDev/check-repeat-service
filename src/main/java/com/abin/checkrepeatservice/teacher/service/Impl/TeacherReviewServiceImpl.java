@@ -588,6 +588,17 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
                 : sysUserMapper.selectBatchIds(reviewerIds).stream()
                         .collect(Collectors.toMap(SysUser::getId, u -> u));
 
+        // Wave 3：批量预载最新签核，待审列表直接携带 signoffQualified / signoffId / canBatchReview，
+        // 前端批量提交前无需再逐篇调用 check-signoff（消除 N 次请求）。
+        Map<Long, PaperCheckSignoff> signoffMap = new HashMap<>();
+        List<PaperCheckSignoff> signoffList = paperCheckSignoffMapper.selectList(
+                new LambdaQueryWrapper<PaperCheckSignoff>()
+                        .in(PaperCheckSignoff::getPaperId, paperIds)
+                        .orderByDesc(PaperCheckSignoff::getSignTime));
+        for (PaperCheckSignoff signoff : signoffList) {
+            signoffMap.putIfAbsent(signoff.getPaperId(), signoff);
+        }
+
         // 2. 转换为DTO
         return paperList.stream().map(paper -> {
             ReviewResultDTO dto = new ReviewResultDTO();
@@ -606,6 +617,14 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
             paperBaseInfo.setSubmitTime(paper.getSubmitTime());
             paperBaseInfo.setPaperStatus(paper.getPaperStatus());
             dto.setPaperBaseInfo(paperBaseInfo);
+
+            // Wave 3：签核状态（最新一条，按 signTime 倒序取首条）
+            PaperCheckSignoff signoff = signoffMap.get(paper.getId());
+            boolean signoffQualified = signoff != null && Integer.valueOf(1).equals(signoff.getQualified());
+            dto.setSignoffQualified(signoffQualified);
+            dto.setSignoffId(signoff == null ? null : signoff.getId());
+            dto.setCanBatchReview(signoffQualified
+                    && DictConstants.PaperStatus.AUDITING.equals(paper.getPaperStatus()));
 
             // 2.2 填充查重任务信息
             CheckTask task = taskMap.get(paper.getId());

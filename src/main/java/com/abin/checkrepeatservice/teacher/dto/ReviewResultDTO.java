@@ -45,6 +45,22 @@ public class ReviewResultDTO {
      */
     private String feedback;
 
+    /**
+     * Wave 3：最新签核是否合格（qualified=1）；未签核为 false。
+     */
+    private Boolean signoffQualified;
+
+    /**
+     * Wave 3：对应的 paper_check_signoff.id。
+     */
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
+    private Long signoffId;
+
+    /**
+     * Wave 3：是否允许批量审核（signoffQualified && paperStatus=auditing）。
+     */
+    private Boolean canBatchReview;
+
     // ------------------------------ 内部DTO ------------------------------
     /**
      * 论文基础信息
