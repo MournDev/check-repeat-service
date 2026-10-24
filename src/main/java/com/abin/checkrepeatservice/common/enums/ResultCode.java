@@ -53,6 +53,10 @@ public enum ResultCode {
     BUSINESS_EVAL_NOT_READY(40917, HttpStatus.CONFLICT, "论文尚未通过终期答辩，暂不可评价导师"),
     BUSINESS_EVAL_ALREADY_SUBMITTED(40918, HttpStatus.CONFLICT, "您已提交过导师评价，请勿重复提交"),
     BUSINESS_EVAL_WINDOW_CLOSED(40919, HttpStatus.CONFLICT, "导师评价窗口已关闭"),
+    DATA_CONFLICT(40920, HttpStatus.CONFLICT, "数据已存在，请勿重复提交"),
+
+    // ====================== 4.7 文件过大（HTTP 413） ======================
+    FILE_TOO_LARGE(41301, HttpStatus.PAYLOAD_TOO_LARGE, "上传文件过大"),
 
     // ====================== 4.6 限流（HTTP 429） ======================
     LOGIN_TOO_MANY_ATTEMPTS(42901, HttpStatus.TOO_MANY_REQUESTS, "登录尝试次数过多，请稍后再试"),

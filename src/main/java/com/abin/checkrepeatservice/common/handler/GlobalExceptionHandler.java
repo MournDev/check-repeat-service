@@ -3,14 +3,19 @@ package com.abin.checkrepeatservice.common.handler;
 import com.abin.checkrepeatservice.common.Exception.BusinessException;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
+import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.Objects;
@@ -124,7 +129,67 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(result, resultCode.getHttpStatus());
     }
 
-    // -------------------------- 6. 系统异常（兜底处理） --------------------------
+    // -------------------------- 6. 请求体不可读（JSON 格式错误） --------------------------
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<Result<?>> handleNotReadable(HttpMessageNotReadableException e) {
+        log.warn("请求体解析失败：{}", e.getMessage());
+        ResultCode resultCode = ResultCode.PARAM_FORMAT_ERROR;
+        Result<?> result = Result.error(resultCode.getCode(),
+                "请求参数格式错误，请检查 JSON 格式", null);
+        return new ResponseEntity<>(result, resultCode.getHttpStatus());
+    }
+
+    // -------------------------- 7. 缺少必要请求参数 --------------------------
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<Result<?>> handleMissingParameter(MissingServletRequestParameterException e) {
+        log.warn("缺少请求参数：{}", e.getParameterName());
+        ResultCode resultCode = ResultCode.PARAM_EMPTY;
+        Result<?> result = Result.error(resultCode.getCode(),
+                "缺少必要参数：" + e.getParameterName(), null);
+        return new ResponseEntity<>(result, resultCode.getHttpStatus());
+    }
+
+    // -------------------------- 8. 上传文件超过大小限制 --------------------------
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<Result<?>> handleMaxUploadSize(MaxUploadSizeExceededException e) {
+        log.warn("上传文件超过大小限制：{}", e.getMessage());
+        ResultCode resultCode = ResultCode.FILE_TOO_LARGE;
+        Result<?> result = Result.error(resultCode.getCode(),
+                "上传文件过大，请压缩后重试", null);
+        return new ResponseEntity<>(result, resultCode.getHttpStatus());
+    }
+
+    // -------------------------- 9. @RequestParam/@PathVariable 校验失败 --------------------------
+    @ExceptionHandler(ConstraintViolationException.class)
+    public ResponseEntity<Result<?>> handleConstraintViolation(ConstraintViolationException e) {
+        String message = e.getConstraintViolations() == null ? null
+                : e.getConstraintViolations().stream()
+                        .map(violation -> violation.getMessage())
+                        .filter(Objects::nonNull)
+                        .findFirst()
+                        .orElse(null);
+        if (message == null || message.isBlank()) {
+            message = "参数校验失败";
+        }
+        log.warn("参数校验失败：{}", message);
+        ResultCode resultCode = ResultCode.PARAM_ERROR;
+        Result<?> result = Result.error(resultCode.getCode(), message, null);
+        return new ResponseEntity<>(result, resultCode.getHttpStatus());
+    }
+
+    // -------------------------- 10. 数据库唯一键/约束冲突 --------------------------
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<Result<?>> handleDataIntegrityViolation(DataIntegrityViolationException e) {
+        String detail = e.getMostSpecificCause() == null ? e.getMessage()
+                : e.getMostSpecificCause().getMessage();
+        log.warn("数据库约束冲突：{}", detail);
+        ResultCode resultCode = ResultCode.DATA_CONFLICT;
+        Result<?> result = Result.error(resultCode.getCode(),
+                "数据已存在，请勿重复提交", null);
+        return new ResponseEntity<>(result, resultCode.getHttpStatus());
+    }
+
+    // -------------------------- 11. 系统异常（兜底处理） --------------------------
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Result<?>> handleSystemException(Exception e) {
         log.error("系统异常：{}", e.getMessage(), e);
