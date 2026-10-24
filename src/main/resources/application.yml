@@ -124,7 +124,12 @@ paper:
 check:
   task:
     max-concurrent: 2
+    # checking 任务超时（毫秒）：超时后置 failure 并返还学院额度
     timeout: 3600000
+    # pending 任务排队超时（毫秒）：超过后先重新投递一次事件，仍超时则置 failure
+    pending-timeout: 900000
+    # pending 超时重新投递的最大次数（0 表示不重投，直接失败）
+    pending-max-retry: 1
     temp-file-path: /data/check-temp/
   simhash:
     hash-bits: 64

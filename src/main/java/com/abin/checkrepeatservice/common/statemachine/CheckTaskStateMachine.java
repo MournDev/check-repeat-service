@@ -97,31 +97,10 @@ public class CheckTaskStateMachine {
     }
 
     /**
-     * 超时任务批量回收：把 start_time 早于 deadline 且仍在 CHECKING 的任务置为 FAILURE。
-     *
-     * <p>替代原先接收裸 SQL 片段的 batchTransitionStatus，条件全部参数化，
-     * 且只更新状态相关列 + version。</p>
-     *
-     * @param deadline 开始时间阈值（早于该时间视为超时）
-     * @param reason   失败原因
-     * @return 实际回收的任务数
+     * 超时任务批量回收已由 CheckTaskScheduler 改为「逐任务条件流转」：
+     * CHECKING -> FAILURE 走 transitionStatus，保证与消费端/取消端互斥，
+     * 且只有真正抢到状态的一方执行额度返还。
      */
-    public int failTimeoutTasks(LocalDateTime deadline, String reason) {
-        if (deadline == null) {
-            return 0;
-        }
-
-        int rows = checkTaskMapper.update(null, new LambdaUpdateWrapper<CheckTask>()
-                .eq(CheckTask::getCheckStatus, CheckTaskStatusEnum.CHECKING.getCode())
-                .lt(CheckTask::getStartTime, deadline)
-                .set(CheckTask::getCheckStatus, CheckTaskStatusEnum.FAILURE.getCode())
-                .set(CheckTask::getEndTime, LocalDateTime.now())
-                .set(CheckTask::getFailReason, truncateReason(reason))
-                .setSql("version = version + 1"));
-
-        log.info("超时任务回收完成：deadline={}, 影响行数={}", deadline, rows);
-        return rows;
-    }
 
     private String truncateReason(String reason) {
         if (reason == null) {
