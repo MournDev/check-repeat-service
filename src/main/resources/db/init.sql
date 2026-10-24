@@ -457,9 +457,7 @@ CREATE TABLE `check_result` (
   KEY `idx_repeat_rate` (`repeat_rate`),
   KEY `idx_check_source` (`check_source`),
   KEY `idx_check_time` (`check_time`),
-  KEY `idx_status` (`status`),
-  KEY `idx_check_result_task_id` (`task_id`),
-  KEY `idx_check_result_paper_id` (`paper_id`)
+  KEY `idx_status` (`status`)
 ) ENGINE=InnoDB AUTO_INCREMENT=2048440745244753923 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='论文查重结果表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -560,6 +558,8 @@ CREATE TABLE `check_task` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_task_no` (`task_no`),
   KEY `idx_ct_paper_submit` (`paper_id`,`submit_id`),
+  KEY `idx_ct_status_delete_start` (`check_status`,`is_deleted`,`start_time`),
+  KEY `idx_ct_paper_delete_time` (`paper_id`,`is_deleted`,`create_time`),
   KEY `idx_check_task_rule_id` (`check_rule_id`),
   KEY `idx_check_task_delete_by` (`delete_by`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='查重任务表';
@@ -819,8 +819,7 @@ CREATE TABLE `file_info` (
   `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
   `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
   PRIMARY KEY (`id`),
-  UNIQUE KEY `idx_md5` (`md5`) USING BTREE,
-  KEY `idx_file_info_md5` (`md5`)
+  UNIQUE KEY `idx_md5` (`md5`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='文件信息表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -1853,7 +1852,9 @@ CREATE TABLE `sys_login_log` (
   `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '逻辑删除',
   `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
   `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
-  KEY `idx_login_log_user_time` (`user_id`,`login_time`)
+  PRIMARY KEY (`id`),
+  KEY `idx_login_log_user_time` (`user_id`,`login_time`),
+  KEY `idx_sll_username_time` (`username`,`login_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='用户登录历史记录表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
