@@ -14,6 +14,7 @@ import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -212,10 +213,14 @@ public class FileService {
     
         String fileName = fileId + "_" + safeFilename;
         String relativePath = Paths.get(userId, datePath, fileName).toString();
-        String fullPath = Paths.get(uploadPath, relativePath).toString();
 
-        // 创建目录
-        File destFile = new File(fullPath);
+        // 阶段 5 安全加固：规范化后必须仍位于上传根目录内，阻断 ../ 路径穿越
+        Path root = Paths.get(uploadPath).toAbsolutePath().normalize();
+        Path target = root.resolve(relativePath).normalize();
+        if (!target.startsWith(root)) {
+            throw new IOException("非法的文件存储路径");
+        }
+        File destFile = target.toFile();
         File parentDir = destFile.getParentFile();
         if (parentDir != null && !parentDir.exists()) {
             boolean created = parentDir.mkdirs();
@@ -228,7 +233,7 @@ public class FileService {
 
         // 保存文件
         file.transferTo(destFile);
-        log.debug("文件保存到磁盘成功: {}", fullPath);
+        log.debug("文件保存到磁盘成功: {}", destFile.getAbsolutePath());
 
         return relativePath;
     }

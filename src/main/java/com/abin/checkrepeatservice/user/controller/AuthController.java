@@ -56,7 +56,11 @@ public class AuthController {
      */
     @PostMapping("/refresh-token")
     public Result<RefreshTokenVO> refreshToken(@Valid @RequestBody RefreshTokenReq refreshTokenReq) {
-        log.info("接收令牌刷新请求：旧令牌={}", refreshTokenReq.getOldToken().substring(0, 20) + "..."); // 隐藏部分令牌，避免日志泄露
+        String oldToken = refreshTokenReq.getOldToken();
+        // 日志脱敏（阶段 5）：只保留前 8 位，禁止完整 token 落日志
+        String maskedToken = (oldToken == null || oldToken.length() <= 8)
+                ? "***" : oldToken.substring(0, 8) + "***";
+        log.info("接收令牌刷新请求：旧令牌={}", maskedToken);
         return authService.refreshToken(refreshTokenReq);
     }
 

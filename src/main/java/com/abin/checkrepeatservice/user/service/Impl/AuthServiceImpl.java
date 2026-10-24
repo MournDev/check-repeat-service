@@ -370,11 +370,11 @@ public class AuthServiceImpl implements AuthService {
 
         // 1. 校验旧令牌有效性（格式+是否过期）
         if (!jwtUtils.validateTokenFormat(oldToken)) {
-            log.warn("令牌刷新失败：旧令牌格式错误，token={}", oldToken);
+            log.warn("令牌刷新失败：旧令牌格式错误，token={}", maskToken(oldToken));
             return Result.error(ResultCode.PARAM_ERROR, "令牌格式错误，请重新登录");
         }
         if (jwtUtils.isTokenExpired(oldToken)) {
-            log.warn("令牌刷新失败：旧令牌已过期，token={}", oldToken);
+            log.warn("令牌刷新失败：旧令牌已过期，token={}", maskToken(oldToken));
             return Result.error(ResultCode.PARAM_VALUE_INVALID, "旧令牌已过期，请重新登录");
         }
 
@@ -384,7 +384,7 @@ public class AuthServiceImpl implements AuthService {
         String roleCode = jwtUtils.extractRoleCode(oldToken);
         // 兜底：校验令牌中的用户信息是否完整
         if (userId == null || username == null || roleCode == null) {
-            log.error("令牌刷新失败：旧令牌信息不完整，token={}", oldToken);
+            log.error("令牌刷新失败：旧令牌信息不完整，token={}", maskToken(oldToken));
             return Result.error(ResultCode.PARAM_ERROR, "令牌信息损坏，请重新登录");
         }
 
@@ -557,6 +557,17 @@ public class AuthServiceImpl implements AuthService {
         }
         return Result.error(ResultCode.PARAM_VALUE_INVALID, "验证码错误或已过期");
     }
+    /**
+     * 日志脱敏：只保留 token 前 8 位，禁止完整凭证落日志。
+     */
+    private String maskToken(String token) {
+        String normalized = jwtUtils.normalizeToken(token);
+        if (normalized == null || normalized.isEmpty()) {
+            return "***";
+        }
+        return normalized.length() <= 8 ? "***" : normalized.substring(0, 8) + "***";
+    }
+
     /**
      * 记录登录日志
      */
