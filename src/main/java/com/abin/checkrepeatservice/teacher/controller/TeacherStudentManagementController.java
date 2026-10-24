@@ -12,6 +12,7 @@ import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
 import com.abin.checkrepeatservice.teacher.dto.*;
 import com.abin.checkrepeatservice.teacher.service.TeacherStudentManagementService;
 import com.abin.checkrepeatservice.user.service.SysUserService;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -24,6 +25,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * 教师学生管理控制器
@@ -158,6 +160,19 @@ public class TeacherStudentManagementController {
             @RequestBody AssignAdvisorDTO assignAdvisorDTO) {
         
         try {
+            // 数据范围收口：教师只可操作「本人名下」的学生，防止借分配入口改他人指导关系
+            String currentRole = UserBusinessInfoUtils.getCurrentUserRoleCode();
+            if ("TEACHER".equals(currentRole)) {
+                Long currentTeacherId = UserBusinessInfoUtils.getCurrentUserId();
+                List<PaperInfo> papers = paperInfoMapper.selectList(new LambdaQueryWrapper<PaperInfo>()
+                        .eq(PaperInfo::getStudentId, studentId)
+                        .eq(PaperInfo::getIsDeleted, 0));
+                boolean ownsStudent = !papers.isEmpty()
+                        && papers.stream().allMatch(p -> Objects.equals(p.getTeacherId(), currentTeacherId));
+                if (!ownsStudent) {
+                    return Result.error(ResultCode.PERMISSION_NO_ACCESS, "仅可管理本人名下的学生");
+                }
+            }
             log.info("分配导师: studentId={}, advisorId={}", studentId, assignAdvisorDTO.getAdvisorId());
             boolean result = studentManagementService.assignAdvisor(studentId, assignAdvisorDTO);
             if (result) {
@@ -199,7 +214,8 @@ public class TeacherStudentManagementController {
      * POST /api/teacher/students/batch-assign-advisor
      */
     @PostMapping("/batch-assign-advisor")
-    @Operation(summary = "批量分配导师", description = "为多个学生批量分配同一指导老师")
+    @PreAuthorize("hasAuthority('ADMIN')")
+    @Operation(summary = "批量分配导师", description = "为多个学生批量分配同一指导老师（仅管理员）")
     @OperationLog(type = "batch_assign_advisor", description = "批量分配导师")
     public Result<Object> batchAssignAdvisor(@RequestBody BatchAssignAdvisorDTO batchAssignDTO) {
         
@@ -290,11 +306,26 @@ public class TeacherStudentManagementController {
     }
 
     /**
-     * 9. 添加学生接口
+     * 9. 添加学生接口（REST 风格入口）
+     * POST /api/teacher/students
+     *
+     * <p>与 /add 等价，只保留管理员/超管入口；教师角色在此路径上由过滤器链直接返回 403。</p>
+     */
+    @PostMapping
+    @PreAuthorize("hasAuthority('ADMIN')")
+    @Operation(summary = "添加学生", description = "添加新的学生用户（仅管理员）")
+    @OperationLog(type = "add_student", description = "添加学生")
+    public Result<Object> addStudentRest(@RequestBody AddStudentDTO addStudentDTO) {
+        return addStudent(addStudentDTO);
+    }
+
+    /**
+     * 9.1 添加学生接口
      * POST /api/teacher/students/add
      */
     @PostMapping("/add")
-    @Operation(summary = "添加学生", description = "添加新的学生用户")
+    @PreAuthorize("hasAuthority('ADMIN')")
+    @Operation(summary = "添加学生", description = "添加新的学生用户（仅管理员）")
     @OperationLog(type = "add_student", description = "添加学生")
     public Result<Object> addStudent(@RequestBody AddStudentDTO addStudentDTO) {
         
@@ -313,7 +344,8 @@ public class TeacherStudentManagementController {
      * POST /api/teacher/students/import
      */
     @PostMapping("/import")
-    @Operation(summary = "导入学生数据", description = "从Excel文件导入学生数据")
+    @PreAuthorize("hasAuthority('ADMIN')")
+    @Operation(summary = "导入学生数据", description = "从Excel文件导入学生数据（仅管理员）")
     @OperationLog(type = "import_students", description = "导入学生数据")
     public Result<Object> importStudents(@RequestParam("file") MultipartFile file) {
         

@@ -30,6 +30,13 @@ public class UserInfoDTO {
     private Long roleId;
 
     private String roleName;
+
+    /**
+     * 角色编码（STUDENT/TEACHER/ADMIN/SUPER_ADMIN）。前端用户管理按角色判断可否操作，
+     * 不再从 userType 反推（后者只是 role_code 的冗余副本）。
+     */
+    private String roleCode;
+
     private Integer status;
     private String collegeName;
     private String major;

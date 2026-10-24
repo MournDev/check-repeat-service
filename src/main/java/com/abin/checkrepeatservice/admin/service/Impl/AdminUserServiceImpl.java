@@ -84,9 +84,9 @@ public class AdminUserServiceImpl implements AdminUserService {
             
             // 转换为DTO
             Page<UserInfoDTO> dtoPage = new Page<>(resultPage.getCurrent(), resultPage.getSize(), resultPage.getTotal());
-            Map<Long, String> roleNames = loadRoleNames();
+            Map<Long, SysRole> roles = loadRoles();
             List<UserInfoDTO> dtoList = resultPage.getRecords().stream()
-                    .map(user -> convertToDTO(user, roleNames))
+                    .map(user -> convertToDTO(user, roles))
                     .collect(Collectors.toList());
             dtoPage.setRecords(dtoList);
             
@@ -386,7 +386,7 @@ public class AdminUserServiceImpl implements AdminUserService {
             return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权查看该用户");
         }
         
-        UserInfoDTO userInfoDTO = convertToDTO(user, loadRoleNames());
+        UserInfoDTO userInfoDTO = convertToDTO(user, loadRoles());
         return Result.success("用户详情获取成功", userInfoDTO);
     }
 
@@ -497,10 +497,10 @@ public class AdminUserServiceImpl implements AdminUserService {
      * 特意**不过滤 is_deleted**：角色被软删后历史用户仍指向它，此时更要显示出名字，
      * 而不是让这批用户集体变成「未知」。
      */
-    private Map<Long, String> loadRoleNames() {
+    private Map<Long, SysRole> loadRoles() {
         return sysRoleMapper.selectList(null).stream()
-                .filter(role -> role.getId() != null && role.getRoleName() != null)
-                .collect(Collectors.toMap(SysRole::getId, SysRole::getRoleName, (a, b) -> a));
+                .filter(role -> role.getId() != null)
+                .collect(Collectors.toMap(SysRole::getId, role -> role, (a, b) -> a));
     }
 
     /**
@@ -527,9 +527,9 @@ public class AdminUserServiceImpl implements AdminUserService {
     /**
      * 将SysUser转换为UserInfoDTO
      *
-     * @param roleNames 角色ID → 角色名，由 loadRoleNames() 批量取，勿在循环里单独查
+     * @param roles 角色ID → 角色，由 loadRoles() 批量取，勿在循环里单独查
      */
-    private UserInfoDTO convertToDTO(SysUser user, Map<Long, String> roleNames) {
+    private UserInfoDTO convertToDTO(SysUser user, Map<Long, SysRole> roles) {
         UserInfoDTO dto = new UserInfoDTO();
         dto.setUserId(user.getId());
         dto.setUsername(user.getUsername());
@@ -549,7 +549,9 @@ public class AdminUserServiceImpl implements AdminUserService {
         // 的冗余副本：既会因 NULL 抛 NPE，也认不出 SUPER_ADMIN / EDU_ADMIN 这些后来加的
         // 角色（全被 default 打成「未知」）。改成查表后，新增角色不用再改这里的代码。
         dto.setRoleId(user.getRoleId());
-        String roleName = roleNames.get(user.getRoleId());
+        SysRole role = roles.get(user.getRoleId());
+        String roleName = role == null ? null : role.getRoleName();
+        dto.setRoleCode(role == null ? null : role.getRoleCode());
         dto.setRoleName((roleName == null || roleName.isBlank())
                 ? userTypeFallbackName(user.getUserType())
                 : roleName);

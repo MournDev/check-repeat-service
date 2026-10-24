@@ -8,6 +8,7 @@ import jakarta.servlet.DispatcherType;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.access.hierarchicalroles.RoleHierarchy;
 import org.springframework.security.access.hierarchicalroles.RoleHierarchyImpl;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -161,6 +162,15 @@ public class SecurityConfig {
                         .requestMatchers("/actuator/**").hasAuthority("ADMIN")
                         // 学生接口：仅学生角色可访问
                         .requestMatchers("/api/student/**").hasAuthority("STUDENT")
+                        // 教师端学生管理中的「账号侧」动作：新增学生、批量导入、批量分配导师
+                        // 属于管理面权限，教师角色不应有入口。必须在 /api/teacher/** 之前声明，
+                        // 否则会被后一条 hasAuthority("TEACHER") 规则先匹配。
+                        // 根路径按 HTTP 方法区分：POST 是「新增学生」，GET 仍是教师查学生列表，
+                        // 不能把整个 /api/teacher/students 都收归 ADMIN。
+                        .requestMatchers(HttpMethod.POST, "/api/teacher/students").hasAuthority("ADMIN")
+                        .requestMatchers("/api/teacher/students/add",
+                                "/api/teacher/students/import",
+                                "/api/teacher/students/batch-assign-advisor").hasAuthority("ADMIN")
                         // 教师接口：仅教师角色可访问
                         .requestMatchers("/api/teacher/**").hasAuthority("TEACHER")
                         // 管理员接口：仅管理员角色可访问
