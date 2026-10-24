@@ -6,6 +6,7 @@ import com.abin.checkrepeatservice.pojo.entity.CheckTask;
 import com.abin.checkrepeatservice.student.dto.CheckTaskResultDTO;
 import com.abin.checkrepeatservice.student.service.CheckTaskService;
 import com.abin.checkrepeatservice.user.vo.CheckResultVO;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import jakarta.annotation.Resource;
 import jakarta.validation.Valid;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -37,10 +38,12 @@ public class StudentCheckTaskController {
      * @param checkStatus 任务状态（可选：0-待执行，1-执行中，2-执行成功，3-执行失败）
      */
     @GetMapping("/list")
-    public Result<List<CheckTaskResultDTO>> getMyCheckTaskList(
+    public Result<Page<CheckTaskResultDTO>> getMyCheckTaskList(
             @RequestParam(required = false) Long paperId,
-            @RequestParam(required = false) Integer checkStatus) {
-        return checkTaskService.getMyCheckTaskList(paperId, checkStatus);
+            @RequestParam(required = false) Integer checkStatus,
+            @RequestParam(defaultValue = "1") Integer page,
+            @RequestParam(defaultValue = "10") Integer size) {
+        return checkTaskService.getMyCheckTaskList(paperId, checkStatus, page, size);
     }
 
     /**

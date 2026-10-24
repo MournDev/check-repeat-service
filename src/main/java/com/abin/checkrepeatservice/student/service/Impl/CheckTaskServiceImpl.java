@@ -22,6 +22,7 @@ import com.abin.checkrepeatservice.user.vo.CheckResultVO;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.TypeReference;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -203,7 +204,11 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
     }
 
     @Override
-    public Result<List<CheckTaskResultDTO>> getMyCheckTaskList(Long paperId, Integer checkStatus) {
+    public Result<Page<CheckTaskResultDTO>> getMyCheckTaskList(Long paperId, Integer checkStatus,
+                                                               Integer page, Integer size) {
+        int current = (page == null || page < 1) ? 1 : page;
+        int pageSize = (size == null || size < 1) ? 10 : Math.min(size, 100);
+
         SysUser currentUser = UserBusinessInfoUtils.getCurrentSysUser();
         LambdaQueryWrapper<CheckTask> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(CheckTask::getIsDeleted, 0)
@@ -226,17 +231,30 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
         }
 
         // 3. 按任务状态过滤（可选）
-        if (checkStatus != null && (checkStatus >= 0 && checkStatus <= 3)) {
-            queryWrapper.eq(CheckTask::getCheckStatus, checkStatus);
+        // check_status 是 varchar，不能用 Integer 直接比较：MySQL 会把字符串转数字，
+        // "pending"/"checking" 等都会变成 0，导致按 0 过滤命中全部状态。
+        if (checkStatus != null) {
+            String statusCode = switch (checkStatus) {
+                case 0 -> DictConstants.CheckStatus.PENDING;
+                case 1 -> DictConstants.CheckStatus.CHECKING;
+                case 2 -> DictConstants.CheckStatus.COMPLETED;
+                case 3 -> DictConstants.CheckStatus.FAILURE;
+                case 4 -> DictConstants.CheckStatus.CANCELLED;
+                default -> null;
+            };
+            if (statusCode != null) {
+                queryWrapper.eq(CheckTask::getCheckStatus, statusCode);
+            }
         }
 
-        // 4. 查询任务并转换为DTO（含报告摘要）
-        List<CheckTask> taskList = list(queryWrapper);
-        List<CheckTaskResultDTO> resultDTOList = taskList.stream()
-                .map(this::convertToTaskResultDTO)
-                .collect(Collectors.toList());
+        // 4. 分页查询 + 批量装配（避免逐条 selectById 的 N+1）
+        Page<CheckTask> taskPage = page(new Page<>(current, pageSize), queryWrapper);
+        List<CheckTaskResultDTO> dtoList = convertToTaskResultDTOs(taskPage.getRecords());
 
-        return Result.success("查重任务列表查询成功", resultDTOList);
+        Page<CheckTaskResultDTO> resultPage = new Page<>(
+                taskPage.getCurrent(), taskPage.getSize(), taskPage.getTotal());
+        resultPage.setRecords(dtoList);
+        return Result.success("查重任务列表查询成功", resultPage);
     }
 
     @Override
@@ -261,7 +279,7 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
             return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权限查看该查重任务");
         }
         // 3. 转换为DTO（含完整报告信息）
-        CheckTaskResultDTO resultDTO = convertToTaskResultDTO(checkTask, true);
+        CheckTaskResultDTO resultDTO = convertToTaskResultDTO(checkTask);
         return Result.success("查重任务详情查询成功", resultDTO);
     }
 
@@ -283,7 +301,7 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
         }
 
         // 3. 转换为DTO（含完整报告信息）
-        return Result.success("查重任务详情查询成功", convertToTaskResultDTO(checkTask, true));
+        return Result.success("查重任务详情查询成功", convertToTaskResultDTO(checkTask));
     }
 
     @Override
@@ -424,17 +442,56 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
     }
 
     /**
-     * 转换CheckTask为CheckTaskResultDTO（含报告摘要）
+     * 批量转换任务 DTO（阶段 4 性能优化）。
+     *
+     * <p>先把本页所有 paperId / reportId 收集起来，各执行一次 selectBatchIds，
+     * 转成 Map 后在循环内直接取值。N 条任务由 2N+1 次查询降为 3 次
+     * （任务分页 1 次 + 论文批量 1 次 + 报告批量 1 次）。</p>
      */
-    private CheckTaskResultDTO convertToTaskResultDTO(CheckTask checkTask) {
-        return convertToTaskResultDTO(checkTask, false);
+    private List<CheckTaskResultDTO> convertToTaskResultDTOs(List<CheckTask> tasks) {
+        if (tasks == null || tasks.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        List<Long> paperIds = tasks.stream()
+                .map(CheckTask::getPaperId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+        Map<Long, PaperInfo> paperMap = paperIds.isEmpty() ? Map.of()
+                : paperInfoMapper.selectBatchIds(paperIds).stream()
+                        .collect(Collectors.toMap(PaperInfo::getId, p -> p));
+
+        List<Long> reportIds = tasks.stream()
+                .filter(t -> DictConstants.CheckStatus.COMPLETED.equals(t.getCheckStatus()))
+                .map(CheckTask::getReportId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+        Map<Long, CheckReport> reportMap = reportIds.isEmpty() ? Map.of()
+                : checkReportMapper.selectBatchIds(reportIds).stream()
+                        .collect(Collectors.toMap(CheckReport::getId, r -> r));
+
+        return tasks.stream()
+                .map(task -> convertToTaskResultDTO(task,
+                        paperMap.get(task.getPaperId()),
+                        reportMap.get(task.getReportId())))
+                .collect(Collectors.toList());
     }
 
     /**
-     * 转换CheckTask为CheckTaskResultDTO（支持是否返回完整报告）
-     * @param withFullReport 是否返回完整报告信息
+     * 单任务转换（详情用）：复用批量装配，避免维护两套映射。
      */
-    private CheckTaskResultDTO convertToTaskResultDTO(CheckTask checkTask, boolean withFullReport) {
+    private CheckTaskResultDTO convertToTaskResultDTO(CheckTask checkTask) {
+        List<CheckTaskResultDTO> dtos = convertToTaskResultDTOs(Collections.singletonList(checkTask));
+        return dtos.isEmpty() ? null : dtos.get(0);
+    }
+
+    /**
+     * 核心映射：只读取预载好的 paper/report，不再触发任何 DB 查询。
+     */
+    private CheckTaskResultDTO convertToTaskResultDTO(CheckTask checkTask, PaperInfo paperInfo,
+                                                      CheckReport checkReport) {
         CheckTaskResultDTO dto = new CheckTaskResultDTO();
         dto.setTaskId(checkTask.getId());
         dto.setTaskNo(checkTask.getTaskNo());
@@ -453,27 +510,23 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
         dto.setEndTime(checkTask.getEndTime());
         dto.setFailReason(checkTask.getFailReason());
 
-        // 补充论文标题
-        PaperInfo paperInfo = paperInfoMapper.selectById(checkTask.getPaperId());
+        // 补充论文标题（预载 Map 取值）
         if (paperInfo != null) {
             dto.setPaperTitle(paperInfo.getPaperTitle());
         }
 
-        // 补充报告摘要（仅任务成功且需要时）
-        if (checkTask.getCheckStatus().equals(DictConstants.CheckStatus.COMPLETED)
-                && checkTask.getReportId() != null && (withFullReport || true)) {
-            CheckReport checkReport = checkReportMapper.selectById(checkTask.getReportId());
-            if (checkReport != null) {
-                CheckTaskResultDTO.CheckReportSummaryDTO reportSummary = new CheckTaskResultDTO.CheckReportSummaryDTO();
-                reportSummary.setReportId(checkReport.getId());
-                reportSummary.setReportNo(checkReport.getReportNo());
-                // 解析重复段落数量（从JSON字符串中提取）
-                List<Map<String, Object>> repeatDetails = JSON.parseObject(checkReport.getRepeatDetails(), new TypeReference<List<Map<String, Object>>>(){});
-                reportSummary.setRepeatParagraphCount(repeatDetails.size());
-                // 构建报告下载URL（前端拼接域名，如：/api/student/reports/download?reportId=xxx）
-                reportSummary.setReportDownloadUrl("/api/student/reports/download?reportId=" + checkReport.getId());
-                dto.setReportSummary(reportSummary);
-            }
+        // 补充报告摘要（仅任务成功且有报告时）
+        if (DictConstants.CheckStatus.COMPLETED.equals(checkTask.getCheckStatus()) && checkReport != null) {
+            CheckTaskResultDTO.CheckReportSummaryDTO reportSummary = new CheckTaskResultDTO.CheckReportSummaryDTO();
+            reportSummary.setReportId(checkReport.getId());
+            reportSummary.setReportNo(checkReport.getReportNo());
+            // 解析重复段落数量（从JSON字符串中提取）
+            List<Map<String, Object>> repeatDetails = JSON.parseObject(
+                    checkReport.getRepeatDetails(), new TypeReference<List<Map<String, Object>>>() {});
+            reportSummary.setRepeatParagraphCount(repeatDetails == null ? 0 : repeatDetails.size());
+            // 构建报告下载URL（前端拼接域名，如：/api/student/reports/download?reportId=xxx）
+            reportSummary.setReportDownloadUrl("/api/student/reports/download?reportId=" + checkReport.getId());
+            dto.setReportSummary(reportSummary);
         }
 
         return dto;

@@ -4,6 +4,7 @@ import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
 import com.abin.checkrepeatservice.student.dto.CheckTaskResultDTO;
 import com.abin.checkrepeatservice.student.service.CheckTaskService;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import jakarta.annotation.Resource;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -27,10 +28,12 @@ public class TeacherCheckTaskController {
      * @param checkStatus 任务状态（可选）
      */
     @GetMapping("/list")
-    public Result<List<CheckTaskResultDTO>> getGuideCheckTaskList(
+    public Result<Page<CheckTaskResultDTO>> getGuideCheckTaskList(
             @RequestParam(required = false) Long paperId,
-            @RequestParam(required = false) Integer checkStatus) {
-        return checkTaskService.getMyCheckTaskList(paperId, checkStatus);
+            @RequestParam(required = false) Integer checkStatus,
+            @RequestParam(defaultValue = "1") Integer page,
+            @RequestParam(defaultValue = "10") Integer size) {
+        return checkTaskService.getMyCheckTaskList(paperId, checkStatus, page, size);
     }
 
     /**

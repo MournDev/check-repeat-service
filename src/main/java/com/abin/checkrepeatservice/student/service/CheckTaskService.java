@@ -4,6 +4,7 @@ import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.pojo.entity.CheckTask;
 import com.abin.checkrepeatservice.student.dto.CheckTaskResultDTO;
 import com.abin.checkrepeatservice.user.vo.CheckResultVO;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 
 import java.util.List;
 
@@ -29,12 +30,15 @@ public interface CheckTaskService {
     Result<CheckResultVO> createCheckTask(Long paperId, Long studentId);
 
     /**
-     * 获取查重任务列表
+     * 获取查重任务列表（分页）
      * @param paperId 论文ID
-     * @param checkStatus 状态
-     * @return 查重任务详情
+     * @param checkStatus 状态（0-待执行，1-执行中，2-成功，3-失败，4-已取消）
+     * @param page 页码，默认 1
+     * @param size 每页数量，默认 10
+     * @return 分页后的任务列表
      */
-    Result<List<CheckTaskResultDTO>> getMyCheckTaskList(Long paperId, Integer checkStatus);
+    Result<Page<CheckTaskResultDTO>> getMyCheckTaskList(Long paperId, Integer checkStatus,
+                                                        Integer page, Integer size);
 
     /**
      * 获取查重任务详情

@@ -976,21 +976,34 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
             historyDTO.setPaperId(paperId.toString());
             historyDTO.setPaperTitle(paperInfo.getPaperTitle());
 
-            List<PaperReviewHistoryDTO.ReviewHistoryRecord> historyRecords = reviewRecords.stream()
-                    .map(record -> {
-                        PaperReviewHistoryDTO.ReviewHistoryRecord historyRecord = new PaperReviewHistoryDTO.ReviewHistoryRecord();
-                        historyRecord.setReviewId(record.getId().toString());
-
-                        SysUser reviewer = sysUserMapper.selectById(record.getTeacherId());
-                        historyRecord.setReviewerName(reviewer != null ? reviewer.getRealName() : "未知教师");
-                        historyRecord.setReviewStatus(record.getReviewStatus());
-                        historyRecord.setReviewOpinion(record.getReviewOpinion());
-                        historyRecord.setReviewTime(record.getReviewTime());
-                        historyRecord.setVersion("V" + (reviewRecords.indexOf(record) + 1));
-                        historyRecord.setReviewStatusDesc(getReviewStatusDesc(record.getReviewStatus()));
-                        return historyRecord;
-                    })
+            // 阶段 4 性能优化：批量预载审核教师，避免循环内逐条 selectById（N+1）；
+            // 同时用下标生成版本号，去掉 O(n²) 的 reviewRecords.indexOf(record)。
+            List<Long> reviewerIds = reviewRecords.stream()
+                    .map(ReviewRecord::getTeacherId)
+                    .filter(Objects::nonNull)
+                    .distinct()
                     .collect(Collectors.toList());
+            Map<Long, SysUser> reviewerMap = reviewerIds.isEmpty() ? new HashMap<>()
+                    : sysUserMapper.selectBatchIds(reviewerIds).stream()
+                            .collect(Collectors.toMap(SysUser::getId, u -> u));
+
+            List<PaperReviewHistoryDTO.ReviewHistoryRecord> historyRecords =
+                    new ArrayList<>(reviewRecords.size());
+            for (int i = 0; i < reviewRecords.size(); i++) {
+                ReviewRecord record = reviewRecords.get(i);
+                PaperReviewHistoryDTO.ReviewHistoryRecord historyRecord =
+                        new PaperReviewHistoryDTO.ReviewHistoryRecord();
+                historyRecord.setReviewId(record.getId().toString());
+
+                SysUser reviewer = reviewerMap.get(record.getTeacherId());
+                historyRecord.setReviewerName(reviewer != null ? reviewer.getRealName() : "未知教师");
+                historyRecord.setReviewStatus(record.getReviewStatus());
+                historyRecord.setReviewOpinion(record.getReviewOpinion());
+                historyRecord.setReviewTime(record.getReviewTime());
+                historyRecord.setVersion("V" + (i + 1));
+                historyRecord.setReviewStatusDesc(getReviewStatusDesc(record.getReviewStatus()));
+                historyRecords.add(historyRecord);
+            }
             historyDTO.setHistory(historyRecords);
 
             return Result.success("获取审核历史成功", historyDTO);
