@@ -3,6 +3,7 @@ package com.abin.checkrepeatservice.pojo.entity;
 import cn.hutool.core.date.DateTime;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.Version;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -48,6 +49,15 @@ public class CheckTask extends BaseEntity {
      */
     @TableField("quota_charged")
     private Integer quotaCharged;
+
+    /**
+     * 乐观锁版本号（P0 并发控制）：实体级更新（updateById）会带上 version 条件并自增；
+     * 状态流转则走「状态条件 UPDATE + version = version + 1」，两种更新方式共用同一版本轴。
+     * 注意：该列必须在部署新代码前先执行 DDL，否则 MyBatis-Plus 自动 SQL 会引用不存在的列。
+     */
+    @Version
+    @TableField("version")
+    private Integer version;
 
     /**
      * 对应的论文文件 ID（关联 file_info.id）

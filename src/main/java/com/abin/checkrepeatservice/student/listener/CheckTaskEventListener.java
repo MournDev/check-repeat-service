@@ -1,9 +1,15 @@
 package com.abin.checkrepeatservice.student.listener;
 
 import com.abin.checkrepeatservice.admin.mapper.CheckResultMapper;
+import com.abin.checkrepeatservice.admin.service.CollegeQuotaService;
+import com.abin.checkrepeatservice.common.component.PaperStageGate;
+import com.abin.checkrepeatservice.common.component.ReportPathResolver;
 import com.abin.checkrepeatservice.common.constant.DictConstants;
+import com.abin.checkrepeatservice.common.engine.CheckEngineManager;
 import com.abin.checkrepeatservice.common.service.CheckPolicyResolver;
+import com.abin.checkrepeatservice.common.service.PaperLibraryIngestService;
 import com.abin.checkrepeatservice.common.statemachine.CheckTaskStateMachine;
+import com.abin.checkrepeatservice.common.utils.PdfReportGenerator;
 import com.abin.checkrepeatservice.common.utils.ReportHashUtils;
 import com.abin.checkrepeatservice.common.utils.RiskLevelUtils;
 import com.abin.checkrepeatservice.detection.dto.SentenceHit;
@@ -42,7 +48,7 @@ import java.util.*;
 /**
  * 查重任务事件监听器
  * 异步处理查重任务的执行
- * P5：合格判定阈值优先走检测策略集 check_policy（按论文 degree_type 命中），
+ * 合格判定阈值优先走检测策略集 check_policy（按论文 degree_type 命中），
  * 未配置/未命中时回落 similarity_threshold 既有解析链路，判定行为不变。
  */
 @Component
@@ -62,13 +68,17 @@ public class CheckTaskEventListener {
     private CheckTaskStateMachine stateMachine;
 
     @Resource
-    private com.abin.checkrepeatservice.common.engine.CheckEngineManager checkEngineManager;
+    private CheckEngineManager checkEngineManager;
 
     @Resource
     private CheckResultMapper checkResultMapper;
 
     @Resource
-    private com.abin.checkrepeatservice.common.utils.PdfReportGenerator pdfReportGenerator;
+    private PdfReportGenerator pdfReportGenerator;
+
+    // 报告路径统一解析：库里存相对路径，生成/下载/预览/删除都按配置根目录解析
+    @Resource
+    private ReportPathResolver reportPathResolver;
 
     @Resource
     private CheckProgressWebSocketHandler webSocketHandler;
@@ -76,22 +86,22 @@ public class CheckTaskEventListener {
     @Resource
     private NotificationService notificationService;
 
-    // M4.1：任务失败时返还创建时扣减的学院月度额度（幂等）
+    // 任务失败时返还创建时扣减的学院月度额度（幂等）
     @Resource
-    private com.abin.checkrepeatservice.admin.service.CollegeQuotaService collegeQuotaService;
+    private CollegeQuotaService collegeQuotaService;
 
-    // M2.2 阶段门收口：论文状态流转统一校验（默认影子模式，只告警不阻断）
+    // 论文状态流转统一校验（默认影子模式，只告警不阻断）
     @Resource
-    private com.abin.checkrepeatservice.common.component.PaperStageGate paperStageGate;
+    private PaperStageGate paperStageGate;
 
-    // 架构修复（P0）：比对库入库管道，正文提取成功后写入 MinIO 并回填 content_path
+    // 比对库入库管道，正文提取成功后写入 MinIO 并回填 content_path
     @Resource
-    private com.abin.checkrepeatservice.common.service.PaperLibraryIngestService paperLibraryIngestService;
+    private PaperLibraryIngestService paperLibraryIngestService;
 
     @Value("${file.upload.base-path}")
     private String basePath;
 
-    // P5：合格判定阈值优先取检测策略集（按论文 degree_type 命中 check_policy），
+    // 合格判定阈值优先取检测策略集（按论文 degree_type 命中 check_policy），
     // 未命中时由 CheckPolicyResolver 内部回落学院/专业既有解析链路（专业 > 学院 > 全局 > yml 兜底）
     @Resource
     private CheckPolicyResolver checkPolicyResolver;
@@ -100,10 +110,10 @@ public class CheckTaskEventListener {
     private CheckSentenceHitMapper checkSentenceHitMapper;
 
     /**
-     * 报告验真哈希盐（P5）：与 ReportVerifyService 共用同一环境变量，
+     * 报告验真哈希盐：与 ReportVerifyService 共用同一环境变量，
      * 缺省兜底值仅用于本地开发，生产应显式注入
      */
-    // 安全修复（P0）：默认盐仅供本地开发，生产由环境变量 REPORT_HASH_SALT 注入（ProductionSecretValidator 强制校验）
+    // 安全修复生产由环境变量 REPORT_HASH_SALT 注入（ProductionSecretValidator 强制校验）
     @Value("${REPORT_HASH_SALT:dev-only-report-hash-salt-do-not-use-in-prod-0123456789}")
     private String reportHashSalt;
 
@@ -115,7 +125,7 @@ public class CheckTaskEventListener {
     /**
      * 监听查重任务创建事件，异步执行查重。
      *
-     * <p>P0-1/P0-2：改为 AFTER_COMMIT 监听，保证任务行与额度扣减已提交后
+     * <p>改为 AFTER_COMMIT 监听，保证任务行与额度扣减已提交后
      * 异步线程才读取得到；fallbackExecution=true 兼容无事务环境下的事件发布。</p>
      */
     @Async("checkTaskExecutor")
@@ -127,15 +137,12 @@ public class CheckTaskEventListener {
 
         log.info("接收到查重任务创建事件 - 任务 ID: {}, 论文 ID: {}", taskId, paperId);
 
-        // 1. 先更新任务状态为 CHECKING
-        boolean transitionSuccess = stateMachine.transitionStatus(
-            taskId,
-            com.abin.checkrepeatservice.common.enums.CheckTaskStatusEnum.CHECKING,
-            "开始执行查重"
-        );
-
-        if (!transitionSuccess) {
-            log.warn("状态转换失败，任务 ID: {}", taskId);
+        // 1. 先抢占任务：只有 PENDING -> CHECKING 条件更新成功才继续。
+        //    重复事件、已被取消、已被超时扫描改写的任务都会抢占失败并直接退出，
+        //    无需加锁即可保证同一任务不会被并发执行（天然幂等）。
+        boolean claimed = stateMachine.claimForExecution(taskId);
+        if (!claimed) {
+            log.warn("任务抢占失败，放弃本次执行（可能已被其他线程/超时扫描处理），任务 ID: {}", taskId);
             return;
         }
 
@@ -211,8 +218,9 @@ public class CheckTaskEventListener {
             // 8. 生成查重报告（含 P5 报告验真码 content_hash）
             CheckReport checkReport = generateCheckReport(checkTask, effectiveRateValue, repeatDetails, maxPerSource, citationRate);
 
-            // 9. 更新任务状态为成功
+            // 9. 更新任务状态为成功（条件：CHECKING -> COMPLETED）
             boolean completed = stateMachine.transitionStatus(taskId,
+                com.abin.checkrepeatservice.common.enums.CheckTaskStatusEnum.CHECKING,
                 com.abin.checkrepeatservice.common.enums.CheckTaskStatusEnum.COMPLETED,
                 "查重任务执行成功");
             if (!completed) {
@@ -263,9 +271,16 @@ public class CheckTaskEventListener {
 
             // M1.2：引擎全失败/比对故障必须落 failure + fail_reason，且兜底 message 为 null 的情况
             String failReason = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
-            stateMachine.transitionStatus(taskId,
+            boolean failed = stateMachine.transitionStatus(taskId,
+                com.abin.checkrepeatservice.common.enums.CheckTaskStatusEnum.CHECKING,
                 com.abin.checkrepeatservice.common.enums.CheckTaskStatusEnum.FAILURE,
-                failReason.length() > 500 ? failReason.substring(0, 500) : failReason);
+                failReason);
+            if (!failed) {
+                // 任务已是终态（典型：报告落库后、后续步骤异常，而状态已是 COMPLETED）。
+                // 此时不能回滚论文、更不能返还额度，否则「查重成功」会被当成失败处理。
+                log.warn("任务已处于终态，跳过失败回滚与额度返还，任务 ID: {}", taskId);
+                return;
+            }
 
             // 回滚论文状态（M4.1：有指导教师回"已分配"，未分配回"待分配"，与流程状态对齐）
             // paperInfo 为 null 时（论文在加载前就被删除）跳过状态回滚，但不能因此漏掉额度返还
@@ -376,9 +391,9 @@ public class CheckTaskEventListener {
         //    —— 批量查重并发完成时同毫秒会撞 uk_report_no，直接导致报告落库失败
         String reportNo = "REPORT" + checkTask.getId();
 
-        // 2. 生成报告路径
-        String reportPath = "D:/data/report/" + LocalDateTime.now().format(
-            java.time.format.DateTimeFormatter.ofPattern("yyyy/MM/dd")) + "/" + reportNo + ".pdf";
+        // 2. 生成报告相对路径：只存 yyyy/MM/dd/<reportNo>.pdf，
+        //    绝对路径在生成/下载/预览时由 ReportPathResolver 按配置解析
+        String reportPath = reportPathResolver.buildRelativePath(reportNo);
 
         // 3. 构建报告实体
         CheckReport checkReport = new CheckReport();
@@ -398,7 +413,41 @@ public class CheckTaskEventListener {
         checkReport.setCreateBy(checkTask.getCreateBy());
         checkReportMapper.insert(checkReport);
 
+        // 4. 落盘 PDF：路径统一走配置根目录，确保预览/下载能直接读到文件
+        String absolutePath = reportPathResolver.toAbsolute(reportPath);
+        reportPathResolver.ensureParentDirectory(absolutePath);
+        pdfReportGenerator.generatePdfToFile(
+                buildReportPreviewDTO(checkTask, checkReport, checkRate), absolutePath);
+
         return checkReport;
+    }
+
+    /**
+     * 构建报告预览数据（PDF 生成入参）。
+     * 只使用当前异步线程可获取的数据，不依赖 SecurityContext。
+     */
+    private ReportPreviewDTO buildReportPreviewDTO(CheckTask checkTask, CheckReport checkReport,
+                                                   BigDecimal checkRate) {
+        ReportPreviewDTO dto = new ReportPreviewDTO();
+        ReportPreviewDTO.ReportBaseInfoDTO baseInfo = new ReportPreviewDTO.ReportBaseInfoDTO();
+        baseInfo.setTaskId(checkTask.getId());
+        baseInfo.setTaskNo(checkTask.getTaskNo());
+        baseInfo.setPaperVersion(checkTask.getPaperVersion());
+        baseInfo.setReportId(checkReport.getId());
+        baseInfo.setReportNo(checkReport.getReportNo());
+        baseInfo.setSimilarityRate(checkRate);
+        baseInfo.setCheckTime(LocalDateTime.now());
+        baseInfo.setCheckScope(CheckEngineManager.CHECK_SCOPE);
+        baseInfo.setReportDetails(checkReport.getRepeatDetails());
+
+        PaperInfo paperInfo = paperInfoMapper.selectById(checkTask.getPaperId());
+        if (paperInfo != null) {
+            baseInfo.setPaperTitle(paperInfo.getPaperTitle());
+            baseInfo.setAuthor(paperInfo.getAuthor());
+            baseInfo.setStudentId(paperInfo.getStudentId());
+        }
+        dto.setBaseInfo(baseInfo);
+        return dto;
     }
 
     /**

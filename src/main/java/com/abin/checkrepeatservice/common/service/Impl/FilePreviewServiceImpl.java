@@ -1,5 +1,6 @@
 package com.abin.checkrepeatservice.common.service.Impl;
 
+import com.abin.checkrepeatservice.common.component.ReportPathResolver;
 import com.abin.checkrepeatservice.common.service.FilePreviewService;
 import com.abin.checkrepeatservice.common.service.FileService;
 import com.abin.checkrepeatservice.pojo.entity.CheckReport;
@@ -60,6 +61,10 @@ public class FilePreviewServiceImpl implements FilePreviewService {
 
     @Value("${file.upload.base-path}")
     private String uploadBasePath;
+
+    // 报告路径统一解析：库里存相对路径，按配置根目录解析到绝对路径
+    @Autowired
+    private ReportPathResolver reportPathResolver;
 
 
     private final RestTemplate restTemplate;
@@ -314,10 +319,10 @@ public class FilePreviewServiceImpl implements FilePreviewService {
                         .body("查重报告不存在");
             }
 
-            // 3. 获取报告文件信息
+            // 3. 获取报告文件信息（report_path 可能是存量绝对路径或新相对路径）
             String reportPath = checkReport.getReportPath();
-            File reportFile = new File(reportPath);
-            if (!reportFile.exists()) {
+            File reportFile = reportPathResolver.toFile(reportPath);
+            if (reportFile == null || !reportFile.exists()) {
                 log.error("报告文件不存在 - path: {}", reportPath);
                 return ResponseEntity.status(HttpStatus.NOT_FOUND)
                         .body("报告文件不存在");
@@ -367,8 +372,8 @@ public class FilePreviewServiceImpl implements FilePreviewService {
      */
     private ResponseEntity<Resource> directPreviewReport(String reportPath, String fileName) {
         try {
-            File file = new File(reportPath);
-            if (!file.exists()) {
+            File file = reportPathResolver.toFile(reportPath);
+            if (file == null || !file.exists()) {
                 return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
             }
 
@@ -399,8 +404,8 @@ public class FilePreviewServiceImpl implements FilePreviewService {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
         }
         String reportPath = checkReport.getReportPath();
-        File file = new File(reportPath);
-        if (!file.exists()) {
+        File file = reportPathResolver.toFile(reportPath);
+        if (file == null || !file.exists()) {
             log.error("报告文件不存在 - reportId: {}, path: {}", reportId, reportPath);
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
         }

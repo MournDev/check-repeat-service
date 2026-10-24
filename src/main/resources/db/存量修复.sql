@@ -2691,3 +2691,24 @@ SELECT COUNT(*) AS uk_index
    AND table_name = 'sys_user'
    AND index_name = 'uk_su_username_deleted';
 
+
+-- ============================================================================
+-- 7. 阶段 2（2026-10）：check_task 乐观锁版本列
+--
+-- ⚠️ 必须先执行本段，再部署新后端。CheckTask 实体已声明 @Version version 字段，
+--    MyBatis-Plus 自动生成的每一条 SELECT/UPDATE 都会引用 check_task.version；
+--    缺列时学生/教师/管理端的查重任务查询会直接 500。
+-- ============================================================================
+
+-- 7.1 加列（已存在会报 1060 Duplicate column name，属预期，可忽略）
+ALTER TABLE `check_task`
+  ADD COLUMN `version` INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号（状态流转与实体更新共用）';
+
+-- 7.2 执行后自检：期望 version_cols = 1
+SELECT COUNT(*) AS version_cols
+  FROM information_schema.columns
+ WHERE table_schema = DATABASE()
+   AND table_name = 'check_task'
+   AND column_name = 'version';
+
+

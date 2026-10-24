@@ -3,176 +3,132 @@ package com.abin.checkrepeatservice.common.statemachine;
 import com.abin.checkrepeatservice.common.enums.CheckTaskStatusEnum;
 import com.abin.checkrepeatservice.pojo.entity.CheckTask;
 import com.abin.checkrepeatservice.student.mapper.CheckTaskMapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import lombok.extern.slf4j.Slf4j;
-import org.redisson.api.RLock;
-import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
-import java.util.concurrent.TimeUnit;
 
 /**
- * 查重任务状态机管理器
- * 负责安全的状态流转控制和并发处理
+ * 查重任务状态机（阶段 2 加固）。
+ *
+ * <p>核心原则：状态流转一律走「条件抢占」——单条 UPDATE 同时携带
+ * {@code id + 期望状态} 条件，以影响行数判定是否抢占成功。不再先 select 再
+ * updateById 全量回写，因此天然避免并发覆盖与旧实体状态回写。</p>
+ *
+ * <p>版本轴：条件 UPDATE 同时执行 {@code version = version + 1}，与实体级
+ * {@code updateById} 的乐观锁（@Version）共用同一条版本序列；任何在状态变化前
+ * 读取的实体，之后再做 updateById 都会因版本不匹配而失败。</p>
  */
 @Component
 @Slf4j
 public class CheckTaskStateMachine {
-    
+
+    private static final int FAIL_REASON_MAX_LENGTH = 500;
+
     @Autowired
     private CheckTaskMapper checkTaskMapper;
-    
-    @Autowired(required = false)
-    private RedissonClient redissonClient;
-    
-    private static final String LOCK_PREFIX = "check_task_lock:";
-    private static final long LOCK_WAIT_TIME = 3000; // 3秒等待锁
-    private static final long LOCK_LEASE_TIME = 10000; // 10秒锁过期
-    
+
     /**
-     * 安全的状态转换
-     * @param taskId 任务ID
-     * @param targetStatus 目标状态
-     * @param reason 转换原因
-     * @return 是否转换成功
+     * 异步消费入口：抢占 PENDING -> CHECKING。
+     *
+     * <p>只有影响行数为 1 的线程能拿到执行权；重复事件、已被取消或已被超时扫描
+     * 改写的任务都会抢占失败，直接返回，实现天然幂等。</p>
+     *
+     * @return true=抢占成功，可以开始解析/比对；false=放弃本次执行
      */
-    public boolean transitionStatus(Long taskId, CheckTaskStatusEnum targetStatus, String reason) {
-        String lockKey = LOCK_PREFIX + taskId;
-        RLock lock = redissonClient != null ? redissonClient.getLock(lockKey) : null;
-        
-        try {
-            // 尝试获取分布式锁
-            boolean locked = lock == null || lock.tryLock(LOCK_WAIT_TIME, LOCK_LEASE_TIME, TimeUnit.MILLISECONDS);
-            if (lock != null && !locked) {
-                log.warn("获取任务锁超时，taskId={}", taskId);
-                return false;
-            }
-            
-            // 查询当前任务状态
-            CheckTask task = checkTaskMapper.selectById(taskId);
-            if (task == null) {
-                log.warn("任务不存在，taskId={}", taskId);
-                return false;
-            }
-            
-            CheckTaskStatusEnum currentStatus = CheckTaskStatusEnum.fromCode(task.getCheckStatus());
-            
-            // 验证状态转换合法性
-            if (!currentStatus.canTransitionTo(targetStatus)) {
-                log.warn("非法状态转换：{} -> {}，taskId={}", 
-                        currentStatus.getDescription(), targetStatus.getDescription(), taskId);
-                return false;
-            }
-            
-            // 执行状态转换
-            task.setCheckStatus(targetStatus.getCode());
-            
-            // 设置相关时间字段
-            if (targetStatus == CheckTaskStatusEnum.CHECKING) {
-                task.setStartTime(LocalDateTime.now());
-            } else if (targetStatus.isFinalStatus()) {
-                task.setEndTime(LocalDateTime.now());
-                if (task.getStartTime() != null) {
-                    long duration = java.time.Duration.between(task.getStartTime(), task.getEndTime()).getSeconds();
-                    task.setDurationSeconds(duration);
-                }
-            }
-            
-            // 更新失败原因（如果是失败状态）
-            if (targetStatus == CheckTaskStatusEnum.FAILURE && reason != null) {
-                task.setFailReason(reason.length() > 500 ? reason.substring(0, 500) : reason);
-            }
-            
-            // 保存更新
-            checkTaskMapper.updateById(task);
-            
-            log.info("状态转换成功：{} -> {}，taskId={}，reason={}", 
-                    currentStatus.getDescription(), targetStatus.getDescription(), taskId, reason);
-            
-            return true;
-            
-        } catch (Exception e) {
-            log.error("状态转换失败，taskId={}", taskId, e);
-            return false;
-        } finally {
-            // 释放锁
-            if (lock != null && lock.isHeldByCurrentThread()) {
-                lock.unlock();
-            }
-        }
+    public boolean claimForExecution(Long taskId) {
+        return transitionStatus(taskId,
+                CheckTaskStatusEnum.PENDING,
+                CheckTaskStatusEnum.CHECKING,
+                "开始执行查重");
     }
-    
+
     /**
-     * 批量状态转换（用于定时任务清理等场景）
+     * 条件状态流转。
+     *
+     * @param taskId         任务 ID
+     * @param expectedStatus 期望的当前状态（作为 UPDATE 条件）
+     * @param targetStatus   目标状态
+     * @param reason         失败原因（仅在目标为 FAILURE 时落库）
+     * @return true=抢占并更新成功；false=状态已被其他线程改变或流转非法
      */
-    public int batchTransitionStatus(CheckTaskStatusEnum targetStatus, String reason, String conditionSql) {
-        try {
-            // 直接使用LambdaUpdateWrapper
-            com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<CheckTask> updateWrapper = 
-                new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<CheckTask>()
-                    .set(CheckTask::getCheckStatus, targetStatus.getCode())
-                    .set(CheckTask::getEndTime, LocalDateTime.now())
-                    .set(CheckTask::getFailReason, reason != null ? reason : "")
-                    .apply(conditionSql);
-            
-            int affectedRows = checkTaskMapper.update(null, updateWrapper);
-            
-            log.info("批量状态转换完成：目标状态={}，影响行数={}，条件={}", 
-                    targetStatus.getDescription(), affectedRows, conditionSql);
-            
-            return affectedRows;
-            
-        } catch (Exception e) {
-            log.error("批量状态转换失败", e);
+    public boolean transitionStatus(Long taskId,
+                                    CheckTaskStatusEnum expectedStatus,
+                                    CheckTaskStatusEnum targetStatus,
+                                    String reason) {
+        if (taskId == null || expectedStatus == null || targetStatus == null
+                || !expectedStatus.canTransitionTo(targetStatus)) {
+            log.warn("非法状态流转请求：taskId={}, {} -> {}",
+                    taskId,
+                    expectedStatus == null ? "null" : expectedStatus.getCode(),
+                    targetStatus == null ? "null" : targetStatus.getCode());
+            return false;
+        }
+
+        LambdaUpdateWrapper<CheckTask> wrapper = new LambdaUpdateWrapper<CheckTask>()
+                .eq(CheckTask::getId, taskId)
+                .eq(CheckTask::getCheckStatus, expectedStatus.getCode())
+                .set(CheckTask::getCheckStatus, targetStatus.getCode())
+                .setSql("version = version + 1");
+
+        if (targetStatus == CheckTaskStatusEnum.CHECKING) {
+            wrapper.set(CheckTask::getStartTime, LocalDateTime.now());
+        }
+        if (targetStatus.isFinalStatus()) {
+            wrapper.set(CheckTask::getEndTime, LocalDateTime.now());
+        }
+        if (targetStatus == CheckTaskStatusEnum.FAILURE
+                || targetStatus == CheckTaskStatusEnum.CANCELLED) {
+            wrapper.set(CheckTask::getFailReason, truncateReason(reason));
+        }
+
+        int rows = checkTaskMapper.update(null, wrapper);
+        if (rows == 0) {
+            log.info("状态抢占失败（已被并发改写）：taskId={}, 期望={}, 目标={}",
+                    taskId, expectedStatus.getCode(), targetStatus.getCode());
+            return false;
+        }
+
+        log.info("状态流转成功：taskId={}, {} -> {}, reason={}",
+                taskId, expectedStatus.getCode(), targetStatus.getCode(), reason);
+        return true;
+    }
+
+    /**
+     * 超时任务批量回收：把 start_time 早于 deadline 且仍在 CHECKING 的任务置为 FAILURE。
+     *
+     * <p>替代原先接收裸 SQL 片段的 batchTransitionStatus，条件全部参数化，
+     * 且只更新状态相关列 + version。</p>
+     *
+     * @param deadline 开始时间阈值（早于该时间视为超时）
+     * @param reason   失败原因
+     * @return 实际回收的任务数
+     */
+    public int failTimeoutTasks(LocalDateTime deadline, String reason) {
+        if (deadline == null) {
             return 0;
         }
+
+        int rows = checkTaskMapper.update(null, new LambdaUpdateWrapper<CheckTask>()
+                .eq(CheckTask::getCheckStatus, CheckTaskStatusEnum.CHECKING.getCode())
+                .lt(CheckTask::getStartTime, deadline)
+                .set(CheckTask::getCheckStatus, CheckTaskStatusEnum.FAILURE.getCode())
+                .set(CheckTask::getEndTime, LocalDateTime.now())
+                .set(CheckTask::getFailReason, truncateReason(reason))
+                .setSql("version = version + 1"));
+
+        log.info("超时任务回收完成：deadline={}, 影响行数={}", deadline, rows);
+        return rows;
     }
-    
-    /**
-     * 验证状态转换是否合法（不执行转换）
-     * @param currentStatus 当前状态
-     * @param targetStatus 目标状态
-     * @return 是否合法
-     */
-    public boolean validateTransition(CheckTaskStatusEnum currentStatus, CheckTaskStatusEnum targetStatus) {
-        return currentStatus.canTransitionTo(targetStatus);
-    }
-    
-    /**
-     * 获取任务当前状态
-     * @param taskId 任务ID
-     * @return 当前状态枚举
-     */
-    public CheckTaskStatusEnum getCurrentStatus(Long taskId) {
-        CheckTask task = checkTaskMapper.selectById(taskId);
-        if (task == null) {
-            return null;
+
+    private String truncateReason(String reason) {
+        if (reason == null) {
+            return "";
         }
-        return CheckTaskStatusEnum.fromCode(task.getCheckStatus());
-    }
-    
-    /**
-     * 检查任务是否处于某个状态
-     * @param taskId 任务ID
-     * @param status 目标状态
-     * @return 是否匹配
-     */
-    public boolean isInStatus(Long taskId, CheckTaskStatusEnum status) {
-        CheckTaskStatusEnum currentStatus = getCurrentStatus(taskId);
-        return currentStatus == status;
-    }
-    
-    /**
-     * 获取任务执行耗时（秒）
-     * @param taskId 任务ID
-     * @return 耗时秒数，未完成返回-1
-     */
-    public long getTaskDuration(Long taskId) {
-        CheckTask task = checkTaskMapper.selectById(taskId);
-        if (task == null || task.getStartTime() == null || task.getEndTime() == null) {
-            return -1;
-        }
-        return java.time.Duration.between(task.getStartTime(), task.getEndTime()).getSeconds();
+        return reason.length() > FAIL_REASON_MAX_LENGTH
+                ? reason.substring(0, FAIL_REASON_MAX_LENGTH)
+                : reason;
     }
 }

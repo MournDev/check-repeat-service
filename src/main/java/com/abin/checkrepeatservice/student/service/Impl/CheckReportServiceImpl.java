@@ -2,6 +2,7 @@ package com.abin.checkrepeatservice.student.service.Impl;
 
 import com.abin.checkrepeatservice.common.Exception.BusinessException;
 import com.abin.checkrepeatservice.common.Result;
+import com.abin.checkrepeatservice.common.component.ReportPathResolver;
 import com.abin.checkrepeatservice.common.constant.DictConstants;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.pojo.entity.CheckReport;
@@ -21,7 +22,6 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -31,8 +31,6 @@ import java.io.File;
 import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Objects;
 
@@ -55,9 +53,9 @@ public class CheckReportServiceImpl extends ServiceImpl<CheckReportMapper, Check
     @Resource
     private PdfReportGenerator pdfReportGenerator;
 
-    // 报告存储根路径（从配置文件获取）
-    @Value("${report.storage.base-path}")
-    private String reportBasePath;
+    // 报告路径统一解析：库里存相对路径，生成/下载/预览/删除都按配置根目录解析
+    @Resource
+    private ReportPathResolver reportPathResolver;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -72,23 +70,18 @@ public class CheckReportServiceImpl extends ServiceImpl<CheckReportMapper, Check
             throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "关联的论文不存在");
         }
 
-        // 1. 先生成PDF文件
+        // 1. 先生成PDF文件：库里只存相对路径，绝对路径按配置根目录解析
         String taskNo = checkTask.getTaskNo();
         String reportNo = "REPORT" + taskNo.substring(5);
-        String dateDir = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy/MM/dd"));
-        String reportFileName = reportNo + ".pdf";
-        String reportPath = reportBasePath + dateDir + "/" + reportFileName;
+        String relativePath = reportPathResolver.buildRelativePath(reportNo);
+        String absolutePath = reportPathResolver.toAbsolute(relativePath);
 
         // 调试：打印路径信息
-        log.info("开始生成PDF报告，路径: {}", reportPath);
+        log.info("开始生成PDF报告，路径: {}", absolutePath);
 
         try {
             // 先创建目录
-            File reportDir = new File(reportBasePath + dateDir);
-            if (!reportDir.exists()) {
-                boolean created = reportDir.mkdirs();
-                log.info("创建报告目录: {}, 成功: {}", reportDir.getAbsolutePath(), created);
-            }
+            reportPathResolver.ensureParentDirectory(absolutePath);
 
             // 临时创建报告对象用于生成预览
             CheckReport tempReport = new CheckReport();
@@ -98,10 +91,10 @@ public class CheckReportServiceImpl extends ServiceImpl<CheckReportMapper, Check
             ReportPreviewDTO previewDTO = reportContentProcessor.buildReportPreviewDTO(tempReport, checkTask);
 
             // 生成PDF文件
-            pdfReportGenerator.generatePdfToFile(previewDTO, reportPath);
+            pdfReportGenerator.generatePdfToFile(previewDTO, absolutePath);
 
             // 验证文件是否生成成功
-            File generatedFile = new File(reportPath);
+            File generatedFile = new File(absolutePath);
             if (!generatedFile.exists() || generatedFile.length() == 0) {
                 throw new BusinessException(ResultCode.SYSTEM_ERROR, "PDF文件生成失败，文件不存在或为空");
             }
@@ -113,17 +106,17 @@ public class CheckReportServiceImpl extends ServiceImpl<CheckReportMapper, Check
             throw new BusinessException(ResultCode.SYSTEM_ERROR, "报告文件生成失败: " + "系统异常，请稍后重试");
         }
 
-        // 2. 文件生成成功后再保存数据库记录
+        // 2. 文件生成成功后再保存数据库记录（只存相对路径）
         CheckReport checkReport = new CheckReport();
         checkReport.setTaskId(taskId);
         checkReport.setReportNo(reportNo);
         checkReport.setRepeatDetails(repeatDetails);
-        checkReport.setReportPath(reportPath);
+        checkReport.setReportPath(relativePath);
         checkReport.setReportType("pdf");
         UserBusinessInfoUtils.setAuditField(checkReport, true);
         save(checkReport);
 
-        log.info("查重报告生成完成 - 报告ID: {}, 文件路径: {}", checkReport.getId(), reportPath);
+        log.info("查重报告生成完成 - 报告ID: {}, 文件路径: {}", checkReport.getId(), relativePath);
 
         return checkReport;
     }
@@ -199,12 +192,12 @@ public class CheckReportServiceImpl extends ServiceImpl<CheckReportMapper, Check
             // 4. 生成并输出报告文件
             if ("pdf".equals(format)) {
                 // 若已存在PDF文件，直接读取；否则重新生成
-                if (java.nio.file.Files.exists(java.nio.file.Paths.get(checkReport.getReportPath()))) {
+                String absoluteReportPath = reportPathResolver.toAbsolute(checkReport.getReportPath());
+                java.nio.file.Path storedFile = absoluteReportPath == null
+                        ? null : java.nio.file.Paths.get(absoluteReportPath);
+                if (storedFile != null && java.nio.file.Files.exists(storedFile)) {
                     // 直接读取文件输出（简化逻辑，实际需用流读取）
-                    java.nio.file.Files.copy(
-                            java.nio.file.Paths.get(checkReport.getReportPath()),
-                            response.getOutputStream()
-                    );
+                    java.nio.file.Files.copy(storedFile, response.getOutputStream());
                 } else {
                     // 重新生成PDF并输出
                     CheckTask task = checkTaskMapper.selectById(checkReport.getTaskId());
@@ -287,10 +280,13 @@ public class CheckReportServiceImpl extends ServiceImpl<CheckReportMapper, Check
 
         // 5. 物理删除报告文件（可选）
         try {
-            java.nio.file.Path filePath = java.nio.file.Paths.get(checkReport.getReportPath());
-            if (java.nio.file.Files.exists(filePath)) {
-                java.nio.file.Files.delete(filePath);
-                log.info("报告文件删除成功：{}", checkReport.getReportPath());
+            String absoluteReportPath = reportPathResolver.toAbsolute(checkReport.getReportPath());
+            if (absoluteReportPath != null) {
+                java.nio.file.Path filePath = java.nio.file.Paths.get(absoluteReportPath);
+                if (java.nio.file.Files.exists(filePath)) {
+                    java.nio.file.Files.delete(filePath);
+                    log.info("报告文件删除成功：{}", absoluteReportPath);
+                }
             }
         } catch (IOException e) {
             log.error("报告文件删除失败：", e);

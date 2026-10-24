@@ -112,12 +112,6 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 // 配置URL权限规则
                 .authorizeHttpRequests(auth -> auth
-                        // 放行容器的 ERROR 转发（/error）。
-                        // 这一条不能省：AccessDeniedHandlerImpl 是用 response.sendError(403)
-                        // 回复的，sendError 会让容器再向 /error 转发一次。而 JwtAuthenticationFilter
-                        // 继承 OncePerRequestFilter 且未重写 shouldNotFilterErrorDispatch()（默认 true），
-                        // ERROR 转发时它不执行，SecurityContext 又已在首次 dispatch 结束时清空 ——
-                        // 于是这次转发是匿名的，若 /error 自己也要鉴权，就会被 entry point 改成 401。
                         // 结果：任何「已登录但权限不足」都返回 401 而非 403，前端再把 401 当成登录过期
                         // 直接清 token 踢下线。放行 /error 后，403 才能原样到达调用方。
                         // 注：/ws/info 与 /actuator/health 那两次 401 也是同一类问题的不同表现。
@@ -125,17 +119,12 @@ public class SecurityConfig {
                         .requestMatchers("/error").permitAll()
                         // 放行公开接口
                         // /ws/** 是 SockJS 握手入口，握手走 HTTP 请求，必须在过滤器链上放行，
-                        // 否则 /ws/info 会直接 401。握手放行不等于免鉴权：
                         // STOMP CONNECT 帧仍由 WebSocketChannelInterceptor 校验 JWT，无有效 token 照样拒绝。
-                        // 安全修复（P0）：/api/avatar/** 保留匿名（<img> 标签无法带 JWT，头像为公开资料）；
                         // /api/file/**（论文文件上传/下载/预览）与 /api/papers/**（学生论文/查重数据）
-                        // 由匿名改为登录可访问，资源归属在 Controller/Service 层二次校验，
-                        // 修复原匿名用户可枚举 fileId 下载任意论文/报告的 IDOR 漏洞；
                         // /api/minio/** 收归 ADMIN（配合 MinioController 类级 @PreAuthorize 双保险）。
                         .requestMatchers("/api/auth/**", "/api/avatar/**", "/ws/**").permitAll()
                         .requestMatchers("/api/minio/**").hasAuthority("ADMIN")
                         // kkFileView 服务端回调专用：匿名仅可访问签名取文件端点，
-                        // 令牌绑定单个 fileId 且 10 分钟有效（PreviewSignedUrlService），
                         // 必须在 /api/file/** 的 authenticated 规则之前
                         .requestMatchers("/api/file/preview-fetch/**").permitAll()
                         // 报告预览的同类回调端点：报告文件在宿主文件系统上（非 MinIO），
@@ -143,11 +132,8 @@ public class SecurityConfig {
                         // 与文件令牌命名空间隔离），仅 kkFileView 服务端回调可访问
                         .requestMatchers("/api/file/preview-fetch-report/**").permitAll()
                         .requestMatchers("/api/file/**", "/api/papers/**").authenticated()
-                        // 阶段1止血（P0-3/P0-4）：此前 /api/check、/api/enhanced、/api/advisor、
-                        // /api/assignment 不在任何角色前缀下，仅 anyRequest().authenticated()，
-                        // 任意登录用户都能越权建查重任务/读他人结果/代教师确认论文。
                         // 这里显式按角色收口，Service 层再做数据归属二次校验。
-                        .requestMatchers("/api/check/**", "/api/enhanced/**").hasAuthority("STUDENT")
+                        .requestMatchers("/api/check/**").hasAuthority("STUDENT")
                         .requestMatchers("/api/advisor/**").hasAuthority("ADMIN")
                         .requestMatchers("/api/assignment/**").hasAuthority("TEACHER")
                         // P5 报告验真：对齐行业报告验真惯例，凭报告编号匿名验证报告真伪，
@@ -159,23 +145,16 @@ public class SecurityConfig {
                         // 容器 healthcheck 与 deploy.sh 都用它做探活，必须匿名可访问
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         // Prometheus 抓取端点：限管理员。
-                        // 不放 permitAll——它会暴露 JVM/堆/GC、全部接口路径和业务计数，
                         // 对匿名调用方是实打实的信息泄露，也与本项目其余部分的 ADMIN-only 姿态不一致。
-                        // 代价：将来真接 Grafana 时抓取端需要带 JWT；若要走内网抓取，
                         // 更标准的做法是另开 management.server.port 绑内网 + 网络白名单。
                         .requestMatchers("/actuator/prometheus").hasAuthority("ADMIN")
-                        // 安全修复（P0）：metrics/info/env 等运维端点原先落到 anyRequest().authenticated()，
                         // 任意学生登录即可查看 JVM/HTTP 指标；health 已在前面放行，其余 actuator 端点全部收归 ADMIN
                         .requestMatchers("/actuator/**").hasAuthority("ADMIN")
                         // 学生接口：仅学生角色可访问
                         .requestMatchers("/api/student/**").hasAuthority("STUDENT")
-                        // 教师端学生管理中的「账号侧」动作：新增学生、批量导入、批量分配导师
-                        // 属于管理面权限，教师角色不应有入口。必须在 /api/teacher/** 之前声明，
-                        // 否则会被后一条 hasAuthority("TEACHER") 规则先匹配。
                         // 根路径按 HTTP 方法区分：POST 是「新增学生」，GET 仍是教师查学生列表，
                         // 不能把整个 /api/teacher/students 都收归 ADMIN。
                         .requestMatchers(HttpMethod.POST, "/api/teacher/students").hasAuthority("ADMIN")
-                        // 阶段1止血（P0-5）：学生账号的删除同样是账号生命周期管理动作，
                         // 教师端只保留「查」，删除/批量删除收归 ADMIN（方法级再做双保险）。
                         .requestMatchers(HttpMethod.DELETE, "/api/teacher/students/**").hasAuthority("ADMIN")
                         .requestMatchers("/api/teacher/students/add",
@@ -187,8 +166,6 @@ public class SecurityConfig {
                         .requestMatchers("/api/admin/**").hasAuthority("ADMIN")
                         // 管理端通知管理接口（不在 /api/admin/** 下，需单独列出）
                         // 这条规则不能省、也不能只靠 NoticeController 上的 @PreAuthorize：
-                        // GlobalExceptionHandler 没有 AccessDeniedException 处理器，方法级安全
-                        // 拒绝会被 Exception 兜底成 HTTP 500；过滤器链上的规则才产生正确的 403
                         .requestMatchers("/api/notices/**").hasAuthority("ADMIN")
                         // 知识库管理端（同样不在 /api/admin/** 下）。只圈 admin 子路径：
                         // /api/knowledge/** 的其余部分（categories/articles/search）是学生端要用的，
@@ -200,11 +177,10 @@ public class SecurityConfig {
                         .anyRequest().authenticated())
                 // 注册认证提供者
                 .authenticationProvider(authenticationProvider())
-                // S9：XSS 输入过滤放在 Security 链前段，保证登录/注册等匿名入口也被覆盖。
+                // XSS 输入过滤放在 Security 链前段，保证登录/注册等匿名入口也被覆盖。
                 // 注意：addFilterBefore/After 的锚点必须是 Spring Security 内置过滤器——
                 // 自定义过滤器（如 JwtAuthenticationFilter）未在 FilterOrderRegistration 注册
                 // order，作为锚点会在启动时抛 IllegalArgumentException:
-                // "does not have a registered order"（此 bug 曾导致 prod 启动失败）
                 .addFilterBefore(xssFilter, SecurityContextHolderFilter.class)
                 // 在UsernamePasswordAuthenticationFilter之前添加JWT认证过滤器
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);

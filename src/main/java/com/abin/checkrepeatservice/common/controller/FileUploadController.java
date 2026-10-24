@@ -2,6 +2,7 @@ package com.abin.checkrepeatservice.common.controller;
 
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.VO.FileUploadResponse;
+import com.abin.checkrepeatservice.common.component.ReportPathResolver;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.common.service.FilePreviewService;
 import com.abin.checkrepeatservice.common.service.FileService;
@@ -69,6 +70,10 @@ public class FileUploadController {
     // 安全修复（S2 配套）：kkFileView 服务端回调无法携带 JWT，改用绑定单文件、10 分钟有效的签名 URL
     @Autowired
     private com.abin.checkrepeatservice.common.jwt.PreviewSignedUrlService previewSignedUrlService;
+
+    // 报告路径统一解析：库里存相对路径，按配置根目录解析到绝对路径
+    @Autowired
+    private ReportPathResolver reportPathResolver;
 
     /**
      * 通用文件上传接口
@@ -443,11 +448,10 @@ public class FileUploadController {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
             }
 
-            // 3. 检查文件
-            String reportPath = checkReport.getReportPath();
-            File file = new File(reportPath);
+            // 3. 检查文件（report_path 可能是存量绝对路径或新相对路径，统一解析）
+            File file = reportPathResolver.toFile(checkReport.getReportPath());
 
-            if (!file.exists()) {
+            if (file == null || !file.exists()) {
                 return ResponseEntity.notFound().build();
             }
 

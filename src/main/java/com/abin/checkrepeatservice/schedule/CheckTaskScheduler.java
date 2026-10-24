@@ -61,20 +61,19 @@ public class CheckTaskScheduler {
         try {
             log.info("开始检查超时查重任务...");
 
-            String condition = "check_status = '" + CheckTaskStatusEnum.CHECKING.getCode() +
-                             "' AND start_time < DATE_SUB(NOW(), INTERVAL 1 HOUR)";
+            LocalDateTime timeoutLine = LocalDateTime.now().minusHours(1);
 
             // M4.1：先记录本轮将被判失败且已扣额度的任务，状态置失败后逐一幂等返还
             java.util.List<CheckTask> timeoutTasks = checkTaskMapper.selectList(
                     new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<CheckTask>()
                             .eq(CheckTask::getCheckStatus, CheckTaskStatusEnum.CHECKING.getCode())
-                            .lt(CheckTask::getStartTime, LocalDateTime.now().minusHours(1))
+                            .lt(CheckTask::getStartTime, timeoutLine)
                             .eq(CheckTask::getQuotaCharged, 1));
 
-            int affected = stateMachine.batchTransitionStatus(
-                CheckTaskStatusEnum.FAILURE,
-                "任务执行超时（超过1小时）",
-                condition
+            // 类型化批量回收：CHECKING -> FAILURE，条件全部参数化（不再拼接裸 SQL）
+            int affected = stateMachine.failTimeoutTasks(
+                timeoutLine,
+                "任务执行超时（超过1小时）"
             );
 
             if (affected > 0) {
