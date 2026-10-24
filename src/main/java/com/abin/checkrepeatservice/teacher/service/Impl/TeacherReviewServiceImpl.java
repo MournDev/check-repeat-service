@@ -17,6 +17,7 @@ import com.abin.checkrepeatservice.teacher.dto.PaperReviewHistoryDTO;
 import com.abin.checkrepeatservice.teacher.dto.ReviewOperateReq;
 import com.abin.checkrepeatservice.teacher.dto.ReviewQueryReq;
 import com.abin.checkrepeatservice.teacher.dto.ReviewResultDTO;
+import com.abin.checkrepeatservice.teacher.mapper.PaperCheckSignoffMapper;
 import com.abin.checkrepeatservice.teacher.mapper.ReviewRecordMapper;
 import com.abin.checkrepeatservice.teacher.service.TeacherReviewService;
 import com.abin.checkrepeatservice.teacher.vo.PendingStatsVO;
@@ -105,9 +106,20 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
     @Resource
     private ReviewWorkflowService reviewWorkflowService;
 
+    @Resource
+    private PaperCheckSignoffMapper paperCheckSignoffMapper;
+
     // 批量审核最大数量（从配置文件获取）
     @Value("${review.batch.max-count}")
     private Integer batchMaxCount;
+
+    /**
+     * 查重签核门槛（论文全生命周期 P5）：与评阅分配同一口径。
+     * true 时教师初审前必须存在「最新 completed 查重任务 + 导师合格签核」，
+     * 否则管理端有门、教师端无门的缺口会把风险从 UI 挪到 API。
+     */
+    @Value("${check.signoff.required:true}")
+    private boolean checkSignoffRequired;
 
     @Override
     public Result<Page<ReviewResultDTO>> getPendingReviewList(ReviewQueryReq queryReq) {
@@ -230,6 +242,23 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
                     continue;
                 }
 
+                // 3.2.1 查重签核门槛（P5）：教师初审与管理端评阅分配必须同一口径。
+                // 最新 completed 任务必须已有导师签核且 qualified=1，否则教师路径无门可绕，
+                // 风险只是从 UI 挪到 API。
+                PaperCheckSignoff signoff = null;
+                if (checkSignoffRequired) {
+                    signoff = paperCheckSignoffMapper.selectOne(
+                            new LambdaQueryWrapper<PaperCheckSignoff>()
+                                    .eq(PaperCheckSignoff::getPaperId, paperId)
+                                    .eq(PaperCheckSignoff::getTaskId, checkTask.getId())
+                                    .last("LIMIT 1"));
+                    if (signoff == null || !Integer.valueOf(1).equals(signoff.getQualified())) {
+                        failReasons.add(String.format(
+                                "论文ID：%s，原因：查重报告未经导师签核或结论不合格，不可审核", paperId));
+                        continue;
+                    }
+                }
+
                 // 3.3 创建审核记录
                 ReviewRecord reviewRecord = new ReviewRecord();
                 reviewRecord.setPaperId(paperId);
@@ -243,6 +272,11 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
                     reviewRecord.setReviewAttach(attachInfo.getAttachPath());
                 }
                 reviewRecord.setReviewTime(LocalDateTime.now());
+                // 审核留痕：责任主体、来源与签核关联由服务端写入
+                reviewRecord.setAuditSource("TEACHER");
+                reviewRecord.setAuditorId(currentTeacherId);
+                reviewRecord.setAuditorRole(UserBusinessInfoUtils.getCurrentUserRoleCode());
+                reviewRecord.setSignoffId(signoff == null ? null : signoff.getId());
                 UserBusinessInfoUtils.setAuditField(reviewRecord, true); // 填充审计字段
                 save(reviewRecord);
 

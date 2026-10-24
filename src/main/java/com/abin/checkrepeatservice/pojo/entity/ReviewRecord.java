@@ -56,6 +56,33 @@ public class ReviewRecord extends BaseEntity {
      * 审核时间
      */
     private LocalDateTime reviewTime;
+
+    /**
+     * 审核来源：TEACHER-导师审核 / ADMIN_PROXY-管理员代审。
+     * 由服务端按当前登录角色裁决写入，不接受客户端传值；历史数据默认 TEACHER。
+     */
+    private String auditSource;
+
+    /**
+     * 代审原因（仅 audit_source=ADMIN_PROXY 有值，服务端必填校验）
+     */
+    private String proxyReason;
+
+    /**
+     * 实际出结论人ID（关联 sys_user.id），用于区分责任主体
+     */
+    private Long auditorId;
+
+    /**
+     * 实际出结论人角色编码（TEACHER/ADMIN/SUPER_ADMIN）
+     */
+    private String auditorRole;
+
+    /**
+     * 关联的查重报告签核记录ID（paper_check_signoff.id）；管理员代审为空，
+     * 可据此反查该次结论是否绕过了导师签核。
+     */
+    private Long signoffId;
     
     /**
      * 论文标题（冗余字段，便于查询显示）

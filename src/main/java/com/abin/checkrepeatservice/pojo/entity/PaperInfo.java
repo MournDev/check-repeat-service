@@ -16,6 +16,7 @@ import java.io.Serial;
 import java.io.Serializable;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Map;
 
 /**
  * 论文信息实体：对应paper_info表
@@ -329,4 +330,71 @@ public class PaperInfo extends BaseEntity implements Serializable {
     @JsonFormat(shape = JsonFormat.Shape.STRING)
     @TableField("parent_paper_id")
     private Long parentPaperId;
+
+    // ==================== 审核留痕 / 重提闭环回传字段（非表列） ====================
+
+    /**
+     * 最近一次审核来源：TEACHER-导师审核 / ADMIN_PROXY-管理员代审。
+     * 取自 review_record 最新记录；历史无来源记录按 TEACHER 兜底。
+     */
+    @TableField(exist = false)
+    private String auditSource;
+
+    /**
+     * 最近一次代审原因（仅管理员代审有值）
+     */
+    @TableField(exist = false)
+    private String proxyReason;
+
+    /**
+     * 最近一次出结论人姓名（审计责任主体）
+     */
+    @TableField(exist = false)
+    private String auditorName;
+
+    /**
+     * 最近一次出结论时间
+     */
+    @TableField(exist = false)
+    private LocalDateTime auditTime;
+
+    /**
+     * 已重提次数（0 表示未重提，口径为 paper_info.version - 1）
+     */
+    @TableField(exist = false)
+    private Integer revisionRound;
+
+    /**
+     * 重提次数上限（对齐 check_rule.max_re_submit_count；null=不限）
+     */
+    @TableField(exist = false)
+    private Integer maxRevisionRound;
+
+    /**
+     * 服务端计算的重提资格：状态为 rejected 且未超上限、未过截止、且不存在更新的版本
+     */
+    @TableField(exist = false)
+    private Boolean canResubmit;
+
+    /**
+     * 重提截止时间（system_config.resubmit_deadline；未配置为 null）
+     */
+    @TableField(exist = false)
+    private LocalDateTime resubmitDeadline;
+
+    /**
+     * 下一步动作要素（actionCode/bizType/bizId），供前端做路由枚举映射，
+     * 不再由前端靠标题正则猜测去向。
+     */
+    @TableField(exist = false)
+    private Map<String, Object> nextAction;
+
+    /**
+     * 审核意见的兼容输出名：历史上该字段以 feedback 键返回给前端，
+     * 新契约同时输出 auditComment（不含来源前缀），两边都能读。
+     */
+    @JsonProperty("auditComment")
+    public String getAuditCommentForClient() {
+        return auditComment;
+    }
 }

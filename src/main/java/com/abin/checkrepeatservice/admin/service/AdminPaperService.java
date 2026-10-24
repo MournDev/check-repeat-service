@@ -27,14 +27,17 @@ public interface AdminPaperService {
     Result<PaperInfo> getPaperDetail(Long paperId);
 
     /**
-     * 审核论文
+     * 审核论文（管理员代审）：返回 {reviewRecordId, paperStatus, auditSource}
+     *
+     * @param proxyReason 代审原因，服务端必填校验（≤200），落库到 review_record.proxy_reason
      */
-    Result<String> auditPaper(Long paperId, String auditResult, String auditComment);
+    Result<Map<String, Object>> auditPaper(Long paperId, String auditResult, String auditComment, String proxyReason);
 
     /**
-     * 批量审核论文（逐篇跳过并发冲突，返回 {total, success, skipped, skipReasons[]} 明细）
+     * 批量审核论文（逐篇跳过并发冲突，返回 {total, success, skipped, skipReasons[], results[]} 明细）
      */
-    Result<Map<String, Object>> batchAuditPapers(List<Long> paperIds, String auditResult, String auditComment);
+    Result<Map<String, Object>> batchAuditPapers(List<Long> paperIds, String auditResult,
+                                                String auditComment, String proxyReason);
 
     /**
      * 删除论文

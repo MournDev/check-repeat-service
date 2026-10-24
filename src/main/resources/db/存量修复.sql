@@ -1956,6 +1956,143 @@ CREATE TABLE IF NOT EXISTS `attachment_download_record` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='附件下载记录表';
 
 -- ============================================================================
+-- 段 1.27：审核留痕与重提状态收口（Wave 1 三项修复配套）
+--
+-- 背景：
+--   1) 管理员代审此前只改 paper_info，不落 review_record，审计侧无法区分
+--      「导师审核」与「管理员代审」，也无法反查代审是否绕过查重签核；
+--   2) 学生端历史数据里存在字典外的 paper_status='revision_needed'，
+--      状态机、统计、筛选都不认这个值，需要一次性归并为 rejected。
+-- 变更：
+--   review_record 新增 audit_source / proxy_reason / auditor_id / auditor_role / signoff_id；
+--   task_id 改为可空（管理员代审可发生在无成功查重任务时）；
+--   历史 review_record 的 audit_source 由列默认值统一回填 TEACHER；
+--   paper_status='revision_needed' 一次性迁移为 rejected。
+-- 部署顺序：必须「先跑本段，再部署后端 jar」。
+-- 幂等性：逐列探测 information_schema，重复执行输出"已存在，跳过"；
+--   UPDATE 重提状态收口天然幂等。
+-- 执行后自检：见段 5.21。
+-- ============================================================================
+
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.columns
+   WHERE table_schema = DATABASE() AND table_name = 'review_record'
+     AND column_name = 'audit_source'
+);
+SET @ddl = IF(@col_exists = 0,
+  'ALTER TABLE `review_record` '
+  'ADD COLUMN `audit_source` varchar(20) NOT NULL DEFAULT ''TEACHER'' COMMENT ''审核来源：TEACHER-导师审核，ADMIN_PROXY-管理员代审（历史数据回填 TEACHER）'' AFTER `review_time`',
+  'SELECT ''review_record.audit_source 已存在，跳过'' AS msg');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.columns
+   WHERE table_schema = DATABASE() AND table_name = 'review_record'
+     AND column_name = 'proxy_reason'
+);
+SET @ddl = IF(@col_exists = 0,
+  'ALTER TABLE `review_record` '
+  'ADD COLUMN `proxy_reason` varchar(200) DEFAULT NULL COMMENT ''代审原因（仅 audit_source=ADMIN_PROXY 有值）'' AFTER `audit_source`',
+  'SELECT ''review_record.proxy_reason 已存在，跳过'' AS msg');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.columns
+   WHERE table_schema = DATABASE() AND table_name = 'review_record'
+     AND column_name = 'auditor_id'
+);
+SET @ddl = IF(@col_exists = 0,
+  'ALTER TABLE `review_record` '
+  'ADD COLUMN `auditor_id` bigint DEFAULT NULL COMMENT ''实际出结论人ID（关联sys_user.id；区分责任主体）'' AFTER `proxy_reason`',
+  'SELECT ''review_record.auditor_id 已存在，跳过'' AS msg');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.columns
+   WHERE table_schema = DATABASE() AND table_name = 'review_record'
+     AND column_name = 'auditor_role'
+);
+SET @ddl = IF(@col_exists = 0,
+  'ALTER TABLE `review_record` '
+  'ADD COLUMN `auditor_role` varchar(50) DEFAULT NULL COMMENT ''实际出结论人角色编码（TEACHER/ADMIN/SUPER_ADMIN）'' AFTER `auditor_id`',
+  'SELECT ''review_record.auditor_role 已存在，跳过'' AS msg');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.columns
+   WHERE table_schema = DATABASE() AND table_name = 'review_record'
+     AND column_name = 'signoff_id'
+);
+SET @ddl = IF(@col_exists = 0,
+  'ALTER TABLE `review_record` '
+  'ADD COLUMN `signoff_id` bigint DEFAULT NULL COMMENT ''关联的查重报告签核记录ID（paper_check_signoff.id；代审为空，可反查是否绕过签核）'' AFTER `auditor_role`',
+  'SELECT ''review_record.signoff_id 已存在，跳过'' AS msg');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- task_id 改为可空：管理员代审可在无已成功查重任务时发生
+SET @col_nullable = (
+  SELECT IS_NULLABLE FROM information_schema.columns
+   WHERE table_schema = DATABASE() AND table_name = 'review_record'
+     AND column_name = 'task_id'
+);
+SET @ddl = IF(@col_nullable = 'NO',
+  'ALTER TABLE `review_record` MODIFY COLUMN `task_id` bigint DEFAULT NULL COMMENT ''对应的查重任务ID（关联check_task.id；管理员代审可无查重任务时为 NULL）''',
+  'SELECT ''review_record.task_id 已可空，跳过'' AS msg');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- 索引：列表回查最新审核记录 / 按来源统计（逐索引探测，避免重复键 1061）
+SET @idx_exists = (
+  SELECT COUNT(DISTINCT INDEX_NAME) FROM information_schema.statistics
+   WHERE table_schema = DATABASE() AND table_name = 'review_record'
+     AND INDEX_NAME = 'idx_rr_paper_time'
+);
+SET @ddl = IF(@idx_exists = 0,
+  'ALTER TABLE `review_record` ADD KEY `idx_rr_paper_time` (`paper_id`,`review_time`)',
+  'SELECT ''review_record.idx_rr_paper_time 已存在，跳过'' AS msg');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @idx_exists = (
+  SELECT COUNT(DISTINCT INDEX_NAME) FROM information_schema.statistics
+   WHERE table_schema = DATABASE() AND table_name = 'review_record'
+     AND INDEX_NAME = 'idx_rr_audit_source'
+);
+SET @ddl = IF(@idx_exists = 0,
+  'ALTER TABLE `review_record` ADD KEY `idx_rr_audit_source` (`audit_source`)',
+  'SELECT ''review_record.idx_rr_audit_source 已存在，跳过'' AS msg');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @idx_exists = (
+  SELECT COUNT(DISTINCT INDEX_NAME) FROM information_schema.statistics
+   WHERE table_schema = DATABASE() AND table_name = 'review_record'
+     AND INDEX_NAME = 'idx_rr_auditor'
+);
+SET @ddl = IF(@idx_exists = 0,
+  'ALTER TABLE `review_record` ADD KEY `idx_rr_auditor` (`auditor_id`)',
+  'SELECT ''review_record.idx_rr_auditor 已存在，跳过'' AS msg');
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- 状态收口：字典外存量值 revision_needed → rejected（可重复执行）
+UPDATE `paper_info` SET `paper_status` = 'rejected' WHERE `paper_status` = 'revision_needed';
+
+-- ============================================================================
 -- 段 2：similarity_threshold 系列表的 is_deleted 历史 NULL 归零
 --
 -- 背景：category_similarity_threshold.is_deleted 在 init.sql 里一度是 DEFAULT NULL，
@@ -2462,6 +2599,22 @@ SELECT (SELECT COUNT(*) FROM information_schema.COLUMNS
 SELECT (SELECT COUNT(*) FROM information_schema.TABLES
          WHERE TABLE_SCHEMA = DATABASE()
            AND TABLE_NAME = 'attachment_download_record')                           AS attachment_download_record_tbl;
+
+-- 5.21 段 1.27 审核留痕与状态收口执行后：
+--   期望：rr_audit_cols=5 / rr_task_nullable=YES / rr_audit_source_idx=1 /
+--         pi_revision_needed_rows=0
+SELECT (SELECT COUNT(*) FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'review_record'
+           AND COLUMN_NAME IN ('audit_source','proxy_reason','auditor_id','auditor_role','signoff_id'))
+                                                                                AS rr_audit_cols,
+       (SELECT IS_NULLABLE FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'review_record'
+           AND COLUMN_NAME = 'task_id')                                         AS rr_task_nullable,
+       (SELECT COUNT(DISTINCT INDEX_NAME) FROM information_schema.STATISTICS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'review_record'
+           AND INDEX_NAME = 'idx_rr_audit_source')                              AS rr_audit_source_idx,
+       (SELECT COUNT(*) FROM `paper_info`
+         WHERE `paper_status` = 'revision_needed')                              AS pi_revision_needed_rows;
 
 
 -- ============================================================================

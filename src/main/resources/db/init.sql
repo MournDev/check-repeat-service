@@ -1448,13 +1448,18 @@ DROP TABLE IF EXISTS `review_record`;
 CREATE TABLE `review_record` (
   `id` bigint NOT NULL COMMENT '审核记录唯一ID（雪花ID）',
   `paper_id` bigint NOT NULL COMMENT '对应的论文ID（关联paper_info.id）',
-  `task_id` bigint NOT NULL COMMENT '对应的查重任务ID（关联check_task.id）',
-  `teacher_id` bigint NOT NULL COMMENT '执行审核的教师ID（关联sys_user.id）',
+  `task_id` bigint DEFAULT NULL COMMENT '对应的查重任务ID（关联check_task.id；管理员代审可无查重任务时为 NULL）',
+  `teacher_id` bigint NOT NULL COMMENT '执行审核的教师ID（关联sys_user.id；管理员代审时为论文指导教师）',
   `review_status` varchar(50) NOT NULL,
-  `review_opinion` text COMMENT '审核意见（富文本）',
+  `review_opinion` text COMMENT '审核意见（富文本，不含来源前缀）',
   `suggested_modifications` text COMMENT '建议修改点（JSON 格式）',
   `review_attach` varchar(500) DEFAULT NULL COMMENT '审核附件路径（如修改建议文档）',
   `review_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '审核时间',
+  `audit_source` varchar(20) NOT NULL DEFAULT 'TEACHER' COMMENT '审核来源：TEACHER-导师审核，ADMIN_PROXY-管理员代审（历史数据回填 TEACHER）',
+  `proxy_reason` varchar(200) DEFAULT NULL COMMENT '代审原因（仅 audit_source=ADMIN_PROXY 有值）',
+  `auditor_id` bigint DEFAULT NULL COMMENT '实际出结论人ID（关联sys_user.id；区分责任主体）',
+  `auditor_role` varchar(50) DEFAULT NULL COMMENT '实际出结论人角色编码（TEACHER/ADMIN/SUPER_ADMIN）',
+  `signoff_id` bigint DEFAULT NULL COMMENT '关联的查重报告签核记录ID（paper_check_signoff.id；代审为空，可反查是否绕过签核）',
   `create_by` bigint NOT NULL COMMENT '创建人ID（关联sys_user.id，即教师ID）',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '数据创建时间',
   `update_by` bigint NOT NULL COMMENT '更新人ID（关联sys_user.id，教师/管理员）',
@@ -1462,7 +1467,10 @@ CREATE TABLE `review_record` (
   `is_deleted` tinyint NOT NULL DEFAULT '0' COMMENT '软删除标记（0-未删除，1-已删除）',
   `delete_by` bigint DEFAULT NULL COMMENT '删除人ID',
   `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
-  PRIMARY KEY (`id`)
+  PRIMARY KEY (`id`),
+  KEY `idx_rr_paper_time` (`paper_id`,`review_time`),
+  KEY `idx_rr_audit_source` (`audit_source`),
+  KEY `idx_rr_auditor` (`auditor_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='审核记录表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 

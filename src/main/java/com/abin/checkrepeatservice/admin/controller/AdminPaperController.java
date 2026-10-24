@@ -99,23 +99,34 @@ public class AdminPaperController {
         }
     }
 
+    /** 代审原因最大长度（与 review_record.proxy_reason 列宽一致） */
+    private static final int PROXY_REASON_MAX_LENGTH = 200;
+
     /**
-     * 审核论文
+     * 审核论文（管理员代审）
+     *
+     * <p>auditSource 不从请求体读取，由服务端按登录主体角色落库（管理端入口一律 ADMIN_PROXY）；
+     * proxyReason 为服务端必填校验，空白/超长直接 400。</p>
      */
     @PutMapping("/{paperId:[0-9]+}/audit")
-    @OperationLog(type = "admin_paper_audit", description = "管理员审核论文", recordResult = true)
-    public Result<String> auditPaper(@PathVariable Long paperId,
+    @OperationLog(type = "admin_paper_proxy_audit", description = "论文审核-管理员代审", recordResult = true)
+    public Result<Map<String, Object>> auditPaper(@PathVariable Long paperId,
                                    @RequestBody Map<String, Object> auditRequest) {
         log.info("接收审核论文请求: paperId={}, auditRequest={}", paperId, auditRequest);
         try {
             String auditResult = (String) auditRequest.get("auditResult");
             String auditComment = (String) auditRequest.get("auditComment");
+            String proxyReason = (String) auditRequest.get("proxyReason");
             
             if (auditResult == null || auditResult.isEmpty()) {
                 return Result.error(ResultCode.PARAM_ERROR, "审核结果不能为空");
             }
+            String proxyReasonError = validateProxyReason(proxyReason);
+            if (proxyReasonError != null) {
+                return Result.error(ResultCode.PARAM_ERROR, proxyReasonError);
+            }
             
-            return adminPaperService.auditPaper(paperId, auditResult, auditComment);
+            return adminPaperService.auditPaper(paperId, auditResult, auditComment, proxyReason);
         } catch (Exception e) {
             log.error("审核论文失败: {}", e.getMessage(), e);
             return Result.error(ResultCode.SYSTEM_ERROR, "审核论文失败: " + "系统异常，请稍后重试");
@@ -123,10 +134,10 @@ public class AdminPaperController {
     }
 
     /**
-     * 批量审核论文
+     * 批量审核论文（管理员代审）
      */
     @PostMapping("/batch-audit")
-    @OperationLog(type = "admin_paper_batch_audit", description = "管理员批量审核论文", recordResult = true)
+    @OperationLog(type = "admin_paper_proxy_batch_audit", description = "论文审核-管理员批量代审", recordResult = true)
     public Result<Map<String, Object>> batchAuditPapers(@RequestBody Map<String, Object> batchAuditRequest) {
         log.info("接收批量审核论文请求: batchAuditRequest={}", batchAuditRequest);
         try {
@@ -134,6 +145,7 @@ public class AdminPaperController {
             List<Long> paperIds = (List<Long>) batchAuditRequest.get("paperIds");
             String auditResult = (String) batchAuditRequest.get("auditResult");
             String auditComment = (String) batchAuditRequest.get("auditComment");
+            String proxyReason = (String) batchAuditRequest.get("proxyReason");
             
             if (paperIds == null || paperIds.isEmpty()) {
                 return Result.error(ResultCode.PARAM_ERROR, "论文ID列表不能为空");
@@ -141,12 +153,27 @@ public class AdminPaperController {
             if (auditResult == null || auditResult.isEmpty()) {
                 return Result.error(ResultCode.PARAM_ERROR, "审核结果不能为空");
             }
+            String proxyReasonError = validateProxyReason(proxyReason);
+            if (proxyReasonError != null) {
+                return Result.error(ResultCode.PARAM_ERROR, proxyReasonError);
+            }
             
-            return adminPaperService.batchAuditPapers(paperIds, auditResult, auditComment);
+            return adminPaperService.batchAuditPapers(paperIds, auditResult, auditComment, proxyReason);
         } catch (Exception e) {
             log.error("批量审核论文失败: {}", e.getMessage(), e);
             return Result.error(ResultCode.SYSTEM_ERROR, "批量审核论文失败: " + "系统异常，请稍后重试");
         }
+    }
+
+    /** 代审原因服务端强校验；返回 null 表示通过 */
+    private String validateProxyReason(String proxyReason) {
+        if (proxyReason == null || proxyReason.trim().isEmpty()) {
+            return "代审原因不能为空";
+        }
+        if (proxyReason.trim().length() > PROXY_REASON_MAX_LENGTH) {
+            return "代审原因长度不能超过" + PROXY_REASON_MAX_LENGTH + "字符";
+        }
+        return null;
     }
 
     /**

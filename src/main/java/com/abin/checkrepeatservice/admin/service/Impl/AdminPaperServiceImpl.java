@@ -10,9 +10,13 @@ import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
 import com.abin.checkrepeatservice.user.service.PaperStatusLogService;
 import com.abin.checkrepeatservice.common.enums.CheckStatusFilterEnum;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
+import com.abin.checkrepeatservice.student.mapper.CheckTaskMapper;
 import com.abin.checkrepeatservice.mapper.SysUserMapper;
+import com.abin.checkrepeatservice.pojo.entity.CheckTask;
 import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
+import com.abin.checkrepeatservice.pojo.entity.ReviewRecord;
 import com.abin.checkrepeatservice.pojo.entity.SysUser;
+import com.abin.checkrepeatservice.teacher.mapper.ReviewRecordMapper;
 import com.abin.checkrepeatservice.common.service.FileService;
 import com.abin.checkrepeatservice.pojo.entity.FileInfo;
 import com.abin.checkrepeatservice.detection.service.EnhancedSimilarityDetectionService;
@@ -32,6 +36,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -69,6 +74,19 @@ public class AdminPaperServiceImpl implements AdminPaperService {
 
     @Resource
     private DictService dictService;
+
+    @Resource
+    private ReviewRecordMapper reviewRecordMapper;
+
+    @Resource
+    private CheckTaskMapper checkTaskMapper;
+
+    /** 审核来源：导师审核 */
+    private static final String AUDIT_SOURCE_TEACHER = "TEACHER";
+    /** 审核来源：管理员代审 */
+    private static final String AUDIT_SOURCE_ADMIN_PROXY = "ADMIN_PROXY";
+    /** 代审原因最大长度（与 review_record.proxy_reason 列宽一致） */
+    private static final int PROXY_REASON_MAX_LENGTH = 200;
 
     /** 导出时间列格式（与 AdminAdvisorEvalServiceImpl 同口径） */
     private static final DateTimeFormatter EXPORT_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
@@ -188,7 +206,8 @@ public class AdminPaperServiceImpl implements AdminPaperService {
     }
 
     @Override
-    public Result<String> auditPaper(Long paperId, String auditResult, String auditComment) {
+    public Result<Map<String, Object>> auditPaper(Long paperId, String auditResult,
+                                                  String auditComment, String proxyReason) {
         try {
             PaperInfo paperInfo = paperInfoMapper.selectById(paperId);
             if (paperInfo == null || paperInfo.getIsDeleted() == 1) {
@@ -200,18 +219,34 @@ public class AdminPaperServiceImpl implements AdminPaperService {
 
             // 确定目标状态
             String targetStatus;
+            Integer reviewStatus;
             if ("approved".equals(auditResult)) {
                 targetStatus = DictConstants.PaperStatus.COMPLETED;
+                reviewStatus = DictConstants.ReviewStatus.PASS;
             } else if ("rejected".equals(auditResult)) {
                 targetStatus = DictConstants.PaperStatus.REJECTED;
+                reviewStatus = DictConstants.ReviewStatus.REJECT;
             } else {
                 return Result.error(ResultCode.PARAM_ERROR, "无效的审核结果");
+            }
+
+            // 审核来源不由客户端决定：管理端入口统一按管理员代审落库
+            String auditSource = AUDIT_SOURCE_ADMIN_PROXY;
+            String normalizedProxyReason = normalizeProxyReason(proxyReason);
+            if (AUDIT_SOURCE_ADMIN_PROXY.equals(auditSource)) {
+                String proxyError = validateProxyReason(normalizedProxyReason);
+                if (proxyError != null) {
+                    return Result.error(ResultCode.PARAM_ERROR, proxyError);
+                }
             }
 
             // S12：状态流转统一走阶段门裁决（非法流转抛 40305）；
             // 归一化兼容未跑段 3 迁移的库上残留的历史数字状态码
             String fromStatus = paperStageGate.normalizeLegacy(paperInfo.getPaperStatus());
             paperStageGate.assertTransition(fromStatus, targetStatus);
+
+            Long operatorId = UserBusinessInfoUtils.getCurrentUserId();
+            String operatorRole = UserBusinessInfoUtils.getCurrentUserRoleCode();
 
             // S12：审核意见独立存储到 audit_comment，不再覆盖 check_result（查重结果）
             paperInfo.setPaperStatus(targetStatus);
@@ -220,13 +255,38 @@ public class AdminPaperServiceImpl implements AdminPaperService {
 
             paperInfoMapper.updateById(paperInfo);
 
+            // 代审留痕：管理员路径同样写 review_record，审计侧按 audit_source 区分责任主体，
+            // signoff_id 留空即表示该结论未经导师查重签核（可反查绕过签核）
+            ReviewRecord reviewRecord = new ReviewRecord();
+            reviewRecord.setPaperId(paperId);
+            reviewRecord.setTaskId(findLatestCompletedTaskId(paperId));
+            // teacher_id 保持论文指导教师，避免污染教师端审核统计；
+            // 实际出结论人单独落 auditor_id/auditor_role
+            reviewRecord.setTeacherId(paperInfo.getTeacherId() != null ? paperInfo.getTeacherId() : operatorId);
+            reviewRecord.setReviewStatus(reviewStatus);
+            reviewRecord.setReviewOpinion(auditComment);
+            reviewRecord.setReviewTime(LocalDateTime.now());
+            reviewRecord.setAuditSource(auditSource);
+            reviewRecord.setProxyReason(AUDIT_SOURCE_ADMIN_PROXY.equals(auditSource) ? normalizedProxyReason : null);
+            reviewRecord.setAuditorId(operatorId);
+            reviewRecord.setAuditorRole(operatorRole);
+            reviewRecord.setSignoffId(null);
+            UserBusinessInfoUtils.setAuditField(reviewRecord, true);
+            reviewRecordMapper.insert(reviewRecord);
+
             // S12：补写状态日志，保证学生端时间线完整
             paperStatusLogService.recordStatusLog(paperId, fromStatus, targetStatus,
                     buildAuditReason(auditResult, auditComment),
-                    UserBusinessInfoUtils.getCurrentUserId(), null);
+                    operatorId, null);
 
-            log.info("论文审核成功: paperId={}, result={}, fromStatus={}", paperId, auditResult, fromStatus);
-            return Result.success("论文审核成功");
+            Map<String, Object> data = new HashMap<>();
+            data.put("reviewRecordId", reviewRecord.getId());
+            data.put("paperStatus", targetStatus);
+            data.put("auditSource", auditSource);
+
+            log.info("论文代审成功: paperId={}, result={}, fromStatus={}, reviewRecordId={}, operatorId={}",
+                    paperId, auditResult, fromStatus, reviewRecord.getId(), operatorId);
+            return Result.success("论文审核成功", data);
         } catch (BusinessException e) {
             // S12：阶段门 40305 等业务异常透传原错误码，不降级为 500
             log.warn("论文审核被拦截: paperId={}, code={}, msg={}", paperId, e.getResultCode().getCode(), e.getMessage());
@@ -235,6 +295,37 @@ public class AdminPaperServiceImpl implements AdminPaperService {
             log.error("论文审核失败: paperId={}", paperId, e);
             return Result.error(ResultCode.SYSTEM_ERROR, "论文审核失败: " + "系统异常，请稍后重试");
         }
+    }
+
+    /** 代审原因入库前归一化：去首尾空白，空串按 null 处理 */
+    private String normalizeProxyReason(String proxyReason) {
+        if (proxyReason == null) {
+            return null;
+        }
+        String trimmed = proxyReason.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    /** 代审原因服务端强校验；返回 null 表示通过 */
+    private String validateProxyReason(String proxyReason) {
+        if (proxyReason == null) {
+            return "代审原因不能为空";
+        }
+        if (proxyReason.length() > PROXY_REASON_MAX_LENGTH) {
+            return "代审原因长度不能超过" + PROXY_REASON_MAX_LENGTH + "字符";
+        }
+        return null;
+    }
+
+    /** 取论文最新一次已完成查重任务ID；无任务时返回 null（review_record.task_id 已允许为空） */
+    private Long findLatestCompletedTaskId(Long paperId) {
+        CheckTask latestTask = checkTaskMapper.selectOne(new LambdaQueryWrapper<CheckTask>()
+                .eq(CheckTask::getPaperId, paperId)
+                .eq(CheckTask::getCheckStatus, DictConstants.CheckStatus.COMPLETED)
+                .orderByDesc(CheckTask::getCreateTime)
+                .orderByDesc(CheckTask::getId)
+                .last("LIMIT 1"));
+        return latestTask == null ? null : latestTask.getId();
     }
 
     /**
@@ -254,37 +345,55 @@ public class AdminPaperServiceImpl implements AdminPaperService {
     }
 
     @Override
-    public Result<Map<String, Object>> batchAuditPapers(List<Long> paperIds, String auditResult, String auditComment) {
+    public Result<Map<String, Object>> batchAuditPapers(List<Long> paperIds, String auditResult,
+                                                        String auditComment, String proxyReason) {
         try {
             int successCount = 0;
             List<String> skipReasons = new ArrayList<>();
+            List<Map<String, Object>> results = new ArrayList<>();
 
             for (Long paperId : paperIds) {
+                Map<String, Object> item = new HashMap<>();
+                item.put("paperId", paperId);
                 try {
-                    Result<String> result = auditPaper(paperId, auditResult, auditComment);
+                    Result<Map<String, Object>> result =
+                            auditPaper(paperId, auditResult, auditComment, proxyReason);
                     if (result.getCode() == 200) {
                         successCount++;
+                        item.put("success", true);
+                        item.put("paperStatus", result.getData().get("paperStatus"));
+                        item.put("auditSource", result.getData().get("auditSource"));
+                        item.put("reviewRecordId", result.getData().get("reviewRecordId"));
                     } else {
                         // 并发窗口：管理员填意见期间论文可能已被教师先审完（40305）等，
                         // 逐篇跳过并记录原因，不再让单篇业务失败拖垮整批
-                        skipReasons.add("论文" + paperId + "：" + result.getMessage());
+                        String reason = "论文" + paperId + "：" + result.getMessage();
+                        skipReasons.add(reason);
+                        item.put("success", false);
+                        item.put("message", result.getMessage());
                     }
                 } catch (Exception e) {
                     log.error("批量审核单个论文失败: paperId={}", paperId, e);
-                    skipReasons.add("论文" + paperId + "：系统异常，请稍后重试");
+                    String reason = "论文" + paperId + "：系统异常，请稍后重试";
+                    skipReasons.add(reason);
+                    item.put("success", false);
+                    item.put("message", "系统异常，请稍后重试");
                 }
+                results.add(item);
             }
 
             String message = String.format("批量审核完成: 成功%d篇, 跳过%d篇", successCount, skipReasons.size());
             log.info("{} (auditResult={})", message, auditResult);
 
-            // 对齐答辩批量先例：返回 {total, success, skipped, skipReasons[]} 明细，
-            // 全部跳过也返回明细结构，便于前端逐条展示而非笼统 toast
-            return Result.success(message, Map.of(
-                    "total", paperIds.size(),
-                    "success", successCount,
-                    "skipped", skipReasons.size(),
-                    "skipReasons", skipReasons));
+            // 对齐答辩批量先例：返回 {total, success, skipped, skipReasons[], results[]} 明细，
+            // results 让前端能逐条标记（成功项带 reviewRecordId 与落库后的 auditSource）
+            Map<String, Object> data = new HashMap<>();
+            data.put("total", paperIds.size());
+            data.put("success", successCount);
+            data.put("skipped", skipReasons.size());
+            data.put("skipReasons", skipReasons);
+            data.put("results", results);
+            return Result.success(message, data);
         } catch (Exception e) {
             log.error("批量审核论文失败", e);
             return Result.error(ResultCode.SYSTEM_ERROR, "批量审核论文失败: " + "系统异常，请稍后重试");
@@ -699,6 +808,26 @@ public class AdminPaperServiceImpl implements AdminPaperService {
                 }
             }
         }
+
+        // 审核留痕：取每篇论文最新一条 review_record，回传 auditSource/proxyReason/auditorName/auditTime。
+        // 前端据此用 row.auditSource === 'ADMIN_PROXY' 判定代审，不再依赖会话内 Set 或意见前缀。
+        List<Long> paperIds = papers.stream()
+                .map(PaperInfo::getId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+        Map<Long, ReviewRecord> latestReviewMap = loadLatestReviewRecords(paperIds);
+        List<Long> auditorIds = latestReviewMap.values().stream()
+                .map(r -> r.getAuditorId() != null ? r.getAuditorId() : r.getTeacherId())
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+        Map<Long, SysUser> auditorMap = auditorIds.isEmpty() ? new HashMap<>()
+                : sysUserMapper.selectBatchIds(auditorIds).stream()
+                    .collect(Collectors.toMap(SysUser::getId, u -> u));
+        for (PaperInfo paper : papers) {
+            fillAuditInfo(paper, latestReviewMap.get(paper.getId()), auditorMap);
+        }
     }
 
     /**
@@ -723,6 +852,57 @@ public class AdminPaperServiceImpl implements AdminPaperService {
             if (teacher != null) {
                 paper.setTeacherRealName(teacher.getRealName());
             }
+        }
+
+        // 审核留痕字段（与列表同口径）
+        Map<Long, ReviewRecord> latestReviewMap =
+                loadLatestReviewRecords(Collections.singletonList(paper.getId()));
+        ReviewRecord latestReview = latestReviewMap.get(paper.getId());
+        Long auditorId = latestReview == null ? null
+                : (latestReview.getAuditorId() != null ? latestReview.getAuditorId() : latestReview.getTeacherId());
+        SysUser auditor = auditorId == null ? null : sysUserMapper.selectById(auditorId);
+        Map<Long, SysUser> auditorMap = auditor == null ? new HashMap<>() : Map.of(auditorId, auditor);
+        fillAuditInfo(paper, latestReview, auditorMap);
+    }
+
+    /**
+     * 批量取每篇论文最新一条审核记录（reviewTime + id 倒序，同秒写入也能稳定取到最新）。
+     */
+    private Map<Long, ReviewRecord> loadLatestReviewRecords(List<Long> paperIds) {
+        if (paperIds == null || paperIds.isEmpty()) {
+            return new HashMap<>();
+        }
+        List<ReviewRecord> records = reviewRecordMapper.selectList(new LambdaQueryWrapper<ReviewRecord>()
+                .in(ReviewRecord::getPaperId, paperIds)
+                .orderByDesc(ReviewRecord::getReviewTime)
+                .orderByDesc(ReviewRecord::getId));
+        Map<Long, ReviewRecord> latestMap = new HashMap<>();
+        for (ReviewRecord record : records) {
+            latestMap.putIfAbsent(record.getPaperId(), record);
+        }
+        return latestMap;
+    }
+
+    /**
+     * 把审核记录填充到论文展示字段；历史记录无 audit_source 时按 TEACHER 兜底。
+     */
+    private void fillAuditInfo(PaperInfo paper, ReviewRecord review, Map<Long, SysUser> auditorMap) {
+        if (review == null) {
+            return;
+        }
+        paper.setAuditSource(review.getAuditSource() == null ? AUDIT_SOURCE_TEACHER : review.getAuditSource());
+        paper.setProxyReason(review.getProxyReason());
+        paper.setAuditTime(review.getReviewTime());
+        // 审核意见真值源：教师审核路径只写 review_record，不回写 paper_info.audit_comment；
+        // 列表回传时用审核记录兜底，保证 auditComment/feedback 都是意见原文。
+        if ((paper.getAuditComment() == null || paper.getAuditComment().isBlank())
+                && review.getReviewOpinion() != null) {
+            paper.setAuditComment(review.getReviewOpinion());
+        }
+        Long auditorId = review.getAuditorId() != null ? review.getAuditorId() : review.getTeacherId();
+        SysUser auditor = auditorId == null || auditorMap == null ? null : auditorMap.get(auditorId);
+        if (auditor != null) {
+            paper.setAuditorName(auditor.getRealName());
         }
     }
     
