@@ -22,6 +22,7 @@ import com.abin.checkrepeatservice.user.service.SysUserService;
 import com.abin.checkrepeatservice.user.vo.CheckResultVO;
 import com.alibaba.fastjson2.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import jakarta.annotation.Resource;
@@ -109,6 +110,12 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
         if (paperInfo == null || paperInfo.getIsDeleted() == 1) {
             return Result.error(ResultCode.RESOURCE_NOT_FOUND, "论文不存在或已删除");
         }
+        // 数据归属校验（P0-3）：/api/enhanced/** 仅学生可用，只能为自己的论文建任务
+        if (!java.util.Objects.equals(paperInfo.getStudentId(), currentUserId)) {
+            log.warn("增强查重任务越权创建拦截 - paperId: {}, userId: {}, ownerId: {}",
+                    paperId, currentUserId, paperInfo.getStudentId());
+            return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权为该论文发起查重");
+        }
         
         // 2. 解析引擎类型，并校验检测边界（M1.1：未接入的外部引擎直接拒绝，不建任务）
         List<CheckEngineTypeEnum> engines = parseEngineTypes(engineTypes);
@@ -122,6 +129,8 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
         // 3. 创建任务
         CheckTask checkTask = new CheckTask();
         checkTask.setPaperId(paperId);
+        // 任务与论文文件绑定，保持与学生自助入口一致的落库字段
+        checkTask.setFileId(paperInfo.getFileId());
         checkTask.setTaskNo(generateTaskNo());
         checkTask.setCheckStatus(CheckTaskStatusEnum.PENDING.getCode());
         checkTask.setQuotaCharged(quotaConsumed ? 1 : 0);
@@ -220,6 +229,10 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
         if (task == null || task.getIsDeleted() == 1) {
             return Result.error(ResultCode.RESOURCE_NOT_FOUND, "任务不存在");
         }
+        // P0-3：重试同样要做数据归属校验，否则任意学生可重跑他人失败任务
+        if (!hasTaskAccess(task)) {
+            return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权限重试该任务");
+        }
         
         CheckTaskStatusEnum currentStatus = CheckTaskStatusEnum.fromCode(task.getCheckStatus());
         if (currentStatus != CheckTaskStatusEnum.FAILURE) {
@@ -229,13 +242,19 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
         // M4.1：失败时额度已返还（quota_charged 已置 0），重试不再重复扣减，
         // 保证同一任务最多占用一次额度；重试再次失败时返还逻辑天然幂等。
 
-        // 重置任务状态
-        task.setCheckStatus(CheckTaskStatusEnum.PENDING.getCode());
-        task.setFailReason(null);
-        task.setStartTime(null);
-        task.setEndTime(null);
-        task.setCheckRate(null);
-        updateById(task);
+        // 重置任务状态：用条件 UPDATE 显式清空终态字段。
+        // 防止与并发的超时扫描/重试相互覆盖。
+        boolean reset = update(new LambdaUpdateWrapper<CheckTask>()
+                .eq(CheckTask::getId, taskId)
+                .eq(CheckTask::getCheckStatus, CheckTaskStatusEnum.FAILURE.getCode())
+                .set(CheckTask::getCheckStatus, CheckTaskStatusEnum.PENDING.getCode())
+                .set(CheckTask::getFailReason, null)
+                .set(CheckTask::getStartTime, null)
+                .set(CheckTask::getEndTime, null)
+                .set(CheckTask::getCheckRate, null));
+        if (!reset) {
+            return Result.error(ResultCode.BUSINESS_NO_REPEAT, "任务状态已变化，请刷新后重试");
+        }
         
         // 异步重新执行 - 使用Collections.singletonList
         // 架构修复（P0）：事务提交后异步重试，不再自调用本类 @Async 方法
@@ -281,16 +300,31 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
             log.warn("非法状态流转：{} -> {}", currentStatus.getDescription(), newStatus.getDescription());
             return false;
         }
-        
-        task.setCheckStatus(newStatus.getCode());
+
+        // P0-1：状态只用「条件 UPDATE」写，且只写状态相关列。
+        // 不再对查询出的实体做全量 updateById —— 该实体会把其它已变化的状态字段回写覆盖。
+        LambdaUpdateWrapper<CheckTask> wrapper = new LambdaUpdateWrapper<CheckTask>()
+                .eq(CheckTask::getId, taskId)
+                .eq(CheckTask::getCheckStatus, currentStatus.getCode())
+                .set(CheckTask::getCheckStatus, newStatus.getCode());
+        if (newStatus == CheckTaskStatusEnum.CHECKING) {
+            wrapper.set(CheckTask::getStartTime, LocalDateTime.now());
+        }
         if (newStatus.isFinalStatus()) {
-            task.setEndTime(LocalDateTime.now());
+            wrapper.set(CheckTask::getEndTime, LocalDateTime.now());
         }
         // M1.2：失败状态必须把原因一并落库，否则前端只能看到 failure 而看不到为何失败
         if (newStatus == CheckTaskStatusEnum.FAILURE) {
-            task.setFailReason(reason == null ? "" : (reason.length() > 500 ? reason.substring(0, 500) : reason));
+            wrapper.set(CheckTask::getFailReason,
+                    reason == null ? "" : (reason.length() > 500 ? reason.substring(0, 500) : reason));
         }
-        updateById(task);
+
+        boolean updated = update(wrapper);
+        if (!updated) {
+            log.warn("任务状态条件更新未命中（状态已被并发改写）：ID={}, 期望={}",
+                    taskId, currentStatus.getCode());
+            return false;
+        }
         
         log.info("任务状态更新：ID={}, {} -> {}, 原因={}", 
                 taskId, currentStatus.getDescription(), newStatus.getDescription(), reason);
@@ -302,6 +336,10 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
         CheckTask task = getById(taskId);
         if (task == null) {
             return Result.error(ResultCode.RESOURCE_NOT_FOUND, "任务不存在");
+        }
+        // P0-3：进度查询同样校验数据归属
+        if (!hasTaskAccess(task)) {
+            return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权限查看该任务");
         }
         
         Map<String, Object> progress = new HashMap<>();
@@ -339,10 +377,9 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
                 throw new BusinessException(ResultCode.PARAM_ERROR, "论文文件不存在");
             }
             
-            // 提取文本
+            // 提取文本（start_time 已由 updateTaskStatus 在 CHECKING 流转时写入，
+            // 此处不再对旧 task 实体做全量 updateById）
             String paperText = extractTextFromFile(paperInfo.getFilePath());
-            task.setStartTime(LocalDateTime.now());
-            updateById(task);
 
             // 架构修复（P0）：正文入本地比对库；引擎比对时排除论文自身
             paperLibraryIngestService.ingest(task.getPaperId(), paperText);
@@ -355,14 +392,22 @@ public class EnhancedCheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, C
             // 生成报告
             CheckReport report = generateCheckReport(task, checkResult);
             
-            // 更新任务状态
-            task.setCheckRate(checkResult.getSimilarity());
-            task.setReportId(report.getId());
-            task.setReportPath(report.getReportPath());
-            
             CheckTaskStatusEnum finalStatus = checkResult.isSuccess() ? 
                     CheckTaskStatusEnum.COMPLETED : CheckTaskStatusEnum.FAILURE;
-            updateTaskStatus(taskId, finalStatus, checkResult.getFailReason());
+            boolean statusUpdated = updateTaskStatus(taskId, finalStatus, checkResult.getFailReason());
+            if (!statusUpdated) {
+                log.warn("任务终态流转失败（状态可能已被并发改写）：taskId={}, 目标={}",
+                        taskId, finalStatus.getCode());
+            }
+
+            // P0-1：业务字段单独按列更新。旧写法把 checkRate/reportId 设在执行前查出的 task 上，
+            // 随后的全量 updateById 会把状态写回 pending/checking，且字段实际未落库。
+            update(new LambdaUpdateWrapper<CheckTask>()
+                    .eq(CheckTask::getId, taskId)
+                    .eq(CheckTask::getCheckStatus, finalStatus.getCode())
+                    .set(CheckTask::getCheckRate, checkResult.getSimilarity())
+                    .set(CheckTask::getReportId, report.getId())
+                    .set(CheckTask::getReportPath, report.getReportPath()));
             
             // 更新论文状态
             updatePaperStatus(paperInfo, checkResult.getSimilarity());

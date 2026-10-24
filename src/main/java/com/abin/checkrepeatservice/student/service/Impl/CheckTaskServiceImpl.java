@@ -41,6 +41,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.xml.sax.SAXException;
 
 import java.io.File;
@@ -124,6 +125,14 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
     @Resource
     private ApplicationEventPublisher eventPublisher;
 
+    /**
+     * 显式事务模板（P0-2）：createCheckTask 内部原本用 this 调用 @Transactional 方法，
+     * 绕过 Spring 代理导致事务失效。这里用编程式事务把「扣额度 + 落任务 + 发事件」
+     * 包成同一个事务，事件由 @TransactionalEventListener(AFTER_COMMIT) 在提交后消费。
+     */
+    @Resource
+    private TransactionTemplate transactionTemplate;
+
     // P5 学院月度查重额度：新建任务落库前校验并扣减
     @Resource
     private CollegeQuotaService collegeQuotaService;
@@ -137,34 +146,63 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
 
     @Override
     public Result<CheckResultVO> createCheckTask(Long paperId) {
+        return createCheckTask(paperId, null);
+    }
+
+    /**
+     * 创建查重任务（P0-2 / P0-8）。
+     *
+     * <p>事务边界：前置校验放在事务外；「扣额度 + 任务落库 + 发布事件」由
+     * TransactionTemplate 显式包裹，避免同类 this 调用绕过 @Transactional。
+     * 事件由监听器的 @TransactionalEventListener(AFTER_COMMIT) 在提交后异步消费。</p>
+     *
+     * @param studentId 论文归属学生；教师代触发时显式传入，学生自助时为 null
+     */
+    @Override
+    public Result<CheckResultVO> createCheckTask(Long paperId, Long studentId) {
         Long currentUserId = UserBusinessInfoUtils.getCurrentUserId();
-        
+        // 归属校验主体：显式传入的学生优先，否则当前登录用户
+        Long ownerId = studentId != null ? studentId : currentUserId;
+
         // 前置校验（在事务外执行）
-        log.info("开始创建查重任务 - 论文 ID: {}, 用户 ID: {}", paperId, currentUserId);
-        CheckTaskValidationService.ValidationResult validationResult = 
-            validationService.validateCheckRequest(paperId, currentUserId);
-        
+        log.info("开始创建查重任务 - 论文 ID: {}, 发起人 ID: {}, 归属学生 ID: {}", paperId, currentUserId, ownerId);
+        CheckTaskValidationService.ValidationResult validationResult =
+            validationService.validateCheckRequest(paperId, ownerId);
+
         if (!validationResult.isSuccess()) {
             log.warn("查重前置校验失败 - 论文 ID: {}, 原因：{}", paperId, validationResult.getMessage());
             return Result.error(ResultCode.BUSINESS_NO_REPEAT, validationResult.getMessage());
         }
-        
+
         PaperInfo paperInfo = validationResult.getPaper();
-        
-        // 小事务：只包含数据库操作
+
         try {
-            return createCheckTaskInternal(paperId, paperInfo);
+            CheckResultVO checkResultVO = transactionTemplate.execute(status ->
+                    createCheckTaskInTransaction(paperId, paperInfo, ownerId));
+            if (checkResultVO == null) {
+                return Result.error(ResultCode.SYSTEM_ERROR, "查重任务创建失败：事务未返回结果");
+            }
+
+            log.info("查重任务创建成功 - 任务 ID: {}, 论文 ID: {}, 预估时长：{}秒",
+                    checkResultVO.getTaskId(), paperId, estimateDuration(paperInfo.getWordCount()));
+
+            return Result.success("查重任务创建成功，预计" + estimateDuration(paperInfo.getWordCount()) +
+                                "秒内完成（当前排队位置：#" + getQueuePosition() + "）", checkResultVO);
+        } catch (BusinessException e) {
+            // 额度不足等业务异常：保留原错误码（409），不再统一抹成 500
+            log.warn("创建查重任务业务校验失败 - 论文 ID: {}, 原因：{}", paperId, e.getMessage());
+            return Result.error(e.getResultCode(), e.getMessage());
         } catch (Exception e) {
             log.error("创建查重任务失败 - 论文 ID: {}", paperId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "查重任务创建失败：" + "系统异常，请稍后重试");
+            return Result.error(ResultCode.SYSTEM_ERROR, "查重任务创建失败：系统异常，请稍后重试");
         }
     }
-    
+
     /**
-     * 内部方法：在小事务中创建查重任务
+     * 在 TransactionTemplate 中执行的数据库操作：扣额度、落任务、发事件。
+     * 任何一步抛异常都会回滚额度扣减，避免「扣了额度却没有任务」。
      */
-    @Transactional(rollbackFor = Exception.class)
-    protected Result<CheckResultVO> createCheckTaskInternal(Long paperId, PaperInfo paperInfo) {
+    private CheckResultVO createCheckTaskInTransaction(Long paperId, PaperInfo paperInfo, Long ownerId) {
         // P5 学院月度额度：任务真正落库前校验并扣减学院当月额度。
         // 重试路径复用已存在任务（重新入队），不走本新建入口，不会重复扣减。
         // M4.1：记录本次是否实际扣减，失败返还时据此幂等退回
@@ -180,20 +218,17 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
         // M3.1 版本—报告绑定：快照论文版本 + 最新一次提交记录
         checkTask.setPaperVersion(paperInfo.getVersion());
         checkTask.setSubmitId(resolveLatestSubmitId(paperId));
+        // 教师代触发时 create_by 仍归到论文所属学生，与表注释/归属查询口径一致；
+        // 显式赋值后 MyMetaObjectHandler 的 strictInsertFill 不会覆盖非空值
+        checkTask.setCreateBy(ownerId);
         UserBusinessInfoUtils.setAuditField(checkTask, true);
         save(checkTask);
 
-        // 2. 发布事件，完全解耦（异步执行查重）
+        // 2. 发布事件，事务提交后由 @TransactionalEventListener(AFTER_COMMIT) 异步执行
         eventPublisher.publishEvent(new CheckTaskCreatedEvent(this, checkTask.getId(), paperId));
 
-        // 3. 立即返回，提供预估信息
-        CheckResultVO checkResultVO = buildCheckResultVO(checkTask);
-        
-        log.info("查重任务创建成功 - 任务 ID: {}, 论文 ID: {}, 预估时长：{}秒", 
-                checkTask.getId(), paperId, estimateDuration(paperInfo.getWordCount()));
-        
-        return Result.success("查重任务创建成功，预计" + estimateDuration(paperInfo.getWordCount()) + 
-                            "秒内完成（当前排队位置：#" + getQueuePosition() + "）", checkResultVO);
+        // 3. 返回 VO，真正响应在事务提交后组装
+        return buildCheckResultVO(checkTask);
     }
     
     /**
@@ -357,6 +392,17 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
 
     @Override
     public CheckResultVO getCheckResult(Long paperId) {
+        // 0. 数据归属校验（P0-3）：/api/check/result 只按 paperId 查询，
+        //    必须确认论文属于当前登录学生，避免枚举 paperId 读取他人查重结论。
+        Long currentUserId = UserBusinessInfoUtils.getCurrentUserId();
+        PaperInfo ownerPaper = paperInfoMapper.selectById(paperId);
+        if (ownerPaper == null
+                || Integer.valueOf(1).equals(ownerPaper.getIsDeleted())
+                || !java.util.Objects.equals(ownerPaper.getStudentId(), currentUserId)) {
+            log.warn("查重结果越权访问拦截 - paperId: {}, userId: {}", paperId, currentUserId);
+            throw new BusinessException(ResultCode.PERMISSION_NO_ACCESS, "无权查看该论文的查重结果");
+        }
+
         // 1. Find the latest completed check task for the given paper
         LambdaQueryWrapper<CheckTask> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(CheckTask::getPaperId, paperId)

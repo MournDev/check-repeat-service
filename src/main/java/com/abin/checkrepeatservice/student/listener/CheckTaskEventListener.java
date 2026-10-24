@@ -10,6 +10,7 @@ import com.abin.checkrepeatservice.detection.dto.SentenceHit;
 import com.abin.checkrepeatservice.notification.service.NotificationService;
 import com.abin.checkrepeatservice.pojo.entity.CheckReport;
 import com.abin.checkrepeatservice.pojo.entity.CheckSentenceHit;
+import com.abin.checkrepeatservice.pojo.entity.CheckTask;
 import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
 import com.abin.checkrepeatservice.student.dto.ReportPreviewDTO;
 import com.abin.checkrepeatservice.student.event.CheckProgressEvent;
@@ -19,14 +20,16 @@ import com.abin.checkrepeatservice.student.mapper.CheckSentenceHitMapper;
 import com.abin.checkrepeatservice.student.mapper.CheckTaskMapper;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
 import com.abin.checkrepeatservice.student.service.websocket.CheckProgressWebSocketHandler;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.tika.Tika;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
@@ -110,10 +113,13 @@ public class CheckTaskEventListener {
     private final Tika tika = new Tika();
 
     /**
-     * 监听查重任务创建事件，异步执行查重
+     * 监听查重任务创建事件，异步执行查重。
+     *
+     * <p>P0-1/P0-2：改为 AFTER_COMMIT 监听，保证任务行与额度扣减已提交后
+     * 异步线程才读取得到；fallbackExecution=true 兼容无事务环境下的事件发布。</p>
      */
     @Async("checkTaskExecutor")
-    @EventListener(CheckTaskCreatedEvent.class)
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void handleCheckTaskCreated(CheckTaskCreatedEvent event) {
         Long taskId = event.getTaskId();
         Long paperId = event.getPaperId();
@@ -125,7 +131,7 @@ public class CheckTaskEventListener {
         boolean transitionSuccess = stateMachine.transitionStatus(
             taskId,
             com.abin.checkrepeatservice.common.enums.CheckTaskStatusEnum.CHECKING,
-            "开始执行查重任务"
+            "开始执行查重"
         );
 
         if (!transitionSuccess) {
@@ -136,7 +142,11 @@ public class CheckTaskEventListener {
         // 2. 推送进度：开始处理
         publishProgress(taskId, paperId, "FILE_PARSING", 10, "正在解析论文文件...", 5);
 
-        com.abin.checkrepeatservice.pojo.entity.CheckTask checkTask = checkTaskMapper.selectById(taskId);
+        CheckTask checkTask = checkTaskMapper.selectById(taskId);
+        if (checkTask == null) {
+            log.error("查重任务不存在（可能已被清理）- 任务 ID: {}", taskId);
+            return;
+        }
         PaperInfo paperInfo = paperInfoMapper.selectById(paperId);
 
         try {
@@ -202,17 +212,25 @@ public class CheckTaskEventListener {
             CheckReport checkReport = generateCheckReport(checkTask, effectiveRateValue, repeatDetails, maxPerSource, citationRate);
 
             // 9. 更新任务状态为成功
-            stateMachine.transitionStatus(taskId,
+            boolean completed = stateMachine.transitionStatus(taskId,
                 com.abin.checkrepeatservice.common.enums.CheckTaskStatusEnum.COMPLETED,
                 "查重任务执行成功");
+            if (!completed) {
+                log.warn("任务成功态流转失败（可能已被超时扫描改写），任务 ID: {}", taskId);
+            }
 
-            // 10. 更新任务信息
-            checkTask.setCheckRate(effectiveRateValue);
-            checkTask.setMaxPerSource(maxPerSource);
-            checkTask.setCitationRate(citationRate);
-            checkTask.setEndTime(LocalDateTime.now());
-            checkTask.setReportId(checkReport.getId());
-            checkTaskMapper.updateById(checkTask);
+            // 10. 业务字段单独更新（P0-1）：
+            //     禁止再用执行前查出的 checkTask 做全量 updateById —— 它的 checkStatus 仍是
+            //     "checking"，会把上一步写入的 completed 覆盖回去，1 小时后被误判超时失败。
+            checkTaskMapper.update(null, new LambdaUpdateWrapper<CheckTask>()
+                    .eq(CheckTask::getId, taskId)
+                    .eq(CheckTask::getCheckStatus,
+                            com.abin.checkrepeatservice.common.enums.CheckTaskStatusEnum.COMPLETED.getCode())
+                    .set(CheckTask::getCheckRate, effectiveRateValue)
+                    .set(CheckTask::getMaxPerSource, maxPerSource)
+                    .set(CheckTask::getCitationRate, citationRate)
+                    .set(CheckTask::getEndTime, LocalDateTime.now())
+                    .set(CheckTask::getReportId, checkReport.getId()));
 
             // 11. 更新论文状态（成功后）
             updatePaperSuccess(paperInfo, effectiveRate);

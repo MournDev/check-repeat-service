@@ -9,11 +9,24 @@ import java.util.List;
 
 public interface CheckTaskService {
     /**
-     * 创建查重任务
+     * 创建查重任务（学生本人发起）
      * @param paperId 论文ID
      * @return 查重任务结果
      */
     Result<CheckResultVO> createCheckTask(Long paperId);
+
+    /**
+     * 创建查重任务，显式指定论文归属学生。
+     *
+     * <p>教师确认接收论文后由系统代学生触发查重时使用：查重归属校验必须按
+     * 「论文所属学生」判断，不能用当前登录教师 ID 去比对 paper.studentId，
+     * 否则教师触发路径必然校验失败（P0-8）。</p>
+     *
+     * @param paperId   论文ID
+     * @param studentId 论文归属学生ID；为 null 时回退到当前登录用户
+     * @return 查重任务结果
+     */
+    Result<CheckResultVO> createCheckTask(Long paperId, Long studentId);
 
     /**
      * 获取查重任务列表

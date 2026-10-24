@@ -13,6 +13,7 @@ import com.abin.checkrepeatservice.student.service.CheckTaskService;
 import com.abin.checkrepeatservice.teacher.service.TeacherAssignmentService;
 import com.abin.checkrepeatservice.user.service.AdvisorAssignService;
 import com.abin.checkrepeatservice.user.service.MessageService;
+import com.abin.checkrepeatservice.user.vo.CheckResultVO;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -78,7 +79,7 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
             //createConfirmationRecord(paperId, teacherId, DictConstants.AllocationStatus.CONFIRMED, null);
 
             // 5. 触发查重逻辑
-            triggerCheckRepeatLogic(paperId);
+            triggerCheckRepeatLogic(paperInfo);
             log.info("教师确认接收论文成功 - 论文ID: {}, 老师ID: {}", paperId, teacherId);
             return Result.success( "确认接收成功", true);
 
@@ -90,15 +91,25 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
         }
     }
     /**
-     * 触发查重逻辑
+     * 触发查重逻辑（P0-8）
+     *
+     * <p>教师确认接收论文时，当前登录人是教师；查重归属校验必须按「论文所属学生」
+     * 判断，因此这里显式把 paperInfo.studentId 传给创建入口。旧实现用
+     * getCurrentUserId() 比对 paper.studentId，必然校验失败且异常被静默吞掉，
+     * 论文会永远停在「待查重」。</p>
      */
-    private void triggerCheckRepeatLogic(Long paperId) {
+    private void triggerCheckRepeatLogic(PaperInfo paperInfo) {
         try {
-            // 调用查重服务创建查重任务
-            checkTaskService.createCheckTask(paperId);
-            log.info("查重任务创建成功 - 论文ID: {}", paperId);
+            Result<CheckResultVO> createResult =
+                    checkTaskService.createCheckTask(paperInfo.getId(), paperInfo.getStudentId());
+            if (createResult == null || !createResult.isSuccess()) {
+                log.error("触发查重逻辑失败 - 论文ID: {}, 原因: {}",
+                        paperInfo.getId(), createResult == null ? "空响应" : createResult.getMessage());
+                return;
+            }
+            log.info("查重任务创建成功 - 论文ID: {}", paperInfo.getId());
         } catch (Exception e) {
-            log.error("触发查重逻辑失败 - 论文ID: {}", paperId, e);
+            log.error("触发查重逻辑失败 - 论文ID: {}", paperInfo.getId(), e);
             // 查重触发失败不应影响主流程，仅记录日志
         }
     }
