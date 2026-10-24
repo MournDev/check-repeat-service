@@ -143,6 +143,13 @@ public class SecurityConfig {
                         // 与文件令牌命名空间隔离），仅 kkFileView 服务端回调可访问
                         .requestMatchers("/api/file/preview-fetch-report/**").permitAll()
                         .requestMatchers("/api/file/**", "/api/papers/**").authenticated()
+                        // 阶段1止血（P0-3/P0-4）：此前 /api/check、/api/enhanced、/api/advisor、
+                        // /api/assignment 不在任何角色前缀下，仅 anyRequest().authenticated()，
+                        // 任意登录用户都能越权建查重任务/读他人结果/代教师确认论文。
+                        // 这里显式按角色收口，Service 层再做数据归属二次校验。
+                        .requestMatchers("/api/check/**", "/api/enhanced/**").hasAuthority("STUDENT")
+                        .requestMatchers("/api/advisor/**").hasAuthority("ADMIN")
+                        .requestMatchers("/api/assignment/**").hasAuthority("TEACHER")
                         // P5 报告验真：对齐行业报告验真惯例，凭报告编号匿名验证报告真伪，
                         // 只回元数据（标题打码/指标/时间），不回报告文件与正文；接口内有 IP 限流
                         .requestMatchers("/api/report/verify/**").permitAll()
@@ -168,6 +175,9 @@ public class SecurityConfig {
                         // 根路径按 HTTP 方法区分：POST 是「新增学生」，GET 仍是教师查学生列表，
                         // 不能把整个 /api/teacher/students 都收归 ADMIN。
                         .requestMatchers(HttpMethod.POST, "/api/teacher/students").hasAuthority("ADMIN")
+                        // 阶段1止血（P0-5）：学生账号的删除同样是账号生命周期管理动作，
+                        // 教师端只保留「查」，删除/批量删除收归 ADMIN（方法级再做双保险）。
+                        .requestMatchers(HttpMethod.DELETE, "/api/teacher/students/**").hasAuthority("ADMIN")
                         .requestMatchers("/api/teacher/students/add",
                                 "/api/teacher/students/import",
                                 "/api/teacher/students/batch-assign-advisor").hasAuthority("ADMIN")

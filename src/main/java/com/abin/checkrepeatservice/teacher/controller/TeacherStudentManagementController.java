@@ -107,7 +107,8 @@ public class TeacherStudentManagementController {
      * DELETE /api/teacher/students/{studentId}
      */
     @DeleteMapping("/{studentId}")
-    @Operation(summary = "删除学生", description = "删除指定学生")
+    @PreAuthorize("hasAuthority('ADMIN')")
+    @Operation(summary = "删除学生", description = "删除指定学生（仅管理员，教师端只保留查看权限）")
     @OperationLog(type = "delete_student", description = "删除学生")
     public Result<String> deleteStudent(
             @Parameter(description = "学生ID") @PathVariable Long studentId) {
@@ -255,7 +256,8 @@ public class TeacherStudentManagementController {
      * DELETE /api/teacher/students/batch-delete
      */
     @DeleteMapping("/batch-delete")
-    @Operation(summary = "批量删除学生", description = "批量删除多个学生")
+    @PreAuthorize("hasAuthority('ADMIN')")
+    @Operation(summary = "批量删除学生", description = "批量删除多个学生（仅管理员）")
     @OperationLog(type = "batch_delete_student", description = "批量删除学生")
     public Result<Object> batchDeleteStudents(@RequestBody BatchDeleteDTO batchDeleteDTO) {
         
