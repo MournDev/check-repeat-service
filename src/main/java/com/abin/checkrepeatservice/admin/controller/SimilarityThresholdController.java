@@ -38,12 +38,7 @@ public class SimilarityThresholdController {
     @GetMapping
     @ApiOperation("获取相似度阈值设置")
     public Result<SimilarityThresholdVO> getThresholds() {
-        try {
-            return Result.success(similarityThresholdService.getThresholds());
-        } catch (Exception e) {
-            log.error("获取相似度阈值设置失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取相似度阈值设置失败");
-        }
+        return Result.success(similarityThresholdService.getThresholds());
     }
 
     /**
@@ -53,18 +48,8 @@ public class SimilarityThresholdController {
     @ApiOperation("更新相似度阈值设置")
     @OperationLog(type = "similarity_threshold_update", description = "更新相似度阈值设置")
     public Result<Void> updateThresholds(@RequestBody SimilarityThresholdUpdateReq req) {
-        try {
-            similarityThresholdService.updateThresholds(req);
-            return Result.success("相似度阈值设置更新成功");
-        } catch (BusinessException be) {
-            // 必须放行给 GlobalExceptionHandler，才能得到 400 + 自定义文案。
-            // 落到下面的 catch (Exception) 会被吞成 500「系统繁忙」，
-            // 把"阈值填了 150"这类参数错误伪装成服务故障。
-            throw be;
-        } catch (Exception e) {
-            log.error("更新相似度阈值设置失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "更新相似度阈值设置失败");
-        }
+        similarityThresholdService.updateThresholds(req);
+        return Result.success("相似度阈值设置更新成功");
     }
 
 }

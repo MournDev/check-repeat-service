@@ -50,20 +50,15 @@ public class SysOperationLogController {
         log.info("接收分页查询操作日志请求: page={}, size={}, type={}, user={}, status={}", 
                 page, size, operationType, username, status);
         
-        try {
-            LocalDateTime start = DateTimeUtils.parseStart(startTime);
-            LocalDateTime end = DateTimeUtils.parseEndExclusive(endTime);
+        LocalDateTime start = DateTimeUtils.parseStart(startTime);
+        LocalDateTime end = DateTimeUtils.parseEndExclusive(endTime);
 
-            Page<SysOperationLog> result = sysOperationLogService.getOperationLogPage(
-                page, size, operationType, username, status, start, end);
-            
-            log.info("分页查询操作日志成功: 总记录数={}", result.getTotal());
-            return Result.success("查询成功", result);
-            
-        } catch (Exception e) {
-            log.error("分页查询操作日志失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "查询失败: " + "系统异常，请稍后重试");
-        }
+        Page<SysOperationLog> result = sysOperationLogService.getOperationLogPage(
+            page, size, operationType, username, status, start, end);
+        
+        log.info("分页查询操作日志成功: 总记录数={}", result.getTotal());
+        return Result.success("查询成功", result);
+        
     }
 
     /**
@@ -73,18 +68,13 @@ public class SysOperationLogController {
     public Result<SysOperationLog> getOperationLogDetail(@PathVariable Long id) {
         log.info("接收获取操作日志详情请求: id={}", id);
         
-        try {
-            SysOperationLog logDetail = sysOperationLogService.getOperationLogById(id);
-            if (logDetail == null) {
-                return Result.error(ResultCode.RESOURCE_NOT_FOUND, "日志不存在");
-            }
-            
-            return Result.success("获取成功", logDetail);
-            
-        } catch (Exception e) {
-            log.error("获取操作日志详情失败: id={}, error={}", id, e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取失败: " + "系统异常，请稍后重试");
+        SysOperationLog logDetail = sysOperationLogService.getOperationLogById(id);
+        if (logDetail == null) {
+            return Result.error(ResultCode.RESOURCE_NOT_FOUND, "日志不存在");
         }
+        
+        return Result.success("获取成功", logDetail);
+        
     }
 
     /**
@@ -96,14 +86,9 @@ public class SysOperationLogController {
         
         log.info("接收获取操作统计信息请求: days={}", days);
         
-        try {
-            Map<String, Object> statistics = sysOperationLogService.getOperationStatistics(days);
-            return Result.success("获取成功", statistics);
-            
-        } catch (Exception e) {
-            log.error("获取操作统计信息失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取失败: " + "系统异常，请稍后重试");
-        }
+        Map<String, Object> statistics = sysOperationLogService.getOperationStatistics(days);
+        return Result.success("获取成功", statistics);
+        
     }
 
     /**
@@ -116,14 +101,9 @@ public class SysOperationLogController {
         
         log.info("接收获取热门操作统计请求: days={}, limit={}", days, limit);
         
-        try {
-            List<Map<String, Object>> hotOperations = sysOperationLogService.getHotOperations(days, limit);
-            return Result.success("获取成功", hotOperations);
-            
-        } catch (Exception e) {
-            log.error("获取热门操作统计失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取失败: " + "系统异常，请稍后重试");
-        }
+        List<Map<String, Object>> hotOperations = sysOperationLogService.getHotOperations(days, limit);
+        return Result.success("获取成功", hotOperations);
+        
     }
 
     /**
@@ -135,14 +115,9 @@ public class SysOperationLogController {
         
         log.info("接收获取用户活跃度统计请求: days={}", days);
         
-        try {
-            List<Map<String, Object>> userActivity = sysOperationLogService.getUserActivityStatistics(days);
-            return Result.success("获取成功", userActivity);
-            
-        } catch (Exception e) {
-            log.error("获取用户活跃度统计失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取失败: " + "系统异常，请稍后重试");
-        }
+        List<Map<String, Object>> userActivity = sysOperationLogService.getUserActivityStatistics(days);
+        return Result.success("获取成功", userActivity);
+        
     }
 
     /**
@@ -154,14 +129,9 @@ public class SysOperationLogController {
         
         log.info("接收获取模块使用统计请求: days={}", days);
         
-        try {
-            List<Map<String, Object>> moduleUsage = sysOperationLogService.getModuleUsageStatistics(days);
-            return Result.success("获取成功", moduleUsage);
-            
-        } catch (Exception e) {
-            log.error("获取模块使用统计失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取失败: " + "系统异常，请稍后重试");
-        }
+        List<Map<String, Object>> moduleUsage = sysOperationLogService.getModuleUsageStatistics(days);
+        return Result.success("获取成功", moduleUsage);
+        
     }
 
     /**
@@ -171,23 +141,18 @@ public class SysOperationLogController {
     public Result<String> batchDeleteOperationLogs(@RequestBody List<Long> ids) {
         log.info("接收批量删除操作日志请求: ids={}", ids);
         
-        try {
-            if (ids == null || ids.isEmpty()) {
-                return Result.error(ResultCode.PARAM_ERROR, "请选择要删除的日志");
-            }
-            
-            boolean result = sysOperationLogService.batchDeleteOperationLogs(ids);
-            if (result) {
-                log.info("批量删除操作日志成功: 删除条数={}", ids.size());
-                return Result.success("删除成功");
-            } else {
-                return Result.error(ResultCode.SYSTEM_ERROR, "删除失败");
-            }
-            
-        } catch (Exception e) {
-            log.error("批量删除操作日志失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "删除失败: " + "系统异常，请稍后重试");
+        if (ids == null || ids.isEmpty()) {
+            return Result.error(ResultCode.PARAM_ERROR, "请选择要删除的日志");
         }
+        
+        boolean result = sysOperationLogService.batchDeleteOperationLogs(ids);
+        if (result) {
+            log.info("批量删除操作日志成功: 删除条数={}", ids.size());
+            return Result.success("删除成功");
+        } else {
+            return Result.error(ResultCode.SYSTEM_ERROR, "删除失败");
+        }
+        
     }
 
     /**
@@ -197,19 +162,14 @@ public class SysOperationLogController {
     public Result<String> cleanExpiredLogs(@RequestParam(defaultValue = "30") Integer days) {
         log.info("接收清理过期操作日志请求: days={}", days);
         
-        try {
-            boolean result = sysOperationLogService.cleanExpiredLogs(days);
-            if (result) {
-                log.info("清理过期操作日志成功");
-                return Result.success("清理成功");
-            } else {
-                return Result.error(ResultCode.SYSTEM_ERROR, "清理失败");
-            }
-            
-        } catch (Exception e) {
-            log.error("清理过期操作日志失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "清理失败: " + "系统异常，请稍后重试");
+        boolean result = sysOperationLogService.cleanExpiredLogs(days);
+        if (result) {
+            log.info("清理过期操作日志成功");
+            return Result.success("清理成功");
+        } else {
+            return Result.error(ResultCode.SYSTEM_ERROR, "清理失败");
         }
+        
     }
 
     /**
@@ -226,23 +186,18 @@ public class SysOperationLogController {
 
         log.info("接收审计日志汇总请求: beginDate={}, endDate={}", beginDate, endDate);
 
-        try {
-            if (beginDate != null && endDate != null && beginDate.isAfter(endDate)) {
-                return Result.error(ResultCode.PARAM_VALUE_INVALID, "beginDate 不能晚于 endDate");
-            }
-            // 结束日按"整日包含"换算为开区间上界（endDate 次日 0 点），与 XML 的 >= / < 口径一致
-            LocalDateTime start = beginDate == null ? null : beginDate.atStartOfDay();
-            LocalDateTime end = endDate == null ? null : endDate.plusDays(1).atStartOfDay();
-
-            Map<String, Object> data = new HashMap<>();
-            data.put("operationTypes", sysOperationLogService.summarizeByOperationType(start, end));
-            data.put("userTypes", sysOperationLogService.summarizeByUserType(start, end));
-            return Result.success("获取成功", data);
-
-        } catch (Exception e) {
-            log.error("获取审计日志汇总失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取失败: " + "系统异常，请稍后重试");
+        if (beginDate != null && endDate != null && beginDate.isAfter(endDate)) {
+            return Result.error(ResultCode.PARAM_VALUE_INVALID, "beginDate 不能晚于 endDate");
         }
+        // 结束日按"整日包含"换算为开区间上界（endDate 次日 0 点），与 XML 的 >= / < 口径一致
+        LocalDateTime start = beginDate == null ? null : beginDate.atStartOfDay();
+        LocalDateTime end = endDate == null ? null : endDate.plusDays(1).atStartOfDay();
+
+        Map<String, Object> data = new HashMap<>();
+        data.put("operationTypes", sysOperationLogService.summarizeByOperationType(start, end));
+        data.put("userTypes", sysOperationLogService.summarizeByUserType(start, end));
+        return Result.success("获取成功", data);
+
     }
 
     /**

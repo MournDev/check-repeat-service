@@ -28,13 +28,8 @@ public class DeadlinesConfigController {
     @GetMapping("/deadlines")
     @ApiOperation("获取时间节点配置")
     public Result<DeadlinesDTO> getDeadlinesConfig() {
-        try {
-            DeadlinesDTO deadlines = systemConfigService.getDeadlines();
-            return Result.success(deadlines);
-        } catch (Exception e) {
-            log.error("获取时间节点配置失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR,"获取时间节点配置失败：");
-        }
+        DeadlinesDTO deadlines = systemConfigService.getDeadlines();
+        return Result.success(deadlines);
     }
     
     /**
@@ -43,13 +38,8 @@ public class DeadlinesConfigController {
     @PutMapping("/deadlines")
     @ApiOperation("更新时间节点配置")
     public Result<Void> updateDeadlinesConfig(@RequestBody DeadlinesDTO deadlines) {
-        try {
-            log.info("更新时间节点配置：{}", deadlines);
-            systemConfigService.updateDeadlines(deadlines);
-            return Result.success("时间节点配置更新成功");
-        } catch (Exception e) {
-            log.error("更新时间节点配置失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR,"更新时间节点配置失败：");
-        }
+        log.info("更新时间节点配置：{}", deadlines);
+        systemConfigService.updateDeadlines(deadlines);
+        return Result.success("时间节点配置更新成功");
     }
 }

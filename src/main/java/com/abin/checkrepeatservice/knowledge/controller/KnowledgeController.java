@@ -45,12 +45,7 @@ public class KnowledgeController {
      */
     @GetMapping("/categories")
     public Result<List<KnowledgeCategory>> getCategories() {
-        try {
-            return Result.success(knowledgeCategoryService.listActiveWithArticleCount());
-        } catch (Exception e) {
-            log.error("查询知识库分类失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "查询知识库分类失败: " + "系统异常，请稍后重试");
-        }
+        return Result.success(knowledgeCategoryService.listActiveWithArticleCount());
     }
 
     /**
@@ -65,12 +60,7 @@ public class KnowledgeController {
             @RequestParam(required = false) String category,
             @RequestParam(required = false) String keyword) {
         log.info("接收知识库文章列表请求: page={}, size={}, category={}, keyword={}", page, size, category, keyword);
-        try {
-            return Result.success(knowledgeArticleService.getPublishedArticlePage(category, keyword, page, size));
-        } catch (Exception e) {
-            log.error("查询知识库文章列表失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "查询知识库文章列表失败: " + "系统异常，请稍后重试");
-        }
+        return Result.success(knowledgeArticleService.getPublishedArticlePage(category, keyword, page, size));
     }
 
     /**
@@ -78,12 +68,7 @@ public class KnowledgeController {
      */
     @GetMapping("/articles/popular")
     public Result<List<KnowledgeArticle>> getPopularArticles(@RequestParam(defaultValue = "5") Integer limit) {
-        try {
-            return Result.success(knowledgeArticleService.getPopularArticles(limit));
-        } catch (Exception e) {
-            log.error("查询知识库热门文章失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "查询知识库热门文章失败: " + "系统异常，请稍后重试");
-        }
+        return Result.success(knowledgeArticleService.getPopularArticles(limit));
     }
 
     /**
@@ -94,16 +79,11 @@ public class KnowledgeController {
      */
     @GetMapping("/articles/{id}")
     public Result<KnowledgeArticle> getArticle(@PathVariable("id") Long id) {
-        try {
-            KnowledgeArticle article = knowledgeArticleService.getPublishedArticleDetail(id);
-            if (article == null) {
-                return Result.error(ResultCode.RESOURCE_NOT_FOUND, "文章不存在或未发布");
-            }
-            return Result.success(article);
-        } catch (Exception e) {
-            log.error("查询知识库文章详情失败: id={}, {}", id, e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "查询知识库文章详情失败: " + "系统异常，请稍后重试");
+        KnowledgeArticle article = knowledgeArticleService.getPublishedArticleDetail(id);
+        if (article == null) {
+            return Result.error(ResultCode.RESOURCE_NOT_FOUND, "文章不存在或未发布");
         }
+        return Result.success(article);
     }
 
     /**
@@ -116,11 +96,6 @@ public class KnowledgeController {
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String category) {
         log.info("接收知识库文章搜索请求: page={}, size={}, keyword={}, category={}", page, size, keyword, category);
-        try {
-            return Result.success(knowledgeArticleService.getPublishedArticlePage(category, keyword, page, size));
-        } catch (Exception e) {
-            log.error("搜索知识库文章失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "搜索知识库文章失败: " + "系统异常，请稍后重试");
-        }
+        return Result.success(knowledgeArticleService.getPublishedArticlePage(category, keyword, page, size));
     }
 }

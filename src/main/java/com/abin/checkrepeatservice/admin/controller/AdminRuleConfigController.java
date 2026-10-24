@@ -150,48 +150,43 @@ public class AdminRuleConfigController {
     public Result<Map<String, Object>> getAllConfig() {
         log.info("接收获取所有系统配置请求（真实数据）");
         
-        try {
-            Map<String, Object> allConfig = new HashMap<>();
-            
-            // 1. 获取基础配置（来自数据库）
-            Map<String, Object> basicConfig = getBasicConfigFromDB();
-            allConfig.put("basicConfig", basicConfig);
-            
-            // 2. 获取查重配置（来自数据库）
-            Map<String, Object> plagiarismConfig = getPlagiarismConfigFromDB();
-            allConfig.put("plagiarismConfig", plagiarismConfig);
-            
-            // 3. 获取安全配置（来自数据库）
-            Map<String, Object> securityConfig = getSecurityConfigFromDB();
-            allConfig.put("securityConfig", securityConfig);
-            
-            // 4. 获取邮件配置（来自数据库，不再是配置文件）
-            Map<String, Object> emailConfig = getEmailConfigFromDB();
-            allConfig.put("emailConfig", emailConfig);
-            
-            // 5. 获取性能配置（来自数据库）
-            Map<String, Object> performanceConfig = getPerformanceConfigFromDB();
-            allConfig.put("performanceConfig", performanceConfig);
-            
-            // 6. 获取查重规则配置（来自数据库）
-            Result<Page<CheckRule>> ruleResult = adminRuleConfigService.getCheckRuleList(null, null, 1, 10);
-            allConfig.put("checkRules", ruleResult.getData());
-            
-            // 7. 获取比对库配置（来自数据库）
-            Result<Page<CompareLib>> libResult = adminRuleConfigService.getCompareLibList(null, null, null, 1, 10);
-            allConfig.put("compareLibs", libResult.getData());
-            
-            // 8. 获取系统参数（来自数据库）
-            Result<SystemParam> paramResult = adminRuleConfigService.getCurrentSystemParam();
-            allConfig.put("systemParams", paramResult.getData());
-            
-            log.info("获取所有系统配置成功，共{}个配置项", allConfig.size());
-            return Result.success("系统配置获取成功", allConfig);
-            
-        } catch (Exception e) {
-            log.error("获取系统配置失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取系统配置失败: " + "系统异常，请稍后重试");
-        }
+        Map<String, Object> allConfig = new HashMap<>();
+        
+        // 1. 获取基础配置（来自数据库）
+        Map<String, Object> basicConfig = getBasicConfigFromDB();
+        allConfig.put("basicConfig", basicConfig);
+        
+        // 2. 获取查重配置（来自数据库）
+        Map<String, Object> plagiarismConfig = getPlagiarismConfigFromDB();
+        allConfig.put("plagiarismConfig", plagiarismConfig);
+        
+        // 3. 获取安全配置（来自数据库）
+        Map<String, Object> securityConfig = getSecurityConfigFromDB();
+        allConfig.put("securityConfig", securityConfig);
+        
+        // 4. 获取邮件配置（来自数据库，不再是配置文件）
+        Map<String, Object> emailConfig = getEmailConfigFromDB();
+        allConfig.put("emailConfig", emailConfig);
+        
+        // 5. 获取性能配置（来自数据库）
+        Map<String, Object> performanceConfig = getPerformanceConfigFromDB();
+        allConfig.put("performanceConfig", performanceConfig);
+        
+        // 6. 获取查重规则配置（来自数据库）
+        Result<Page<CheckRule>> ruleResult = adminRuleConfigService.getCheckRuleList(null, null, 1, 10);
+        allConfig.put("checkRules", ruleResult.getData());
+        
+        // 7. 获取比对库配置（来自数据库）
+        Result<Page<CompareLib>> libResult = adminRuleConfigService.getCompareLibList(null, null, null, 1, 10);
+        allConfig.put("compareLibs", libResult.getData());
+        
+        // 8. 获取系统参数（来自数据库）
+        Result<SystemParam> paramResult = adminRuleConfigService.getCurrentSystemParam();
+        allConfig.put("systemParams", paramResult.getData());
+        
+        log.info("获取所有系统配置成功，共{}个配置项", allConfig.size());
+        return Result.success("系统配置获取成功", allConfig);
+        
     }
 
     /**
@@ -318,14 +313,9 @@ public class AdminRuleConfigController {
     @PutMapping("/basic")
     public Result<String> updateBasicConfig(@RequestBody Map<String, Object> config) {
         log.info("接收更新基础配置请求: {}", config);
-        try {
-            saveConfig("system_basic", config, "系统基础配置");
-            log.info("基础配置更新成功");
-            return Result.success("基础配置更新成功");
-        } catch (Exception e) {
-            log.error("更新基础配置失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "更新基础配置失败: " + "系统异常，请稍后重试");
-        }
+        saveConfig("system_basic", config, "系统基础配置");
+        log.info("基础配置更新成功");
+        return Result.success("基础配置更新成功");
     }
 
     /**
@@ -334,14 +324,9 @@ public class AdminRuleConfigController {
     @PutMapping("/plagiarism")
     public Result<String> updatePlagiarismConfig(@RequestBody Map<String, Object> config) {
         log.info("接收更新查重配置请求: {}", config);
-        try {
-            saveConfig("plagiarism_config", config, "查重配置");
-            log.info("查重配置更新成功");
-            return Result.success("查重配置更新成功");
-        } catch (Exception e) {
-            log.error("更新查重配置失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "更新查重配置失败: " + "系统异常，请稍后重试");
-        }
+        saveConfig("plagiarism_config", config, "查重配置");
+        log.info("查重配置更新成功");
+        return Result.success("查重配置更新成功");
     }
 
     /**
@@ -350,14 +335,9 @@ public class AdminRuleConfigController {
     @PutMapping("/security")
     public Result<String> updateSecurityConfig(@RequestBody Map<String, Object> config) {
         log.info("接收更新安全配置请求: {}", config);
-        try {
-            saveConfig("security_config", config, "安全配置");
-            log.info("安全配置更新成功");
-            return Result.success("安全配置更新成功");
-        } catch (Exception e) {
-            log.error("更新安全配置失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "更新安全配置失败: " + "系统异常，请稍后重试");
-        }
+        saveConfig("security_config", config, "安全配置");
+        log.info("安全配置更新成功");
+        return Result.success("安全配置更新成功");
     }
 
     /**
@@ -366,14 +346,9 @@ public class AdminRuleConfigController {
     @PutMapping("/email")
     public Result<String> updateEmailConfig(@RequestBody Map<String, Object> config) {
         log.info("接收更新邮件配置请求: {}", config);
-        try {
-            saveConfig("email_config", config, "邮件配置");
-            log.info("邮件配置更新成功");
-            return Result.success("邮件配置更新成功");
-        } catch (Exception e) {
-            log.error("更新邮件配置失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "更新邮件配置失败: " + "系统异常，请稍后重试");
-        }
+        saveConfig("email_config", config, "邮件配置");
+        log.info("邮件配置更新成功");
+        return Result.success("邮件配置更新成功");
     }
 
     /**
@@ -401,20 +376,15 @@ public class AdminRuleConfigController {
         
         log.info("开始测试邮件发送至: {}", testEmail);
         
-        try {
-            // 真实走 SMTP 发送：失败必须如实返回，避免管理员误判配置可用
-            boolean sent = emailService.sendConfigTestEmail(testEmail);
-            if (!sent) {
-                log.warn("邮件测试发送失败: {}", testEmail);
-                return Result.error(ResultCode.SYSTEM_ERROR,
-                        "测试邮件发送失败，请检查 SMTP 配置与收件地址");
-            }
-            log.info("邮件测试发送成功: {}", testEmail);
-            return Result.success("测试邮件发送成功，请检查邮箱: " + testEmail);
-        } catch (Exception e) {
-            log.error("邮件测试发送异常: {}", testEmail, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "邮件测试发送失败，系统异常，请稍后重试");
+        // 真实走 SMTP 发送：失败必须如实返回，避免管理员误判配置可用
+        boolean sent = emailService.sendConfigTestEmail(testEmail);
+        if (!sent) {
+            log.warn("邮件测试发送失败: {}", testEmail);
+            return Result.error(ResultCode.SYSTEM_ERROR,
+                    "测试邮件发送失败，请检查 SMTP 配置与收件地址");
         }
+        log.info("邮件测试发送成功: {}", testEmail);
+        return Result.success("测试邮件发送成功，请检查邮箱: " + testEmail);
     }
 
     // ========================== 学院月度查重额度（P5） ==========================
@@ -453,45 +423,40 @@ public class AdminRuleConfigController {
         
         log.info("接收到的配置数据: {}", allConfig.keySet());
         
-        try {
-            // 保存各个配置项
-            if (allConfig.containsKey("basicConfig")) {
-                log.info("保存基础配置");
-                Map<String, Object> basicConfig = (Map<String, Object>) allConfig.get("basicConfig");
-                saveConfig("system_basic", basicConfig, "系统基础配置");
-            }
-            
-            if (allConfig.containsKey("plagiarismConfig")) {
-                log.info("保存查重配置");
-                Map<String, Object> plagiarismConfig = (Map<String, Object>) allConfig.get("plagiarismConfig");
-                saveConfig("plagiarism_config", plagiarismConfig, "查重配置");
-            }
-            
-            if (allConfig.containsKey("securityConfig")) {
-                log.info("保存安全配置");
-                Map<String, Object> securityConfig = (Map<String, Object>) allConfig.get("securityConfig");
-                saveConfig("security_config", securityConfig, "安全配置");
-            }
-            
-            if (allConfig.containsKey("emailConfig")) {
-                log.info("保存邮件配置");
-                Map<String, Object> emailConfig = (Map<String, Object>) allConfig.get("emailConfig");
-                saveConfig("email_config", emailConfig, "邮件配置");
-            }
-            
-            if (allConfig.containsKey("performanceConfig")) {
-                log.info("保存性能配置");
-                Map<String, Object> performanceConfig = (Map<String, Object>) allConfig.get("performanceConfig");
-                saveConfig("performance", performanceConfig, "性能配置");
-            }
-            
-            log.info("所有配置保存成功");
-            return Result.success("所有配置保存成功");
-            
-        } catch (Exception e) {
-            log.error("保存配置失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "保存配置失败: " + "系统异常，请稍后重试");
+        // 保存各个配置项
+        if (allConfig.containsKey("basicConfig")) {
+            log.info("保存基础配置");
+            Map<String, Object> basicConfig = (Map<String, Object>) allConfig.get("basicConfig");
+            saveConfig("system_basic", basicConfig, "系统基础配置");
         }
+        
+        if (allConfig.containsKey("plagiarismConfig")) {
+            log.info("保存查重配置");
+            Map<String, Object> plagiarismConfig = (Map<String, Object>) allConfig.get("plagiarismConfig");
+            saveConfig("plagiarism_config", plagiarismConfig, "查重配置");
+        }
+        
+        if (allConfig.containsKey("securityConfig")) {
+            log.info("保存安全配置");
+            Map<String, Object> securityConfig = (Map<String, Object>) allConfig.get("securityConfig");
+            saveConfig("security_config", securityConfig, "安全配置");
+        }
+        
+        if (allConfig.containsKey("emailConfig")) {
+            log.info("保存邮件配置");
+            Map<String, Object> emailConfig = (Map<String, Object>) allConfig.get("emailConfig");
+            saveConfig("email_config", emailConfig, "邮件配置");
+        }
+        
+        if (allConfig.containsKey("performanceConfig")) {
+            log.info("保存性能配置");
+            Map<String, Object> performanceConfig = (Map<String, Object>) allConfig.get("performanceConfig");
+            saveConfig("performance", performanceConfig, "性能配置");
+        }
+        
+        log.info("所有配置保存成功");
+        return Result.success("所有配置保存成功");
+        
     }
 
     /**
@@ -500,19 +465,14 @@ public class AdminRuleConfigController {
     @PostMapping("/reset-default")
     public Result<String> resetDefaultConfig() {
         log.info("接收恢复默认配置请求");
-        try {
-            // 删除现有配置
-            systemConfigService.deleteAllConfigs();
-            
-            // 插入默认配置
-            insertDefaultConfigs();
-            
-            log.info("默认配置恢复成功");
-            return Result.success("默认配置恢复成功");
-        } catch (Exception e) {
-            log.error("恢复默认配置失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "恢复默认配置失败: " + "系统异常，请稍后重试");
-        }
+        // 删除现有配置
+        systemConfigService.deleteAllConfigs();
+        
+        // 插入默认配置
+        insertDefaultConfigs();
+        
+        log.info("默认配置恢复成功");
+        return Result.success("默认配置恢复成功");
     }
     
     /**

@@ -53,22 +53,17 @@ public class MinioController {
      * 测试MinIO连接
      */
     @GetMapping("/test-connection")
-    public Result<String> testConnection() {
-        try {
-            boolean exists = minioClient.bucketExists(
-                io.minio.BucketExistsArgs.builder()
-                    .bucket(bucketName)
-                    .build()
-            );
+    public Result<String> testConnection() throws Exception {
+        boolean exists = minioClient.bucketExists(
+            io.minio.BucketExistsArgs.builder()
+                .bucket(bucketName)
+                .build()
+        );
 
-            if (exists) {
-                return Result.success("MinIO连接成功", "Bucket '" + bucketName + "' 存在且可访问");
-            } else {
-                return Result.error(ResultCode.SYSTEM_ERROR, "Bucket '" + bucketName + "' 不存在");
-            }
-        } catch (Exception e) {
-            log.error("MinIO连接测试失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "MinIO连接失败");
+        if (exists) {
+            return Result.success("MinIO连接成功", "Bucket '" + bucketName + "' 存在且可访问");
+        } else {
+            return Result.error(ResultCode.SYSTEM_ERROR, "Bucket '" + bucketName + "' 不存在");
         }
     }
 
@@ -76,28 +71,23 @@ public class MinioController {
      * 列出存储桶中的所有对象
      */
     @GetMapping("/list")
-    public Result<List<Object>> list() {
-        try {
-            Iterable<io.minio.Result<Item>> myObjects = minioClient.listObjects(ListObjectsArgs.builder()
-                    .bucket(bucketName)
-                    .build());
-            Iterator<io.minio.Result<Item>> iterator = myObjects.iterator();
-            List<Object> items = new ArrayList<>();
+    public Result<List<Object>> list() throws Exception {
+        Iterable<io.minio.Result<Item>> myObjects = minioClient.listObjects(ListObjectsArgs.builder()
+                .bucket(bucketName)
+                .build());
+        Iterator<io.minio.Result<Item>> iterator = myObjects.iterator();
+        List<Object> items = new ArrayList<>();
 
-            while (iterator.hasNext()) {
-                Item item = iterator.next().get();
-                Map<String, Object> fileInfo = new HashMap<>();
-                fileInfo.put("fileName", item.objectName());
-                fileInfo.put("fileSize", item.size());
-                fileInfo.put("lastModified", item.lastModified());
-                items.add(fileInfo);
-            }
-
-            return Result.success("文件列表获取成功", items);
-        } catch (Exception e) {
-            log.error("列出文件失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "文件列表获取失败");
+        while (iterator.hasNext()) {
+            Item item = iterator.next().get();
+            Map<String, Object> fileInfo = new HashMap<>();
+            fileInfo.put("fileName", item.objectName());
+            fileInfo.put("fileSize", item.size());
+            fileInfo.put("lastModified", item.lastModified());
+            items.add(fileInfo);
         }
+
+        return Result.success("文件列表获取成功", items);
     }
 
     /**
@@ -190,21 +180,16 @@ public class MinioController {
      * 删除文件
      */
     @DeleteMapping("/delete/{fileName}")
-    public Result<String> delete(@PathVariable("fileName") String fileName) {
+    public Result<String> delete(@PathVariable("fileName") String fileName) throws Exception {
         if (!isSafeObjectName(fileName)) {
             return Result.error(ResultCode.PARAM_ERROR, "非法的对象名称");
         }
-        try {
-            minioClient.removeObject(RemoveObjectArgs.builder()
-                    .bucket(bucketName)
-                    .object(fileName)
-                    .build());
-            log.warn("管理员删除对象: bucket={}, object={}", bucketName, fileName);
-            return Result.success("文件删除成功", fileName);
-        } catch (Exception e) {
-            log.error("删除文件失败: {}", fileName, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "文件删除失败");
-        }
+        minioClient.removeObject(RemoveObjectArgs.builder()
+                .bucket(bucketName)
+                .object(fileName)
+                .build());
+        log.warn("管理员删除对象: bucket={}, object={}", bucketName, fileName);
+        return Result.success("文件删除成功", fileName);
     }
 
     /**

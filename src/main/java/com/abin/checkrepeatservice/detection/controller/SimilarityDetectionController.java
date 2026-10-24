@@ -39,24 +39,19 @@ public class SimilarityDetectionController {
     public Result<SimilarityDetectionResult> detectSimilarity(
             @RequestHeader("Authorization") String token,
             @Parameter(description = "论文ID") @RequestParam Long paperId,
-            @Parameter(description = "比对论文ID列表（可选，null表示已准入比对库全库）") @RequestBody(required = false) List<Long> targetPaperIds) {
-        try {
-            Long userId = jwtUtils.getUserIdFromToken(token);
-            log.info("用户请求查重检测: userId={}, paperId={}", userId, paperId);
-            
-            Result<SimilarityDetectionResult> result = detectionService.detectPaperSimilarity(
-                    paperId, targetPaperIds, userId);
-            
-            if (result.isSuccess()) {
-                log.info("查重检测完成: paperId={}, similarity={}%", paperId, 
-                        result.getData().getOverallSimilarity());
-            }
-            
-            return result;
-        } catch (Exception e) {
-            log.error("查重检测失败: paperId={}", paperId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "查重检测失败: " + "系统异常，请稍后重试");
+            @Parameter(description = "比对论文ID列表（可选，null表示已准入比对库全库）") @RequestBody(required = false) List<Long> targetPaperIds) throws Exception {
+        Long userId = jwtUtils.getUserIdFromToken(token);
+        log.info("用户请求查重检测: userId={}, paperId={}", userId, paperId);
+        
+        Result<SimilarityDetectionResult> result = detectionService.detectPaperSimilarity(
+                paperId, targetPaperIds, userId);
+        
+        if (result.isSuccess()) {
+            log.info("查重检测完成: paperId={}, similarity={}%", paperId, 
+                    result.getData().getOverallSimilarity());
         }
+        
+        return result;
     }
 
     /**
@@ -66,16 +61,11 @@ public class SimilarityDetectionController {
     @Operation(summary = "获取查重历史", description = "获取指定论文的查重检测历史记录")
     public Result<List<SimilarityDetectionResult>> getDetectionHistory(
             @RequestHeader("Authorization") String token,
-            @Parameter(description = "论文ID") @PathVariable Long paperId) {
-        try {
-            Long userId = jwtUtils.getUserIdFromToken(token);
-            log.debug("用户获取查重历史: userId={}, paperId={}", userId, paperId);
+            @Parameter(description = "论文ID") @PathVariable Long paperId) throws Exception {
+        Long userId = jwtUtils.getUserIdFromToken(token);
+        log.debug("用户获取查重历史: userId={}, paperId={}", userId, paperId);
 
-            return detectionService.getDetectionHistory(paperId, userId);
-        } catch (Exception e) {
-            log.error("获取查重历史失败: paperId={}", paperId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取查重历史失败: " + "系统异常，请稍后重试");
-        }
+        return detectionService.getDetectionHistory(paperId, userId);
     }
 
     /**
@@ -85,15 +75,10 @@ public class SimilarityDetectionController {
     @Operation(summary = "重新查重检测", description = "重新对本人论文执行查重检测（仅比对已准入论文）")
     public Result<SimilarityDetectionResult> recheckPaper(
             @RequestHeader("Authorization") String token,
-            @Parameter(description = "论文ID") @PathVariable Long paperId) {
-        try {
-            Long userId = jwtUtils.getUserIdFromToken(token);
-            log.info("用户请求重新查重: userId={}, paperId={}", userId, paperId);
-            
-            return detectionService.detectPaperSimilarity(paperId, null, userId);
-        } catch (Exception e) {
-            log.error("重新查重失败: paperId={}", paperId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "重新查重失败: " + "系统异常，请稍后重试");
-        }
+            @Parameter(description = "论文ID") @PathVariable Long paperId) throws Exception {
+        Long userId = jwtUtils.getUserIdFromToken(token);
+        log.info("用户请求重新查重: userId={}, paperId={}", userId, paperId);
+        
+        return detectionService.detectPaperSimilarity(paperId, null, userId);
     }
 }

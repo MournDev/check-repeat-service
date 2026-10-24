@@ -36,12 +36,7 @@ public class AssignmentHistoryController {
     @GetMapping("/stats")
     public Result<AssignmentHistoryStatsDTO> getAssignmentHistoryStats() {
         log.info("接收获取分配记录统计信息请求");
-        try {
-            return assignmentHistoryService.getAssignmentHistoryStats();
-        } catch (Exception e) {
-            log.error("获取分配记录统计信息失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取分配记录统计信息失败: " + "系统异常，请稍后重试");
-        }
+        return assignmentHistoryService.getAssignmentHistoryStats();
     }
 
     /**
@@ -61,13 +56,8 @@ public class AssignmentHistoryController {
         log.info("接收获取分配记录列表请求: startDate={}, endDate={}, assignmentType={}, major={}, status={}, keyword={}, page={}, size={}",
                 startDate, endDate, assignmentType, major, status, keyword, page, size);
         
-        try {
-            return assignmentHistoryService.getAssignmentRecordList(
-                    startDate, endDate, assignmentType, major, status, keyword, page, size);
-        } catch (Exception e) {
-            log.error("获取分配记录列表失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取分配记录列表失败: " + "系统异常，请稍后重试");
-        }
+        return assignmentHistoryService.getAssignmentRecordList(
+                startDate, endDate, assignmentType, major, status, keyword, page, size);
     }
 
     /**
@@ -76,12 +66,7 @@ public class AssignmentHistoryController {
     @DeleteMapping
     public Result<String> deleteAssignmentRecords(@RequestBody DeleteAssignmentRecordsDTO request) {
         log.info("接收删除分配记录请求: ids={}", request.getIds());
-        try {
-            return assignmentHistoryService.deleteAssignmentRecords(request);
-        } catch (Exception e) {
-            log.error("删除分配记录失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "删除分配记录失败: " + "系统异常，请稍后重试");
-        }
+        return assignmentHistoryService.deleteAssignmentRecords(request);
     }
 
     /**
@@ -90,12 +75,7 @@ public class AssignmentHistoryController {
     @PostMapping("/revoke")
     public Result<String> revokeAssignment(@RequestBody RevokeAssignmentDTO request) {
         log.info("接收撤销指导老师分配请求: recordId={}, reason={}", request.getRecordId(), request.getReason());
-        try {
-            return assignmentHistoryService.revokeAssignment(request);
-        } catch (Exception e) {
-            log.error("撤销指导老师分配失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "撤销指导老师分配失败: " + "系统异常，请稍后重试");
-        }
+        return assignmentHistoryService.revokeAssignment(request);
     }
 
     /**
@@ -105,12 +85,7 @@ public class AssignmentHistoryController {
     public Result<String> reassignTeacher(@RequestBody ReassignTeacherDTO request) {
         log.info("接收重新分配指导老师请求: recordId={}, newTeacherId={}, reason={}", 
                 request.getRecordId(), request.getNewTeacherId(), request.getReason());
-        try {
-            return assignmentHistoryService.reassignTeacher(request);
-        } catch (Exception e) {
-            log.error("重新分配指导老师失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "重新分配指导老师失败: " + "系统异常，请稍后重试");
-        }
+        return assignmentHistoryService.reassignTeacher(request);
     }
 
     /**
@@ -119,12 +94,7 @@ public class AssignmentHistoryController {
     @GetMapping("/available-teachers")
     public Result<List<AvailableTeacherDTO>> getAvailableTeachers() {
         log.info("接收获取可用教师列表请求");
-        try {
-            return assignmentHistoryService.getAvailableTeachers();
-        } catch (Exception e) {
-            log.error("获取可用教师列表失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取可用教师列表失败: " + "系统异常，请稍后重试");
-        }
+        return assignmentHistoryService.getAvailableTeachers();
     }
 
     /**
@@ -164,11 +134,6 @@ public class AssignmentHistoryController {
     @PostMapping("/refresh")
     public Result<String> refreshAssignmentData() {
         log.info("接收刷新分配记录数据请求");
-        try {
-            return assignmentHistoryService.refreshAssignmentData();
-        } catch (Exception e) {
-            log.error("刷新分配记录数据失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "刷新分配记录数据失败: " + "系统异常，请稍后重试");
-        }
+        return assignmentHistoryService.refreshAssignmentData();
     }
 }

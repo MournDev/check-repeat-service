@@ -44,12 +44,7 @@ public class ReviewWorkflowController {
     @GetMapping
     @ApiOperation("获取审核工作流配置")
     public Result<ReviewWorkflowVO> getWorkflow() {
-        try {
-            return Result.success(reviewWorkflowService.getWorkflow());
-        } catch (Exception e) {
-            log.error("获取审核工作流配置失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取审核工作流配置失败");
-        }
+        return Result.success(reviewWorkflowService.getWorkflow());
     }
 
     /**
@@ -59,18 +54,8 @@ public class ReviewWorkflowController {
     @ApiOperation("更新审核工作流配置")
     @OperationLog(type = "review_workflow_update", description = "更新审核工作流配置")
     public Result<Void> updateWorkflow(@RequestBody ReviewWorkflowUpdateReq req) {
-        try {
-            reviewWorkflowService.updateWorkflow(req);
-            return Result.success("审核工作流配置更新成功");
-        } catch (BusinessException be) {
-            // 必须放行给 GlobalExceptionHandler，才能得到 400 + 自定义文案。
-            // 落到下面的 catch (Exception) 会被吞成 500「系统繁忙」，
-            // 把"步骤名称为空"这类参数错误伪装成服务故障。
-            throw be;
-        } catch (Exception e) {
-            log.error("更新审核工作流配置失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "更新审核工作流配置失败");
-        }
+        reviewWorkflowService.updateWorkflow(req);
+        return Result.success("审核工作流配置更新成功");
     }
 
     /**
@@ -79,12 +64,7 @@ public class ReviewWorkflowController {
     @GetMapping("/teachers")
     @ApiOperation("获取审批人候选教师列表")
     public Result<List<ReviewWorkflowVO.TeacherOption>> getTeachers() {
-        try {
-            return Result.success(reviewWorkflowService.listTeacherOptions());
-        } catch (Exception e) {
-            log.error("获取审批人候选列表失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取审批人列表失败");
-        }
+        return Result.success(reviewWorkflowService.listTeacherOptions());
     }
 
 }

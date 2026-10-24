@@ -102,13 +102,8 @@ public class StudentInfoController {
      */
     @GetMapping("/verify-email")
     public Result<String> verifyEmail(@RequestParam String token) {
-        try {
-            infoService.verifyEmail(token);
-            return Result.success("邮箱验证成功");
-        } catch (Exception e) {
-            log.error("邮箱验证失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "邮箱验证失败：" + "系统异常，请稍后重试");
-        }
+        infoService.verifyEmail(token);
+        return Result.success("邮箱验证成功");
     }
 
     /**

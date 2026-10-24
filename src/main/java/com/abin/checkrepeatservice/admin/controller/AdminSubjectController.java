@@ -53,12 +53,7 @@ public class AdminSubjectController {
     @GetMapping
     @ApiOperation("获取学科领域树")
     public Result<List<AdminSubjectVO>> listTree() {
-        try {
-            return Result.success(adminSubjectService.listTree());
-        } catch (Exception e) {
-            log.error("获取学科领域树失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取学科领域失败");
-        }
+        return Result.success(adminSubjectService.listTree());
     }
 
     /**
@@ -69,14 +64,7 @@ public class AdminSubjectController {
     @OperationLog(type = "subject_create", description = "新增学科领域")
     public Result<Long> create(@Valid @RequestBody SubjectUpsertReq req) {
         log.info("接收新增学科领域请求: code={}, name={}, parentId={}", req.getCode(), req.getName(), req.getParentId());
-        try {
-            return Result.success("新增成功", adminSubjectService.create(req));
-        } catch (BusinessException be) {
-            throw be;
-        } catch (Exception e) {
-            log.error("新增学科领域失败: code={}, {}", req.getCode(), e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "新增学科领域失败");
-        }
+        return Result.success("新增成功", adminSubjectService.create(req));
     }
 
     /**
@@ -88,15 +76,8 @@ public class AdminSubjectController {
     public Result<Void> update(@PathVariable("id") Long id,
                                @Valid @RequestBody SubjectUpsertReq req) {
         log.info("接收修改学科领域请求: id={}, name={}", id, req.getName());
-        try {
-            adminSubjectService.update(id, req);
-            return Result.success("修改成功");
-        } catch (BusinessException be) {
-            throw be;
-        } catch (Exception e) {
-            log.error("修改学科领域失败: id={}, {}", id, e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "修改学科领域失败");
-        }
+        adminSubjectService.update(id, req);
+        return Result.success("修改成功");
     }
 
     /**
@@ -111,15 +92,8 @@ public class AdminSubjectController {
         if (isEnabled == null) {
             return Result.error(ResultCode.PARAM_EMPTY, "请指定启用状态");
         }
-        try {
-            adminSubjectService.setEnabled(id, isEnabled);
-            return Result.success(isEnabled ? "已启用" : "已停用");
-        } catch (BusinessException be) {
-            throw be;
-        } catch (Exception e) {
-            log.error("启用/停用学科领域失败: id={}, {}", id, e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "操作失败");
-        }
+        adminSubjectService.setEnabled(id, isEnabled);
+        return Result.success(isEnabled ? "已启用" : "已停用");
     }
 
     /**
@@ -130,15 +104,8 @@ public class AdminSubjectController {
     @OperationLog(type = "subject_delete", description = "删除学科领域")
     public Result<Void> delete(@PathVariable("id") Long id) {
         log.info("接收删除学科领域请求: id={}", id);
-        try {
-            adminSubjectService.delete(id);
-            return Result.success("删除成功");
-        } catch (BusinessException be) {
-            throw be;
-        } catch (Exception e) {
-            log.error("删除学科领域失败: id={}, {}", id, e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "删除学科领域失败");
-        }
+        adminSubjectService.delete(id);
+        return Result.success("删除成功");
     }
 
 }

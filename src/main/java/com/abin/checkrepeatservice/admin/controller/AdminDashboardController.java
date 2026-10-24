@@ -31,12 +31,7 @@ public class AdminDashboardController {
     @GetMapping("/stats")
     public Result<Map<String, Object>> getSystemStats() {
         log.info("接收获取系统统计数据请求");
-        try {
-            return adminDashboardService.getSystemStats();
-        } catch (Exception e) {
-            log.error("获取系统统计数据失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取系统统计数据失败: " + "系统异常，请稍后重试");
-        }
+        return adminDashboardService.getSystemStats();
     }
 
     /**
@@ -45,12 +40,7 @@ public class AdminDashboardController {
     @GetMapping("/quick-actions")
     public Result<List<Map<String, Object>>> getQuickActions() {
         log.info("接收获取快捷操作菜单请求");
-        try {
-            return adminDashboardService.getQuickActions();
-        } catch (Exception e) {
-            log.error("获取快捷操作菜单失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取快捷操作菜单失败: " + "系统异常，请稍后重试");
-        }
+        return adminDashboardService.getQuickActions();
     }
 
     /**
@@ -59,11 +49,6 @@ public class AdminDashboardController {
     @GetMapping("/realtime-stats")
     public Result<Map<String, Object>> getRealtimeStats() {
         log.info("接收获取实时统计数据请求");
-        try {
-            return adminDashboardService.getRealtimeStats();
-        } catch (Exception e) {
-            log.error("获取实时统计数据失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取实时统计数据失败: " + "系统异常，请稍后重试");
-        }
+        return adminDashboardService.getRealtimeStats();
     }
 }

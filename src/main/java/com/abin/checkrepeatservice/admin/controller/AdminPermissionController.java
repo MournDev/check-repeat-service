@@ -41,12 +41,7 @@ public class AdminPermissionController {
     @GetMapping("/roles/list")
     public Result<List<SysRole>> getRoleList() {
         log.info("接收获取角色列表请求");
-        try {
-            return adminPermissionService.getRoleList();
-        } catch (Exception e) {
-            log.error("获取角色列表失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取角色列表失败: " + "系统异常，请稍后重试");
-        }
+        return adminPermissionService.getRoleList();
     }
 
     /**
@@ -57,12 +52,7 @@ public class AdminPermissionController {
     @OperationLog(type = "admin_role_create", description = "管理员创建角色", recordResult = true)
     public Result<Map<String, Object>> createRole(@Valid @RequestBody RoleCreateReq createReq) {
         log.info("接收创建角色请求: roleName={}", createReq.getRoleName());
-        try {
-            return adminPermissionService.createRole(createReq);
-        } catch (Exception e) {
-            log.error("创建角色失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "创建角色失败: " + "系统异常，请稍后重试");
-        }
+        return adminPermissionService.createRole(createReq);
     }
 
     /**
@@ -74,12 +64,7 @@ public class AdminPermissionController {
     public Result<String> updateRole(@PathVariable Long roleId,
                                      @Valid @RequestBody RoleUpdateReq updateReq) {
         log.info("接收更新角色请求: roleId={}", roleId);
-        try {
-            return adminPermissionService.updateRole(roleId, updateReq);
-        } catch (Exception e) {
-            log.error("更新角色失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "更新角色失败: " + "系统异常，请稍后重试");
-        }
+        return adminPermissionService.updateRole(roleId, updateReq);
     }
 
     /**
@@ -90,12 +75,7 @@ public class AdminPermissionController {
     @OperationLog(type = "admin_role_delete", description = "管理员删除角色")
     public Result<String> deleteRole(@PathVariable Long roleId) {
         log.info("接收删除角色请求: roleId={}", roleId);
-        try {
-            return adminPermissionService.deleteRole(roleId);
-        } catch (Exception e) {
-            log.error("删除角色失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "删除角色失败: " + "系统异常，请稍后重试");
-        }
+        return adminPermissionService.deleteRole(roleId);
     }
 
     /**
@@ -104,12 +84,7 @@ public class AdminPermissionController {
     @GetMapping("/permissions/tree")
     public Result<List<Map<String, Object>>> getPermissionTree() {
         log.info("接收获取权限树请求");
-        try {
-            return adminPermissionService.getPermissionTree();
-        } catch (Exception e) {
-            log.error("获取权限树失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取权限树失败: " + "系统异常，请稍后重试");
-        }
+        return adminPermissionService.getPermissionTree();
     }
 
     /**
@@ -121,11 +96,6 @@ public class AdminPermissionController {
                                          @RequestBody Map<String, Long> requestBody) {
         Long roleId = requestBody.get("roleId");
         log.info("接收分配用户角色请求: userId={}, roleId={}", userId, roleId);
-        try {
-            return adminPermissionService.assignUserRole(userId, roleId);
-        } catch (Exception e) {
-            log.error("分配用户角色失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "分配用户角色失败: " + "系统异常，请稍后重试");
-        }
+        return adminPermissionService.assignUserRole(userId, roleId);
     }
 }

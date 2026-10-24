@@ -32,14 +32,9 @@ public class AcademicIntegrityController {
     @GetMapping("/personal-advice")
     @ApiOperation("获取个性化学术建议")
     public Result<PersonalAdviceDTO> getPersonalAdvice() {
-        try {
-            Long studentId = UserBusinessInfoUtils.getCurrentUserId();
-            PersonalAdviceDTO advice = academicIntegrityService.getPersonalAdvice(studentId);
-            return Result.success("获取个性化学术建议成功", advice);
-        } catch (Exception e) {
-            log.error("获取个性化学术建议失败", e);
-            return Result.error(500, "获取个性化学术建议失败: " + "系统异常，请稍后重试");
-        }
+        Long studentId = UserBusinessInfoUtils.getCurrentUserId();
+        PersonalAdviceDTO advice = academicIntegrityService.getPersonalAdvice(studentId);
+        return Result.success("获取个性化学术建议成功", advice);
     }
     
     /**
@@ -49,14 +44,9 @@ public class AcademicIntegrityController {
     @ApiOperation("获取推荐学习资源")
     public Result<List<AcademicResourceDTO>> getRecommendedResources(
             @RequestParam(required = false) String resourceType) {
-        try {
-            Long studentId = UserBusinessInfoUtils.getCurrentUserId();
-            List<AcademicResourceDTO> resources = academicIntegrityService.getRecommendedResources(studentId, resourceType);
-            return Result.success("获取推荐学习资源成功", resources);
-        } catch (Exception e) {
-            log.error("获取推荐学习资源失败", e);
-            return Result.error(500, "获取推荐学习资源失败: " + "系统异常，请稍后重试");
-        }
+        Long studentId = UserBusinessInfoUtils.getCurrentUserId();
+        List<AcademicResourceDTO> resources = academicIntegrityService.getRecommendedResources(studentId, resourceType);
+        return Result.success("获取推荐学习资源成功", resources);
     }
     
     /**
@@ -65,14 +55,9 @@ public class AcademicIntegrityController {
     @GetMapping("/checklist")
     @ApiOperation("获取用户检查清单")
     public Result<List<ChecklistItemDTO>> getChecklist() {
-        try {
-            Long studentId = UserBusinessInfoUtils.getCurrentUserId();
-            List<ChecklistItemDTO> checklist = academicIntegrityService.getChecklist(studentId);
-            return Result.success("获取用户检查清单成功", checklist);
-        } catch (Exception e) {
-            log.error("获取用户检查清单失败", e);
-            return Result.error(500, "获取用户检查清单失败: " + "系统异常，请稍后重试");
-        }
+        Long studentId = UserBusinessInfoUtils.getCurrentUserId();
+        List<ChecklistItemDTO> checklist = academicIntegrityService.getChecklist(studentId);
+        return Result.success("获取用户检查清单成功", checklist);
     }
     
     /**
@@ -83,17 +68,12 @@ public class AcademicIntegrityController {
     public Result<String> updateChecklistItem(
             @PathVariable Long itemId,
             @RequestBody ChecklistItemDTO updateRequest) {
-        try {
-            Long studentId = UserBusinessInfoUtils.getCurrentUserId();
-            boolean result = academicIntegrityService.updateChecklistItem(studentId, itemId, updateRequest.getChecked());
-            if (result) {
-                return Result.success("更新检查项状态成功");
-            } else {
-                return Result.error(500, "更新检查项状态失败");
-            }
-        } catch (Exception e) {
-            log.error("更新检查项状态失败", e);
-            return Result.error(500, "更新检查项状态失败: " + "系统异常，请稍后重试");
+        Long studentId = UserBusinessInfoUtils.getCurrentUserId();
+        boolean result = academicIntegrityService.updateChecklistItem(studentId, itemId, updateRequest.getChecked());
+        if (result) {
+            return Result.success("更新检查项状态成功");
+        } else {
+            return Result.error(500, "更新检查项状态失败");
         }
     }
     
@@ -103,13 +83,8 @@ public class AcademicIntegrityController {
     @PostMapping("/checklist/init")
     @ApiOperation("初始化用户检查清单")
     public Result<String> initializeChecklist() {
-        try {
-            Long studentId = UserBusinessInfoUtils.getCurrentUserId();
-            academicIntegrityService.initializeChecklist(studentId);
-            return Result.success("初始化用户检查清单成功");
-        } catch (Exception e) {
-            log.error("初始化用户检查清单失败", e);
-            return Result.error(500, "初始化用户检查清单失败: " + "系统异常，请稍后重试");
-        }
+        Long studentId = UserBusinessInfoUtils.getCurrentUserId();
+        academicIntegrityService.initializeChecklist(studentId);
+        return Result.success("初始化用户检查清单成功");
     }
 }

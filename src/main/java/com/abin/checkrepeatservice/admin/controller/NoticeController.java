@@ -64,14 +64,9 @@ public class NoticeController {
 
         log.info("接收通知列表请求: pageNum={}, pageSize={}, noticeType={}, isRead={}, priority={}",
                 pageNum, pageSize, noticeType, isRead, priority);
-        try {
-            Long userId = UserBusinessInfoUtils.getCurrentUserId();
-            return Result.success(sysNoticeService.getNoticePageForUser(
-                    userId, noticeType, isRead, priority, pageNum, pageSize));
-        } catch (Exception e) {
-            log.error("查询通知列表失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "查询通知列表失败: " + "系统异常，请稍后重试");
-        }
+        Long userId = UserBusinessInfoUtils.getCurrentUserId();
+        return Result.success(sysNoticeService.getNoticePageForUser(
+                userId, noticeType, isRead, priority, pageNum, pageSize));
     }
 
     /**
@@ -80,13 +75,8 @@ public class NoticeController {
      */
     @GetMapping("/stats")
     public Result<NoticeStatsVO> getNoticeStats() {
-        try {
-            Long userId = UserBusinessInfoUtils.getCurrentUserId();
-            return Result.success(sysNoticeService.getNoticeStats(userId));
-        } catch (Exception e) {
-            log.error("查询通知统计失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "查询通知统计失败: " + "系统异常，请稍后重试");
-        }
+        Long userId = UserBusinessInfoUtils.getCurrentUserId();
+        return Result.success(sysNoticeService.getNoticeStats(userId));
     }
 
     /**
@@ -94,13 +84,8 @@ public class NoticeController {
      */
     @GetMapping("/unread-count")
     public Result<Integer> getUnreadCount() {
-        try {
-            Long userId = UserBusinessInfoUtils.getCurrentUserId();
-            return Result.success(sysNoticeService.getUnreadNoticeCount(userId));
-        } catch (Exception e) {
-            log.error("查询未读通知数失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "查询未读通知数失败: " + "系统异常，请稍后重试");
-        }
+        Long userId = UserBusinessInfoUtils.getCurrentUserId();
+        return Result.success(sysNoticeService.getUnreadNoticeCount(userId));
     }
 
     /**
@@ -109,13 +94,8 @@ public class NoticeController {
      */
     @GetMapping("/unread-count-by-priority")
     public Result<Map<Integer, Integer>> getUnreadCountByPriority() {
-        try {
-            Long userId = UserBusinessInfoUtils.getCurrentUserId();
-            return Result.success(sysNoticeService.getUnreadCountByPriority(userId));
-        } catch (Exception e) {
-            log.error("按优先级查询未读通知数失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "按优先级查询未读通知数失败: " + "系统异常，请稍后重试");
-        }
+        Long userId = UserBusinessInfoUtils.getCurrentUserId();
+        return Result.success(sysNoticeService.getUnreadCountByPriority(userId));
     }
 
     /**
@@ -123,13 +103,8 @@ public class NoticeController {
      */
     @GetMapping("/latest")
     public Result<List<SysNotice>> getLatestNotices(@RequestParam(defaultValue = "5") Integer limit) {
-        try {
-            Long userId = UserBusinessInfoUtils.getCurrentUserId();
-            return Result.success(sysNoticeService.getLatestNotices(userId, limit));
-        } catch (Exception e) {
-            log.error("查询最新通知失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "查询最新通知失败: " + "系统异常，请稍后重试");
-        }
+        Long userId = UserBusinessInfoUtils.getCurrentUserId();
+        return Result.success(sysNoticeService.getLatestNotices(userId, limit));
     }
 
     // ==================== 标记已读 ====================
@@ -142,16 +117,11 @@ public class NoticeController {
     @OperationLog(type = "notice_read", description = "标记通知已读")
     public Result<String> markAsRead(@PathVariable("id") Long noticeId) {
         log.info("接收标记通知已读请求: noticeId={}", noticeId);
-        try {
-            Long userId = UserBusinessInfoUtils.getCurrentUserId();
-            if (!sysNoticeService.markNoticeAsRead(noticeId, userId)) {
-                return Result.error(ResultCode.RESOURCE_NOT_FOUND, "通知不存在或无权操作");
-            }
-            return Result.success("已标记为已读", null);
-        } catch (Exception e) {
-            log.error("标记通知已读失败: noticeId={}, {}", noticeId, e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "标记通知已读失败: " + "系统异常，请稍后重试");
+        Long userId = UserBusinessInfoUtils.getCurrentUserId();
+        if (!sysNoticeService.markNoticeAsRead(noticeId, userId)) {
+            return Result.error(ResultCode.RESOURCE_NOT_FOUND, "通知不存在或无权操作");
         }
+        return Result.success("已标记为已读", null);
     }
 
     /**
@@ -166,14 +136,9 @@ public class NoticeController {
         if (invalid != null) {
             return invalid;
         }
-        try {
-            Long userId = UserBusinessInfoUtils.getCurrentUserId();
-            int rows = sysNoticeService.batchMarkAsRead(noticeIds, userId);
-            return Result.success("已标记 " + rows + " 条通知为已读", rows);
-        } catch (Exception e) {
-            log.error("批量标记通知已读失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "批量标记通知已读失败: " + "系统异常，请稍后重试");
-        }
+        Long userId = UserBusinessInfoUtils.getCurrentUserId();
+        int rows = sysNoticeService.batchMarkAsRead(noticeIds, userId);
+        return Result.success("已标记 " + rows + " 条通知为已读", rows);
     }
 
     /**
@@ -182,14 +147,9 @@ public class NoticeController {
     @PutMapping("/read-all")
     @OperationLog(type = "notice_read_all", description = "全部标记通知已读")
     public Result<Integer> markAllAsRead() {
-        try {
-            Long userId = UserBusinessInfoUtils.getCurrentUserId();
-            int rows = sysNoticeService.markAllUnreadAsRead(userId);
-            return Result.success("已将 " + rows + " 条通知标记为已读", rows);
-        } catch (Exception e) {
-            log.error("全部标记通知已读失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "全部标记通知已读失败: " + "系统异常，请稍后重试");
-        }
+        Long userId = UserBusinessInfoUtils.getCurrentUserId();
+        int rows = sysNoticeService.markAllUnreadAsRead(userId);
+        return Result.success("已将 " + rows + " 条通知标记为已读", rows);
     }
 
     // ==================== 删除（逻辑删除） ====================
@@ -201,17 +161,12 @@ public class NoticeController {
     @OperationLog(type = "notice_delete", description = "删除通知")
     public Result<String> deleteNotice(@PathVariable("id") Long noticeId) {
         log.info("接收删除通知请求: noticeId={}", noticeId);
-        try {
-            Long userId = UserBusinessInfoUtils.getCurrentUserId();
-            int rows = sysNoticeService.deleteNotice(noticeId, userId);
-            if (rows <= 0) {
-                return Result.error(ResultCode.RESOURCE_NOT_FOUND, "通知不存在或无权操作");
-            }
-            return Result.success("已删除该通知", null);
-        } catch (Exception e) {
-            log.error("删除通知失败: noticeId={}, {}", noticeId, e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "删除通知失败: " + "系统异常，请稍后重试");
+        Long userId = UserBusinessInfoUtils.getCurrentUserId();
+        int rows = sysNoticeService.deleteNotice(noticeId, userId);
+        if (rows <= 0) {
+            return Result.error(ResultCode.RESOURCE_NOT_FOUND, "通知不存在或无权操作");
         }
+        return Result.success("已删除该通知", null);
     }
 
     /**
@@ -226,14 +181,9 @@ public class NoticeController {
         if (invalid != null) {
             return invalid;
         }
-        try {
-            Long userId = UserBusinessInfoUtils.getCurrentUserId();
-            int rows = sysNoticeService.batchDeleteNotices(noticeIds, userId);
-            return Result.success("已删除 " + rows + " 条通知", rows);
-        } catch (Exception e) {
-            log.error("批量删除通知失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "批量删除通知失败: " + "系统异常，请稍后重试");
-        }
+        Long userId = UserBusinessInfoUtils.getCurrentUserId();
+        int rows = sysNoticeService.batchDeleteNotices(noticeIds, userId);
+        return Result.success("已删除 " + rows + " 条通知", rows);
     }
 
     /**
@@ -243,14 +193,9 @@ public class NoticeController {
     @DeleteMapping("/clear-all")
     @OperationLog(type = "notice_clear_all", description = "清空通知")
     public Result<Integer> clearAllNotices() {
-        try {
-            Long userId = UserBusinessInfoUtils.getCurrentUserId();
-            int rows = sysNoticeService.clearAllNotices(userId);
-            return Result.success("已清空 " + rows + " 条通知", rows);
-        } catch (Exception e) {
-            log.error("清空通知失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "清空通知失败: " + "系统异常，请稍后重试");
-        }
+        Long userId = UserBusinessInfoUtils.getCurrentUserId();
+        int rows = sysNoticeService.clearAllNotices(userId);
+        return Result.success("已清空 " + rows + " 条通知", rows);
     }
 
     // ==================== 内部工具 ====================

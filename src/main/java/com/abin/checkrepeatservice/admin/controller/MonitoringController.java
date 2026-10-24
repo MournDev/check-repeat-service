@@ -58,38 +58,33 @@ public class MonitoringController {
     @GetMapping("/overview")
     @Operation(summary = "系统监控概览", description = "获取系统运行时长、版本、请求统计与线程等概览指标")
     public Result<Map<String, Object>> getSystemOverview() {
-        try {
-            log.info("管理员请求获取系统监控概览");
+        log.info("管理员请求获取系统监控概览");
 
-            Map<String, Object> overview = new HashMap<>();
-            var status = systemMonitorService.getSystemStatus();
-            if (status.isSuccess()) {
-                Map<String, Object> data = (Map<String, Object>) status.getData();
+        Map<String, Object> overview = new HashMap<>();
+        var status = systemMonitorService.getSystemStatus();
+        if (status.isSuccess()) {
+            Map<String, Object> data = (Map<String, Object>) status.getData();
 
-                Map<String, Object> runtime = (Map<String, Object>) data.get("runtime");
-                if (runtime != null) {
-                    overview.put("uptime", runtime.get("uptime"));
-                    overview.put("javaVersion", runtime.get("javaVersion"));
-                }
-                Map<String, Object> system = (Map<String, Object>) data.get("system");
-                if (system != null) {
-                    overview.put("osName", system.get("osName"));
-                }
-                Map<String, Object> threads = (Map<String, Object>) data.get("threads");
-                if (threads != null) {
-                    overview.put("activeThreads", threads.get("threadCount"));
-                }
+            Map<String, Object> runtime = (Map<String, Object>) data.get("runtime");
+            if (runtime != null) {
+                overview.put("uptime", runtime.get("uptime"));
+                overview.put("javaVersion", runtime.get("javaVersion"));
             }
-
-            String version = getClass().getPackage().getImplementationVersion();
-            overview.put("version", version != null ? version : "0.0.1-SNAPSHOT");
-            overview.putAll(responseTimeStore.globalStats());
-
-            return Result.success("系统监控概览获取成功", overview);
-        } catch (Exception e) {
-            log.error("获取系统监控概览失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取系统监控概览失败: " + "系统异常，请稍后重试");
+            Map<String, Object> system = (Map<String, Object>) data.get("system");
+            if (system != null) {
+                overview.put("osName", system.get("osName"));
+            }
+            Map<String, Object> threads = (Map<String, Object>) data.get("threads");
+            if (threads != null) {
+                overview.put("activeThreads", threads.get("threadCount"));
+            }
         }
+
+        String version = getClass().getPackage().getImplementationVersion();
+        overview.put("version", version != null ? version : "0.0.1-SNAPSHOT");
+        overview.putAll(responseTimeStore.globalStats());
+
+        return Result.success("系统监控概览获取成功", overview);
     }
 
     /**
@@ -102,18 +97,13 @@ public class MonitoringController {
     @GetMapping("/database")
     @Operation(summary = "数据库监控", description = "获取数据库连接池和性能监控信息")
     public Result<Map<String, Object>> getDatabaseMonitor() {
-        try {
-            log.info("管理员请求获取数据库监控信息");
-            var result = databaseMonitorService.getDatabaseStatus();
-            if (result.isSuccess()) {
-                Map<String, Object> data = (Map<String, Object>) result.getData();
-                data.put("poolUsageHistory", resourceMetricsService.getPoolUsageHistory(60));
-            }
-            return result;
-        } catch (Exception e) {
-            log.error("获取数据库监控信息失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取数据库监控信息失败: " + "系统异常，请稍后重试");
+        log.info("管理员请求获取数据库监控信息");
+        var result = databaseMonitorService.getDatabaseStatus();
+        if (result.isSuccess()) {
+            Map<String, Object> data = (Map<String, Object>) result.getData();
+            data.put("poolUsageHistory", resourceMetricsService.getPoolUsageHistory(60));
         }
+        return result;
     }
 
     /**
@@ -124,13 +114,8 @@ public class MonitoringController {
     @GetMapping("/application")
     @Operation(summary = "应用性能监控", description = "获取应用层面的性能指标和统计信息")
     public Result<Map<String, Object>> getApplicationMetrics() {
-        try {
-            log.info("管理员请求获取应用性能指标");
-            return applicationMonitorService.getApplicationMetrics();
-        } catch (Exception e) {
-            log.error("获取应用性能指标失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取应用性能指标失败: " + "系统异常，请稍后重试");
-        }
+        log.info("管理员请求获取应用性能指标");
+        return applicationMonitorService.getApplicationMetrics();
     }
 
     /**
@@ -150,32 +135,27 @@ public class MonitoringController {
 
         log.info("接收获取系统性能监控数据请求: metric={}, period={}", metric, period);
 
-        try {
-            Map<String, Object> trend = resourceMetricsService.getPerformanceTrend(period);
+        Map<String, Object> trend = resourceMetricsService.getPerformanceTrend(period);
 
-            // 按 metric 过滤序列，timestamps 始终保留
-            Map<String, Object> data = new LinkedHashMap<>();
-            data.put("timestamps", trend.get("timestamps"));
-            switch (metric.toLowerCase()) {
-                case "cpu" -> data.put("cpuUsage", trend.get("cpuUsage"));
-                case "memory" -> data.put("memoryUsage", trend.get("memoryUsage"));
-                case "disk" -> data.put("diskUsage", trend.get("diskUsage"));
-                case "database" -> data.put("dbConnections", trend.get("dbConnections"));
-                default -> {
-                    data.put("cpuUsage", trend.get("cpuUsage"));
-                    data.put("memoryUsage", trend.get("memoryUsage"));
-                    data.put("diskUsage", trend.get("diskUsage"));
-                    data.put("dbConnections", trend.get("dbConnections"));
-                }
+        // 按 metric 过滤序列，timestamps 始终保留
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("timestamps", trend.get("timestamps"));
+        switch (metric.toLowerCase()) {
+            case "cpu" -> data.put("cpuUsage", trend.get("cpuUsage"));
+            case "memory" -> data.put("memoryUsage", trend.get("memoryUsage"));
+            case "disk" -> data.put("diskUsage", trend.get("diskUsage"));
+            case "database" -> data.put("dbConnections", trend.get("dbConnections"));
+            default -> {
+                data.put("cpuUsage", trend.get("cpuUsage"));
+                data.put("memoryUsage", trend.get("memoryUsage"));
+                data.put("diskUsage", trend.get("diskUsage"));
+                data.put("dbConnections", trend.get("dbConnections"));
             }
-
-            log.info("系统性能监控数据获取成功");
-            return Result.success("系统性能监控数据获取成功", data);
-
-        } catch (Exception e) {
-            log.error("获取系统性能监控数据失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取系统性能监控数据失败: " + "系统异常，请稍后重试");
         }
+
+        log.info("系统性能监控数据获取成功");
+        return Result.success("系统性能监控数据获取成功", data);
+
     }
 
     /**
@@ -190,51 +170,46 @@ public class MonitoringController {
     public Result<Map<String, Object>> getResourceUsage() {
         log.info("接收获取当前资源使用率请求");
 
-        try {
-            Map<String, Object> resources = new HashMap<>();
+        Map<String, Object> resources = new HashMap<>();
 
-            var systemStatus = systemMonitorService.getSystemStatus();
-            if (systemStatus.isSuccess()) {
-                Map<String, Object> statusData = (Map<String, Object>) systemStatus.getData();
+        var systemStatus = systemMonitorService.getSystemStatus();
+        if (systemStatus.isSuccess()) {
+            Map<String, Object> statusData = (Map<String, Object>) systemStatus.getData();
 
-                // CPU：整机口径 + JVM 进程口径
-                Map<String, Object> cpuInfo = (Map<String, Object>) statusData.get("cpu");
-                if (cpuInfo != null) {
-                    putIfNonNegative(resources, "cpuUsage", (Double) cpuInfo.get("systemCpuUsage"));
-                    putIfNonNegative(resources, "jvmCpuUsage", (Double) cpuInfo.get("processCpuUsage"));
-                }
-
-                // 内存：整机物理内存口径 + JVM 堆口径
-                Map<String, Object> memoryInfo = (Map<String, Object>) statusData.get("memory");
-                if (memoryInfo != null) {
-                    putIfNonNegative(resources, "memoryUsage", (Double) memoryInfo.get("systemMemoryUsagePercent"));
-                    putIfNonNegative(resources, "jvmHeapUsage", (Double) memoryInfo.get("heapUsagePercent"));
-                }
-
-                // 磁盘使用率
-                Map<String, Object> diskInfo = (Map<String, Object>) statusData.get("disk");
-                if (diskInfo != null) {
-                    putIfNonNegative(resources, "diskUsage", (Double) diskInfo.get("usagePercent"));
-                }
+            // CPU：整机口径 + JVM 进程口径
+            Map<String, Object> cpuInfo = (Map<String, Object>) statusData.get("cpu");
+            if (cpuInfo != null) {
+                putIfNonNegative(resources, "cpuUsage", (Double) cpuInfo.get("systemCpuUsage"));
+                putIfNonNegative(resources, "jvmCpuUsage", (Double) cpuInfo.get("processCpuUsage"));
             }
 
-            // 数据库连接池使用率
-            var dbStatus = databaseMonitorService.getDatabaseStatus();
-            if (dbStatus.isSuccess()) {
-                Map<String, Object> dbData = (Map<String, Object>) dbStatus.getData();
-                Double usageRate = (Double) dbData.get("poolUsageRate");
-                if (usageRate != null) {
-                    resources.put("dbPoolUsage", usageRate);
-                }
+            // 内存：整机物理内存口径 + JVM 堆口径
+            Map<String, Object> memoryInfo = (Map<String, Object>) statusData.get("memory");
+            if (memoryInfo != null) {
+                putIfNonNegative(resources, "memoryUsage", (Double) memoryInfo.get("systemMemoryUsagePercent"));
+                putIfNonNegative(resources, "jvmHeapUsage", (Double) memoryInfo.get("heapUsagePercent"));
             }
 
-            log.info("当前资源使用率获取成功");
-            return Result.success("当前资源使用率获取成功", resources);
-
-        } catch (Exception e) {
-            log.error("获取当前资源使用率失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取当前资源使用率失败: " + "系统异常，请稍后重试");
+            // 磁盘使用率
+            Map<String, Object> diskInfo = (Map<String, Object>) statusData.get("disk");
+            if (diskInfo != null) {
+                putIfNonNegative(resources, "diskUsage", (Double) diskInfo.get("usagePercent"));
+            }
         }
+
+        // 数据库连接池使用率
+        var dbStatus = databaseMonitorService.getDatabaseStatus();
+        if (dbStatus.isSuccess()) {
+            Map<String, Object> dbData = (Map<String, Object>) dbStatus.getData();
+            Double usageRate = (Double) dbData.get("poolUsageRate");
+            if (usageRate != null) {
+                resources.put("dbPoolUsage", usageRate);
+            }
+        }
+
+        log.info("当前资源使用率获取成功");
+        return Result.success("当前资源使用率获取成功", resources);
+
     }
 
     /**
@@ -245,13 +220,8 @@ public class MonitoringController {
     @GetMapping("/cache")
     @Operation(summary = "缓存性能监控", description = "获取Redis缓存的真实命中/未命中统计")
     public Result<Map<String, Object>> getCacheMetrics() {
-        try {
-            log.info("管理员请求获取缓存性能指标");
-            return applicationMonitorService.getCacheMetrics();
-        } catch (Exception e) {
-            log.error("获取缓存性能指标失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取缓存性能指标失败: " + "系统异常，请稍后重试");
-        }
+        log.info("管理员请求获取缓存性能指标");
+        return applicationMonitorService.getCacheMetrics();
     }
 
     /**
@@ -269,22 +239,17 @@ public class MonitoringController {
 
         log.info("接收获取业务指标请求");
 
-        try {
-            Map<String, Object> data = new LinkedHashMap<>();
-            data.put("counters", businessMetricsService.getAllTimeCounters());
-            data.put("todayCounters", businessMetricsService.getTodayCounters());
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("counters", businessMetricsService.getAllTimeCounters());
+        data.put("todayCounters", businessMetricsService.getTodayCounters());
 
-            Map<String, Object> gauges = new LinkedHashMap<>();
-            gauges.put(BusinessMetricsService.QUEUE_DEPTH_KEY, businessMetricsService.getQueueDepth());
-            data.put("gauges", gauges);
+        Map<String, Object> gauges = new LinkedHashMap<>();
+        gauges.put(BusinessMetricsService.QUEUE_DEPTH_KEY, businessMetricsService.getQueueDepth());
+        data.put("gauges", gauges);
 
-            log.info("业务指标获取成功");
-            return Result.success("业务指标获取成功", data);
+        log.info("业务指标获取成功");
+        return Result.success("业务指标获取成功", data);
 
-        } catch (Exception e) {
-            log.error("获取业务指标失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取业务指标失败: " + "系统异常，请稍后重试");
-        }
     }
 
     /**
@@ -303,23 +268,18 @@ public class MonitoringController {
 
         log.info("接收获取响应时间趋势请求: minutes={}", minutes);
 
-        try {
-            if (minutes == null || minutes < 1) {
-                return Result.error(ResultCode.PARAM_VALUE_INVALID, "minutes 必须为正整数");
-            }
-
-            int window = responseTimeStore.getWindowMinutes();
-            int effective = Math.min(minutes, window);
-            if (effective != minutes) {
-                log.warn("minutes={} 超出采集窗口 {} 分钟，已裁剪为 {}", minutes, window, effective);
-            }
-
-            return Result.success("响应时间趋势获取成功", responseTimeStore.snapshot(effective));
-
-        } catch (Exception e) {
-            log.error("获取响应时间趋势失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取响应时间趋势失败: " + "系统异常，请稍后重试");
+        if (minutes == null || minutes < 1) {
+            return Result.error(ResultCode.PARAM_VALUE_INVALID, "minutes 必须为正整数");
         }
+
+        int window = responseTimeStore.getWindowMinutes();
+        int effective = Math.min(minutes, window);
+        if (effective != minutes) {
+            log.warn("minutes={} 超出采集窗口 {} 分钟，已裁剪为 {}", minutes, window, effective);
+        }
+
+        return Result.success("响应时间趋势获取成功", responseTimeStore.snapshot(effective));
+
     }
 
     /**
@@ -336,16 +296,11 @@ public class MonitoringController {
 
         log.info("接收获取API响应时间统计请求: period={}（实际受采集窗口限制）", period);
 
-        try {
-            Map<String, Object> responseTimes = responseTimeStore.snapshot(responseTimeStore.getWindowMinutes());
+        Map<String, Object> responseTimes = responseTimeStore.snapshot(responseTimeStore.getWindowMinutes());
 
-            log.info("API响应时间统计获取成功");
-            return Result.success("API响应时间统计获取成功", responseTimes);
+        log.info("API响应时间统计获取成功");
+        return Result.success("API响应时间统计获取成功", responseTimes);
 
-        } catch (Exception e) {
-            log.error("获取API响应时间统计失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取API响应时间统计失败: " + "系统异常，请稍后重试");
-        }
     }
 
     /**

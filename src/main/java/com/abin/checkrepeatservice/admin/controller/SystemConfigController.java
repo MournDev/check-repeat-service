@@ -39,12 +39,7 @@ public class SystemConfigController {
                 performanceConfig.getQueueSize(),
                 performanceConfig.getCacheStrategy());
         
-        try {
-            return systemConfigService.updatePerformanceConfig(performanceConfig);
-        } catch (Exception e) {
-            log.error("更新性能配置失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR,"更新性能配置失败: " + "系统异常，请稍后重试");
-        }
+        return systemConfigService.updatePerformanceConfig(performanceConfig);
     }
     
     /**
@@ -54,12 +49,7 @@ public class SystemConfigController {
     public Result<PerformanceConfigDTO> getPerformanceConfig() {
         log.info("接收获取性能配置请求");
         
-        try {
-            return systemConfigService.getPerformanceConfig();
-        } catch (Exception e) {
-            log.error("获取性能配置失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR,"获取性能配置失败: " + "系统异常，请稍后重试");
-        }
+        return systemConfigService.getPerformanceConfig();
     }
     
     /**
@@ -71,13 +61,8 @@ public class SystemConfigController {
     public Result<Void> resetPerformanceConfig() {
         log.info("接收重置性能配置请求");
         
-        try {
-            PerformanceConfigDTO defaultConfig = systemConfigService.getDefaultPerformanceConfig();
-            return systemConfigService.updatePerformanceConfig(defaultConfig);
-        } catch (Exception e) {
-            log.error("重置性能配置失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR,"重置性能配置失败: " + "系统异常，请稍后重试");
-        }
+        PerformanceConfigDTO defaultConfig = systemConfigService.getDefaultPerformanceConfig();
+        return systemConfigService.updatePerformanceConfig(defaultConfig);
     }
     
     /**
@@ -89,13 +74,8 @@ public class SystemConfigController {
     public Result<Void> testPerformanceConfig(@Valid @RequestBody PerformanceConfigDTO performanceConfig) {
         log.info("接收测试性能配置请求: {}", performanceConfig);
         
-        try {
-            // 仅测试配置应用，不保存到数据库
-            systemConfigService.applyPerformanceConfig(performanceConfig);
-            return Result.success("性能配置测试应用成功");
-        } catch (Exception e) {
-            log.error("测试性能配置失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR,"测试性能配置失败: " + "系统异常，请稍后重试");
-        }
+        // 仅测试配置应用，不保存到数据库
+        systemConfigService.applyPerformanceConfig(performanceConfig);
+        return Result.success("性能配置测试应用成功");
     }
 }

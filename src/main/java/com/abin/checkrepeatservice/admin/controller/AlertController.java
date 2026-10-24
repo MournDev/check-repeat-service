@@ -53,25 +53,20 @@ public class AlertController {
      */
     @GetMapping("/config")
     public Result<Map<String, Object>> getAlertConfig() {
-        try {
-            Map<String, Object> config = new HashMap<>();
-            config.put("enabled", true);
+        Map<String, Object> config = new HashMap<>();
+        config.put("enabled", true);
 
-            List<Map<String, Object>> rules = new ArrayList<>();
-            for (AlertRule rule : alertEvaluationService.loadEnabledRules()) {
-                Map<String, Object> item = new HashMap<>();
-                item.put("type", rule.getRuleType());
-                item.put("threshold", rule.getThreshold());
-                item.put("duration", rule.getDuration());
-                item.put("severity", rule.getSeverity());
-                rules.add(item);
-            }
-            config.put("rules", rules);
-            return Result.success("智能预警配置获取成功", config);
-        } catch (Exception e) {
-            log.error("获取智能预警配置失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取智能预警配置失败，系统异常，请稍后重试");
+        List<Map<String, Object>> rules = new ArrayList<>();
+        for (AlertRule rule : alertEvaluationService.loadEnabledRules()) {
+            Map<String, Object> item = new HashMap<>();
+            item.put("type", rule.getRuleType());
+            item.put("threshold", rule.getThreshold());
+            item.put("duration", rule.getDuration());
+            item.put("severity", rule.getSeverity());
+            rules.add(item);
         }
+        config.put("rules", rules);
+        return Result.success("智能预警配置获取成功", config);
     }
 
     /**
@@ -80,38 +75,33 @@ public class AlertController {
     @PutMapping("/config")
     @Transactional(rollbackFor = Exception.class)
     public Result<String> updateAlertConfig(@RequestBody Map<String, Object> config) {
-        try {
-            if (config == null) {
-                return Result.error(ResultCode.PARAM_ERROR, "预警配置不能为空");
-            }
-            boolean enabled = !(config.get("enabled") instanceof Boolean b && !b);
-
-            // 先全部禁用，再按入参启用/更新，保证"整体覆盖"语义
-            alertRuleMapper.update(null, new LambdaUpdateWrapper<AlertRule>()
-                    .set(AlertRule::getEnabled, 0));
-
-            if (enabled && config.get("rules") instanceof List<?> items) {
-                for (Object obj : items) {
-                    if (!(obj instanceof Map<?, ?> ruleMap)) {
-                        continue;
-                    }
-                    String ruleType = asString(ruleMap.get("type"));
-                    if (ruleType == null) {
-                        continue;
-                    }
-                    Double threshold = asDouble(ruleMap.get("threshold"));
-                    Integer duration = asInt(ruleMap.get("duration"), DEFAULT_DURATION_SECONDS);
-                    String severity = asString(ruleMap.get("severity"));
-                    alertEvaluationService.upsertRule(ruleType, threshold, duration,
-                            severity == null ? "WARNING" : severity);
-                }
-            }
-            log.info("智能预警配置更新成功: enabled={}", enabled);
-            return Result.success("智能预警配置更新成功");
-        } catch (Exception e) {
-            log.error("更新智能预警配置失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "更新智能预警配置失败，系统异常，请稍后重试");
+        if (config == null) {
+            return Result.error(ResultCode.PARAM_ERROR, "预警配置不能为空");
         }
+        boolean enabled = !(config.get("enabled") instanceof Boolean b && !b);
+
+        // 先全部禁用，再按入参启用/更新，保证"整体覆盖"语义
+        alertRuleMapper.update(null, new LambdaUpdateWrapper<AlertRule>()
+                .set(AlertRule::getEnabled, 0));
+
+        if (enabled && config.get("rules") instanceof List<?> items) {
+            for (Object obj : items) {
+                if (!(obj instanceof Map<?, ?> ruleMap)) {
+                    continue;
+                }
+                String ruleType = asString(ruleMap.get("type"));
+                if (ruleType == null) {
+                    continue;
+                }
+                Double threshold = asDouble(ruleMap.get("threshold"));
+                Integer duration = asInt(ruleMap.get("duration"), DEFAULT_DURATION_SECONDS);
+                String severity = asString(ruleMap.get("severity"));
+                alertEvaluationService.upsertRule(ruleType, threshold, duration,
+                        severity == null ? "WARNING" : severity);
+            }
+        }
+        log.info("智能预警配置更新成功: enabled={}", enabled);
+        return Result.success("智能预警配置更新成功");
     }
 
     /**
@@ -119,29 +109,24 @@ public class AlertController {
      */
     @GetMapping("/active")
     public Result<List<ActiveAlertVO>> getActiveAlerts() {
-        try {
-            // 页面读取时主动评估一次（定时任务每 5 分钟已评估，这里作为兜底）
-            alertEvaluationService.evaluateActiveRules();
+        // 页面读取时主动评估一次（定时任务每 5 分钟已评估，这里作为兜底）
+        alertEvaluationService.evaluateActiveRules();
 
-            List<ActiveAlertVO> alerts = new ArrayList<>();
-            List<AlertRecord> records = alertRecordMapper.selectList(
-                    new LambdaQueryWrapper<AlertRecord>()
-                            .eq(AlertRecord::getStatus, STATUS_ACTIVE)
-                            .orderByDesc(AlertRecord::getTriggerTime));
-            for (AlertRecord record : records) {
-                ActiveAlertVO vo = new ActiveAlertVO();
-                vo.setId(record.getId() == null ? null : record.getId().toString());
-                vo.setLevel(levelOf(record.getSeverity()));
-                vo.setTitle(record.getTitle());
-                vo.setMessage(record.getMessage());
-                vo.setTime(record.getTriggerTime());
-                alerts.add(vo);
-            }
-            return Result.success("当前活跃预警信息获取成功", alerts);
-        } catch (Exception e) {
-            log.error("获取活跃预警失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取活跃预警失败，系统异常，请稍后重试");
+        List<ActiveAlertVO> alerts = new ArrayList<>();
+        List<AlertRecord> records = alertRecordMapper.selectList(
+                new LambdaQueryWrapper<AlertRecord>()
+                        .eq(AlertRecord::getStatus, STATUS_ACTIVE)
+                        .orderByDesc(AlertRecord::getTriggerTime));
+        for (AlertRecord record : records) {
+            ActiveAlertVO vo = new ActiveAlertVO();
+            vo.setId(record.getId() == null ? null : record.getId().toString());
+            vo.setLevel(levelOf(record.getSeverity()));
+            vo.setTitle(record.getTitle());
+            vo.setMessage(record.getMessage());
+            vo.setTime(record.getTriggerTime());
+            alerts.add(vo);
         }
+        return Result.success("当前活跃预警信息获取成功", alerts);
     }
 
     /**
@@ -149,29 +134,24 @@ public class AlertController {
      */
     @PostMapping("/handle")
     public Result<String> handleAlert(@RequestBody HandleAlertReq req) {
-        try {
-            Long alertId = parseId(req.getAlertId());
-            if (alertId == null) {
-                return Result.error(ResultCode.PARAM_ERROR, "预警ID不合法");
-            }
-            AlertRecord record = alertRecordMapper.selectById(alertId);
-            if (record == null) {
-                return Result.error(ResultCode.RESOURCE_NOT_FOUND, "预警记录不存在");
-            }
-            if (STATUS_RESOLVED.equals(record.getStatus())) {
-                return Result.success("预警已处理");
-            }
-            record.setStatus(STATUS_RESOLVED);
-            record.setResolveTime(LocalDateTime.now());
-            record.setResolvedBy(currentUsername());
-            alertRecordMapper.updateById(record);
-            log.info("预警已处理: alertId={}, action={}, operator={}",
-                    alertId, req.getAction(), record.getResolvedBy());
-            return Result.success("预警处理成功");
-        } catch (Exception e) {
-            log.error("处理预警失败: alertId={}", req.getAlertId(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "处理预警失败，系统异常，请稍后重试");
+        Long alertId = parseId(req.getAlertId());
+        if (alertId == null) {
+            return Result.error(ResultCode.PARAM_ERROR, "预警ID不合法");
         }
+        AlertRecord record = alertRecordMapper.selectById(alertId);
+        if (record == null) {
+            return Result.error(ResultCode.RESOURCE_NOT_FOUND, "预警记录不存在");
+        }
+        if (STATUS_RESOLVED.equals(record.getStatus())) {
+            return Result.success("预警已处理");
+        }
+        record.setStatus(STATUS_RESOLVED);
+        record.setResolveTime(LocalDateTime.now());
+        record.setResolvedBy(currentUsername());
+        alertRecordMapper.updateById(record);
+        log.info("预警已处理: alertId={}, action={}, operator={}",
+                alertId, req.getAction(), record.getResolvedBy());
+        return Result.success("预警处理成功");
     }
 
     private String levelOf(String severity) {

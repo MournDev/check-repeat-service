@@ -43,13 +43,8 @@ public class TeacherDashboardController {
     @Operation(summary = "获取教师仪表盘统计数据", description = "获取指导学生总数、待审核论文数量、已审核论文数量、审核通过率等统计信息")
     public Result<Map<String, Object>> getDashboardStats(
             @Parameter(description = "教师ID") @PathVariable Long teacherId) {
-        try {
-            log.info("教师{}请求获取仪表盘统计数据", teacherId);
-            return teacherDashboardService.getDashboardStats(teacherId);
-        } catch (Exception e) {
-            log.error("获取仪表盘统计数据失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取统计数据失败: " + "系统异常，请稍后重试");
-        }
+        log.info("教师{}请求获取仪表盘统计数据", teacherId);
+        return teacherDashboardService.getDashboardStats(teacherId);
     }
 
     /**
@@ -59,14 +54,9 @@ public class TeacherDashboardController {
     @GetMapping("/dashboard/stats")
     @Operation(summary = "获取当前教师仪表盘统计数据", description = "获取当前教师的仪表盘统计数据")
     public Result<Map<String, Object>> getCurrentTeacherDashboardStats() {
-        try {
-            Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
-            log.info("教师{}请求获取仪表盘统计数据", teacherId);
-            return teacherDashboardService.getDashboardStats(teacherId);
-        } catch (Exception e) {
-            log.error("获取仪表盘统计数据失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取统计数据失败: " + "系统异常，请稍后重试");
-        }
+        Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
+        log.info("教师{}请求获取仪表盘统计数据", teacherId);
+        return teacherDashboardService.getDashboardStats(teacherId);
     }
 
     /**
@@ -79,17 +69,12 @@ public class TeacherDashboardController {
             @Parameter(description = "页码") @RequestParam(defaultValue = "1") Integer pageNum,
             @Parameter(description = "每页数量") @RequestParam(defaultValue = "10") Integer pageSize,
             @Parameter(description = "教师ID") @RequestParam(required = false) Long teacherId) {
-        try {
-            // 如果没有传入teacherId，则从当前用户获取
-            if (teacherId == null) {
-                teacherId = UserBusinessInfoUtils.getCurrentUserId();
-            }
-            log.info("教师{}请求获取待审核论文列表: pageNum={}, pageSize={}", teacherId, pageNum, pageSize);
-            return teacherDashboardService.getPendingPapers(teacherId, pageNum, pageSize);
-        } catch (Exception e) {
-            log.error("获取待审核论文列表失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取待审核论文列表失败: " + "系统异常，请稍后重试");
+        // 如果没有传入teacherId，则从当前用户获取
+        if (teacherId == null) {
+            teacherId = UserBusinessInfoUtils.getCurrentUserId();
         }
+        log.info("教师{}请求获取待审核论文列表: pageNum={}, pageSize={}", teacherId, pageNum, pageSize);
+        return teacherDashboardService.getPendingPapers(teacherId, pageNum, pageSize);
     }
 
     /**
@@ -100,13 +85,8 @@ public class TeacherDashboardController {
     @Operation(summary = "获取指导学生状态统计", description = "统计指导学生的论文提交和审核状态")
     public Result<Map<String, Object>> getStudentStats(
             @Parameter(description = "教师ID") @PathVariable Long teacherId) {
-        try {
-            log.info("教师{}请求获取学生状态统计", teacherId);
-            return teacherDashboardService.getStudentStats(teacherId);
-        } catch (Exception e) {
-            log.error("获取学生状态统计失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取学生状态统计失败: " + "系统异常，请稍后重试");
-        }
+        log.info("教师{}请求获取学生状态统计", teacherId);
+        return teacherDashboardService.getStudentStats(teacherId);
     }
 
     /**
@@ -116,14 +96,9 @@ public class TeacherDashboardController {
     @GetMapping("/students/stats")
     @Operation(summary = "获取当前教师指导学生状态统计", description = "统计当前教师指导学生的论文提交和审核状态")
     public Result<Map<String, Object>> getCurrentTeacherStudentStats() {
-        try {
-            Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
-            log.info("教师{}请求获取学生状态统计", teacherId);
-            return teacherDashboardService.getStudentStats(teacherId);
-        } catch (Exception e) {
-            log.error("获取学生状态统计失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取学生状态统计失败: " + "系统异常，请稍后重试");
-        }
+        Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
+        log.info("教师{}请求获取学生状态统计", teacherId);
+        return teacherDashboardService.getStudentStats(teacherId);
     }
 
     /**
@@ -135,17 +110,12 @@ public class TeacherDashboardController {
     @OperationLog(type = "send_message", description = "发送消息给学生")
     public Result<String> sendMessage(@RequestBody SendMessageDTO sendMessageDTO) {
         
-        try {
-            log.info("发送消息: receiverId={}, title={}", sendMessageDTO.getReceiverId(), sendMessageDTO.getTitle());
-            boolean result = studentManagementService.sendMessage(sendMessageDTO);
-            if (result) {
-                return Result.success("消息发送成功");
-            } else {
-                return Result.error(ResultCode.SYSTEM_ERROR, "消息发送失败");
-            }
-        } catch (Exception e) {
-            log.error("发送消息失败: receiverId={}", sendMessageDTO.getReceiverId(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "消息发送失败: " + "系统异常，请稍后重试");
+        log.info("发送消息: receiverId={}, title={}", sendMessageDTO.getReceiverId(), sendMessageDTO.getTitle());
+        boolean result = studentManagementService.sendMessage(sendMessageDTO);
+        if (result) {
+            return Result.success("消息发送成功");
+        } else {
+            return Result.error(ResultCode.SYSTEM_ERROR, "消息发送失败");
         }
     }
     
@@ -157,14 +127,9 @@ public class TeacherDashboardController {
     @Operation(summary = "下载论文文件", description = "下载指定论文的文件")
     public Result<String> downloadPaper(
             @Parameter(description = "论文ID") @PathVariable Long paperId) {
-        try {
-            Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
-            log.info("教师{}请求下载论文{}", teacherId, paperId);
-            return teacherDashboardService.downloadPaper(teacherId, paperId);
-        } catch (Exception e) {
-            log.error("论文下载失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "论文下载失败: " + "系统异常，请稍后重试");
-        }
+        Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
+        log.info("教师{}请求下载论文{}", teacherId, paperId);
+        return teacherDashboardService.downloadPaper(teacherId, paperId);
     }
 
     /**
@@ -174,14 +139,9 @@ public class TeacherDashboardController {
     @GetMapping("/review/statistics")
     @Operation(summary = "获取审核进度统计", description = "获取论文状态分布、各专业审核情况等统计图表数据")
     public Result<Map<String, Object>> getReviewStatistics() {
-        try {
-            Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
-            log.info("教师{}请求获取审核进度统计", teacherId);
-            return teacherDashboardService.getReviewStatistics(teacherId);
-        } catch (Exception e) {
-            log.error("获取审核进度统计失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取审核进度统计失败: " + "系统异常，请稍后重试");
-        }
+        Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
+        log.info("教师{}请求获取审核进度统计", teacherId);
+        return teacherDashboardService.getReviewStatistics(teacherId);
     }
 
     /**
@@ -208,14 +168,9 @@ public class TeacherDashboardController {
     public Result<Object> getRecentActivities(
             @Parameter(description = "页码") @RequestParam(defaultValue = "1") Integer page,
             @Parameter(description = "每页大小") @RequestParam(defaultValue = "10") Integer size) {
-        try {
-            Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
-            log.info("教师{}请求获取近期活动记录: page={}, size={}", teacherId, page, size);
-            return teacherDashboardService.getRecentActivities(teacherId, page, size);
-        } catch (Exception e) {
-            log.error("获取近期活动记录失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取近期活动记录失败: " + "系统异常，请稍后重试");
-        }
+        Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
+        log.info("教师{}请求获取近期活动记录: page={}, size={}", teacherId, page, size);
+        return teacherDashboardService.getRecentActivities(teacherId, page, size);
     }
 
     /**
@@ -243,14 +198,9 @@ public class TeacherDashboardController {
     public Result<Object> getStudentList(
             @Parameter(description = "页码") @RequestParam(defaultValue = "1") Integer page,
             @Parameter(description = "每页大小") @RequestParam(defaultValue = "10") Integer size) {
-        try {
-            Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
-            log.info("教师{}请求获取指导学生列表: page={}, size={}", teacherId, page, size);
-            return teacherDashboardService.getStudentList(teacherId, page, size);
-        } catch (Exception e) {
-            log.error("获取指导学生列表失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取指导学生列表失败: " + "系统异常，请稍后重试");
-        }
+        Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
+        log.info("教师{}请求获取指导学生列表: page={}, size={}", teacherId, page, size);
+        return teacherDashboardService.getStudentList(teacherId, page, size);
     }
 
     /**
@@ -260,13 +210,8 @@ public class TeacherDashboardController {
     @GetMapping("/dashboard/refresh")
     @Operation(summary = "刷新仪表盘实时数据", description = "刷新仪表盘的实时统计数据")
     public Result<Map<String, Object>> refreshDashboard() {
-        try {
-            Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
-            log.info("教师{}请求刷新仪表盘数据", teacherId);
-            return teacherDashboardService.refreshDashboard(teacherId);
-        } catch (Exception e) {
-            log.error("刷新仪表盘数据失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "刷新仪表盘数据失败: " + "系统异常，请稍后重试");
-        }
+        Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
+        log.info("教师{}请求刷新仪表盘数据", teacherId);
+        return teacherDashboardService.refreshDashboard(teacherId);
     }
 }

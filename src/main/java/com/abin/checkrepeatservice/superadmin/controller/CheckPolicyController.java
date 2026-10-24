@@ -45,17 +45,12 @@ public class CheckPolicyController {
      */
     @GetMapping("/list")
     public Result<List<CheckPolicyVO>> list() {
-        try {
-            List<CheckPolicy> policies = checkPolicyMapper.selectList(
-                    new LambdaQueryWrapper<CheckPolicy>()
-                            .orderByAsc(CheckPolicy::getDegreeType));
-            return Result.success("查询成功", policies.stream()
-                    .map(this::toVO)
-                    .collect(Collectors.toList()));
-        } catch (Exception e) {
-            log.error("查询检测策略列表失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "查询失败: " + "系统异常，请稍后重试");
-        }
+        List<CheckPolicy> policies = checkPolicyMapper.selectList(
+                new LambdaQueryWrapper<CheckPolicy>()
+                        .orderByAsc(CheckPolicy::getDegreeType));
+        return Result.success("查询成功", policies.stream()
+                .map(this::toVO)
+                .collect(Collectors.toList()));
     }
 
     /**
@@ -90,33 +85,28 @@ public class CheckPolicyController {
             return Result.error(ResultCode.PARAM_VALUE_INVALID, "enabled 只能是 0 或 1");
         }
 
-        try {
-            // 按 degreeType upsert；唯一键冲突兜底取最新一条改写，避免并发新增撞唯一索引报 500
-            CheckPolicy existing = checkPolicyMapper.selectOne(
-                    new LambdaQueryWrapper<CheckPolicy>()
-                            .eq(CheckPolicy::getDegreeType, degreeType)
-                            .orderByDesc(CheckPolicy::getId)
-                            .last("LIMIT 1"));
-            boolean creating = existing == null;
-            CheckPolicy policy = creating ? new CheckPolicy() : existing;
-            policy.setDegreeType(degreeType);
-            policy.setThreshold(req.getThreshold());
-            policy.setMaxPerSource(req.getMaxPerSource());
-            policy.setMaxCheckCount(req.getMaxCheckCount());
-            policy.setCheckInterval(req.getCheckInterval());
-            policy.setEnabled(enabled);
-            if (creating) {
-                checkPolicyMapper.insert(policy);
-            } else {
-                checkPolicyMapper.updateById(policy);
-            }
-            log.info("检测策略保存成功: degreeType={}, id={}, mode={}",
-                    degreeType, policy.getId(), creating ? "insert" : "update");
-            return Result.success(creating ? "新增成功" : "更新成功");
-        } catch (Exception e) {
-            log.error("保存检测策略失败: degreeType={}", degreeType, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "保存失败: " + "系统异常，请稍后重试");
+        // 按 degreeType upsert；唯一键冲突兜底取最新一条改写，避免并发新增撞唯一索引报 500
+        CheckPolicy existing = checkPolicyMapper.selectOne(
+                new LambdaQueryWrapper<CheckPolicy>()
+                        .eq(CheckPolicy::getDegreeType, degreeType)
+                        .orderByDesc(CheckPolicy::getId)
+                        .last("LIMIT 1"));
+        boolean creating = existing == null;
+        CheckPolicy policy = creating ? new CheckPolicy() : existing;
+        policy.setDegreeType(degreeType);
+        policy.setThreshold(req.getThreshold());
+        policy.setMaxPerSource(req.getMaxPerSource());
+        policy.setMaxCheckCount(req.getMaxCheckCount());
+        policy.setCheckInterval(req.getCheckInterval());
+        policy.setEnabled(enabled);
+        if (creating) {
+            checkPolicyMapper.insert(policy);
+        } else {
+            checkPolicyMapper.updateById(policy);
         }
+        log.info("检测策略保存成功: degreeType={}, id={}, mode={}",
+                degreeType, policy.getId(), creating ? "insert" : "update");
+        return Result.success(creating ? "新增成功" : "更新成功");
     }
 
     /**
@@ -125,18 +115,13 @@ public class CheckPolicyController {
     @DeleteMapping("/{id}")
     @OperationLog(type = "check_policy_delete", description = "删除检测策略")
     public Result<String> delete(@PathVariable Long id) {
-        try {
-            CheckPolicy existing = checkPolicyMapper.selectById(id);
-            if (existing == null) {
-                return Result.error(ResultCode.RESOURCE_NOT_FOUND, "策略不存在");
-            }
-            checkPolicyMapper.deleteById(id);
-            log.info("检测策略删除成功: id={}, degreeType={}", id, existing.getDegreeType());
-            return Result.success("删除成功");
-        } catch (Exception e) {
-            log.error("删除检测策略失败: id={}, error={}", id, e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "删除失败: " + "系统异常，请稍后重试");
+        CheckPolicy existing = checkPolicyMapper.selectById(id);
+        if (existing == null) {
+            return Result.error(ResultCode.RESOURCE_NOT_FOUND, "策略不存在");
         }
+        checkPolicyMapper.deleteById(id);
+        log.info("检测策略删除成功: id={}, degreeType={}", id, existing.getDegreeType());
+        return Result.success("删除成功");
     }
 
     /** 百分比取值是否落在 [0, 100] */

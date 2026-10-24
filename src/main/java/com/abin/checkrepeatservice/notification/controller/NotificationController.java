@@ -50,16 +50,11 @@ public class NotificationController {
             @Parameter(description = "页码") @RequestParam(defaultValue = "1") Integer pageNum,
             @Parameter(description = "每页大小") @RequestParam(defaultValue = "20") Integer pageSize,
             @Parameter(description = "排序字段") @RequestParam(defaultValue = "createTime") String sortBy,
-            @Parameter(description = "排序方式") @RequestParam(defaultValue = "desc") String sortOrder) {
-        try {
-            Long userId = jwtUtils.getUserIdFromToken(token);
-            log.info("用户请求获取消息列表: userId={}, type={}, read={}", userId, messageType, isRead);
-            
-            return messageService.getMessageList(userId, messageType, isRead, pageNum, pageSize, sortBy, sortOrder);
-        } catch (Exception e) {
-            log.error("获取消息列表失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取消息列表失败: " + "系统异常，请稍后重试");
-        }
+            @Parameter(description = "排序方式") @RequestParam(defaultValue = "desc") String sortOrder) throws Exception {
+        Long userId = jwtUtils.getUserIdFromToken(token);
+        log.info("用户请求获取消息列表: userId={}, type={}, read={}", userId, messageType, isRead);
+        
+        return messageService.getMessageList(userId, messageType, isRead, pageNum, pageSize, sortBy, sortOrder);
     }
 
     /**
@@ -67,16 +62,11 @@ public class NotificationController {
      */
     @GetMapping("/unread-count")
     @Operation(summary = "获取未读消息数", description = "获取当前用户未读消息数量")
-    public Result<Integer> getUnreadCount(@RequestHeader("Authorization") String token) {
-        try {
-            Long userId = jwtUtils.getUserIdFromToken(token);
-            log.debug("用户请求获取未读消息数: userId={}", userId);
-            
-            return messageService.getUnreadCount(userId);
-        } catch (Exception e) {
-            log.error("获取未读消息数失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取未读消息数失败: " + "系统异常，请稍后重试");
-        }
+    public Result<Integer> getUnreadCount(@RequestHeader("Authorization") String token) throws Exception {
+        Long userId = jwtUtils.getUserIdFromToken(token);
+        log.debug("用户请求获取未读消息数: userId={}", userId);
+        
+        return messageService.getUnreadCount(userId);
     }
 
     /**
@@ -86,16 +76,11 @@ public class NotificationController {
     @Operation(summary = "标记消息已读", description = "将指定消息标记为已读状态")
     public Result<Boolean> markAsRead(
             @RequestHeader("Authorization") String token,
-            @Parameter(description = "消息ID") @PathVariable Long messageId) {
-        try {
-            Long userId = jwtUtils.getUserIdFromToken(token);
-            log.info("用户标记消息已读: userId={}, messageId={}", userId, messageId);
-            
-            return messageService.markAsRead(messageId, userId);
-        } catch (Exception e) {
-            log.error("标记消息已读失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "标记消息已读失败: " + "系统异常，请稍后重试");
-        }
+            @Parameter(description = "消息ID") @PathVariable Long messageId) throws Exception {
+        Long userId = jwtUtils.getUserIdFromToken(token);
+        log.info("用户标记消息已读: userId={}, messageId={}", userId, messageId);
+        
+        return messageService.markAsRead(messageId, userId);
     }
 
     /**
@@ -105,16 +90,11 @@ public class NotificationController {
     @Operation(summary = "批量标记已读", description = "批量将多个消息标记为已读状态")
     public Result<Boolean> batchMarkAsRead(
             @RequestHeader("Authorization") String token,
-            @Parameter(description = "消息ID列表") @RequestBody List<Long> messageIds) {
-        try {
-            Long userId = jwtUtils.getUserIdFromToken(token);
-            log.info("用户批量标记消息已读: userId={}, messageCount={}", userId, messageIds.size());
-            
-            return messageService.batchMarkAsRead(messageIds, userId);
-        } catch (Exception e) {
-            log.error("批量标记消息已读失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "批量标记消息已读失败: " + "系统异常，请稍后重试");
-        }
+            @Parameter(description = "消息ID列表") @RequestBody List<Long> messageIds) throws Exception {
+        Long userId = jwtUtils.getUserIdFromToken(token);
+        log.info("用户批量标记消息已读: userId={}, messageCount={}", userId, messageIds.size());
+        
+        return messageService.batchMarkAsRead(messageIds, userId);
     }
 
     /**
@@ -124,16 +104,11 @@ public class NotificationController {
     @Operation(summary = "删除消息", description = "删除指定的消息")
     public Result<Boolean> deleteMessage(
             @RequestHeader("Authorization") String token,
-            @Parameter(description = "消息ID") @PathVariable Long messageId) {
-        try {
-            Long userId = jwtUtils.getUserIdFromToken(token);
-            log.info("用户删除消息: userId={}, messageId={}", userId, messageId);
-            
-            return messageService.deleteMessage(messageId, userId);
-        } catch (Exception e) {
-            log.error("删除消息失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "删除消息失败: " + "系统异常，请稍后重试");
-        }
+            @Parameter(description = "消息ID") @PathVariable Long messageId) throws Exception {
+        Long userId = jwtUtils.getUserIdFromToken(token);
+        log.info("用户删除消息: userId={}, messageId={}", userId, messageId);
+        
+        return messageService.deleteMessage(messageId, userId);
     }
 
     /**
@@ -143,16 +118,11 @@ public class NotificationController {
     @Operation(summary = "获取消息详情", description = "获取指定消息的详细信息")
     public Result<SystemMessage> getMessageDetail(
             @RequestHeader("Authorization") String token,
-            @Parameter(description = "消息ID") @PathVariable Long messageId) {
-        try {
-            Long userId = jwtUtils.getUserIdFromToken(token);
-            log.debug("用户获取消息详情: userId={}, messageId={}", userId, messageId);
-            
-            return messageService.getMessageDetail(messageId, userId);
-        } catch (Exception e) {
-            log.error("获取消息详情失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取消息详情失败: " + "系统异常，请稍后重试");
-        }
+            @Parameter(description = "消息ID") @PathVariable Long messageId) throws Exception {
+        Long userId = jwtUtils.getUserIdFromToken(token);
+        log.debug("用户获取消息详情: userId={}, messageId={}", userId, messageId);
+        
+        return messageService.getMessageDetail(messageId, userId);
     }
 
     // ==================== 通知发送接口 ====================
@@ -170,18 +140,13 @@ public class NotificationController {
             @Parameter(description = "论文ID") @RequestParam Long paperId,
             @Parameter(description = "论文标题") @RequestParam String paperTitle,
             @Parameter(description = "新状态") @RequestParam String newStatus,
-            @Parameter(description = "备注") @RequestParam(required = false) String remarks) {
-        try {
-            Long teacherId = jwtUtils.getUserIdFromToken(token);
-            log.info("教师发送论文状态变更通知: teacherId={}, studentId={}, paperId={}", 
-                    teacherId, studentId, paperId);
-            
-            return notificationService.sendPaperStatusChangeNotification(
-                studentId, paperId, paperTitle, newStatus, remarks);
-        } catch (Exception e) {
-            log.error("发送论文状态变更通知失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "发送通知失败: " + "系统异常，请稍后重试");
-        }
+            @Parameter(description = "备注") @RequestParam(required = false) String remarks) throws Exception {
+        Long teacherId = jwtUtils.getUserIdFromToken(token);
+        log.info("教师发送论文状态变更通知: teacherId={}, studentId={}, paperId={}", 
+                teacherId, studentId, paperId);
+        
+        return notificationService.sendPaperStatusChangeNotification(
+            studentId, paperId, paperTitle, newStatus, remarks);
     }
 
     /**
@@ -197,18 +162,13 @@ public class NotificationController {
             @Parameter(description = "论文ID") @RequestParam Long paperId,
             @Parameter(description = "论文标题") @RequestParam String paperTitle,
             @Parameter(description = "审核结果") @RequestParam String reviewResult,
-            @Parameter(description = "审核意见") @RequestParam(required = false) String reviewComments) {
-        try {
-            Long teacherId = jwtUtils.getUserIdFromToken(token);
-            log.info("教师发送论文审核结果通知: teacherId={}, studentId={}, paperId={}", 
-                    teacherId, studentId, paperId);
-            
-            return notificationService.sendPaperReviewResultNotification(
-                studentId, paperId, paperTitle, reviewResult, reviewComments);
-        } catch (Exception e) {
-            log.error("发送论文审核结果通知失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "发送通知失败: " + "系统异常，请稍后重试");
-        }
+            @Parameter(description = "审核意见") @RequestParam(required = false) String reviewComments) throws Exception {
+        Long teacherId = jwtUtils.getUserIdFromToken(token);
+        log.info("教师发送论文审核结果通知: teacherId={}, studentId={}, paperId={}", 
+                teacherId, studentId, paperId);
+        
+        return notificationService.sendPaperReviewResultNotification(
+            studentId, paperId, paperTitle, reviewResult, reviewComments);
     }
 
     /**
@@ -222,16 +182,11 @@ public class NotificationController {
             @Parameter(description = "目标类型") @RequestParam String targetType,
             @Parameter(description = "公告标题") @RequestParam String title,
             @Parameter(description = "公告内容") @RequestParam String content,
-            @Parameter(description = "优先级") @RequestParam(required = false, defaultValue = "NORMAL") String priority) {
-        try {
-            Long adminId = jwtUtils.getUserIdFromToken(token);
-            log.info("管理员发布公告: adminId={}, targetType={}, title={}", adminId, targetType, title);
-            
-            return notificationService.sendSystemAnnouncement(targetType, title, content, priority);
-        } catch (Exception e) {
-            log.error("发布公告失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "发布公告失败: " + "系统异常，请稍后重试");
-        }
+            @Parameter(description = "优先级") @RequestParam(required = false, defaultValue = "NORMAL") String priority) throws Exception {
+        Long adminId = jwtUtils.getUserIdFromToken(token);
+        log.info("管理员发布公告: adminId={}, targetType={}, title={}", adminId, targetType, title);
+        
+        return notificationService.sendSystemAnnouncement(targetType, title, content, priority);
     }
 
     /**
@@ -244,16 +199,11 @@ public class NotificationController {
             @RequestHeader("Authorization") String token,
             @Parameter(description = "用户ID") @RequestParam Long userId,
             @Parameter(description = "通知标题") @RequestParam String title,
-            @Parameter(description = "通知内容") @RequestParam String content) {
-        try {
-            Long adminId = jwtUtils.getUserIdFromToken(token);
-            log.info("管理员发送紧急通知: adminId={}, userId={}, title={}", adminId, userId, title);
-            
-            return notificationService.sendEmergencyNotification(userId, title, content);
-        } catch (Exception e) {
-            log.error("发送紧急通知失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "发送紧急通知失败: " + "系统异常，请稍后重试");
-        }
+            @Parameter(description = "通知内容") @RequestParam String content) throws Exception {
+        Long adminId = jwtUtils.getUserIdFromToken(token);
+        log.info("管理员发送紧急通知: adminId={}, userId={}, title={}", adminId, userId, title);
+        
+        return notificationService.sendEmergencyNotification(userId, title, content);
     }
 
     /**
@@ -261,36 +211,31 @@ public class NotificationController {
      */
     @GetMapping("/statistics")
     @Operation(summary = "获取通知统计", description = "获取用户的消息统计信息")
-    public Result<Map<String, Object>> getNotificationStatistics(@RequestHeader("Authorization") String token) {
-        try {
-            Long userId = jwtUtils.getUserIdFromToken(token);
-            log.debug("用户获取通知统计: userId={}", userId);
-            
-            // 获取各种类型消息的数量统计
-            Map<String, Object> statistics = new java.util.HashMap<>();
-            
-            // 未读消息数
-            Result<Integer> unreadResult = messageService.getUnreadCount(userId);
-            statistics.put("unreadCount", unreadResult.isSuccess() ? unreadResult.getData() : 0);
-            
-            // 各类型消息统计
-            Result<PageResultVO<SystemMessage>> systemMsgs = messageService.getMessageList(
-                userId, "SYSTEM", null, 1, 1, "createTime", "desc");
-            statistics.put("systemMessageCount", systemMsgs.isSuccess() ? systemMsgs.getData().getTotalCount() : 0);
-            
-            Result<PageResultVO<SystemMessage>> privateMsgs = messageService.getMessageList(
-                userId, "PRIVATE", null, 1, 1, "createTime", "desc");
-            statistics.put("privateMessageCount", privateMsgs.isSuccess() ? privateMsgs.getData().getTotalCount() : 0);
-            
-            Result<PageResultVO<SystemMessage>> announcementMsgs = messageService.getMessageList(
-                userId, "ANNOUNCEMENT", null, 1, 1, "createTime", "desc");
-            statistics.put("announcementCount", announcementMsgs.isSuccess() ? announcementMsgs.getData().getTotalCount() : 0);
-            
-            log.debug("获取通知统计成功: userId={}", userId);
-            return Result.success("获取通知统计成功", statistics);
-        } catch (Exception e) {
-            log.error("获取通知统计失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取通知统计失败: " + "系统异常，请稍后重试");
-        }
+    public Result<Map<String, Object>> getNotificationStatistics(@RequestHeader("Authorization") String token) throws Exception {
+        Long userId = jwtUtils.getUserIdFromToken(token);
+        log.debug("用户获取通知统计: userId={}", userId);
+        
+        // 获取各种类型消息的数量统计
+        Map<String, Object> statistics = new java.util.HashMap<>();
+        
+        // 未读消息数
+        Result<Integer> unreadResult = messageService.getUnreadCount(userId);
+        statistics.put("unreadCount", unreadResult.isSuccess() ? unreadResult.getData() : 0);
+        
+        // 各类型消息统计
+        Result<PageResultVO<SystemMessage>> systemMsgs = messageService.getMessageList(
+            userId, "SYSTEM", null, 1, 1, "createTime", "desc");
+        statistics.put("systemMessageCount", systemMsgs.isSuccess() ? systemMsgs.getData().getTotalCount() : 0);
+        
+        Result<PageResultVO<SystemMessage>> privateMsgs = messageService.getMessageList(
+            userId, "PRIVATE", null, 1, 1, "createTime", "desc");
+        statistics.put("privateMessageCount", privateMsgs.isSuccess() ? privateMsgs.getData().getTotalCount() : 0);
+        
+        Result<PageResultVO<SystemMessage>> announcementMsgs = messageService.getMessageList(
+            userId, "ANNOUNCEMENT", null, 1, 1, "createTime", "desc");
+        statistics.put("announcementCount", announcementMsgs.isSuccess() ? announcementMsgs.getData().getTotalCount() : 0);
+        
+        log.debug("获取通知统计成功: userId={}", userId);
+        return Result.success("获取通知统计成功", statistics);
     }
 }

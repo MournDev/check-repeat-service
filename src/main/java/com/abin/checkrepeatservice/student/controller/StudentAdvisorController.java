@@ -33,17 +33,12 @@ public class StudentAdvisorController {
     @GetMapping("/info")
     @ApiOperation("获取导师信息")
     public Result<AdvisorInfoVO> getAdvisorInfo() {
-        try {
-            Long studentId = UserBusinessInfoUtils.getCurrentUserId();
-            log.info("获取导师信息 - 学生ID: {}", studentId);
-            
-            // advisorInfo 为 null 表示该学生还没有导师：正常状态，照样 200 返回，
-            // 前端按空态渲染，不要当成错误。
-            AdvisorInfoVO advisorInfo = studentMessageService.getAdvisorInfo(studentId);
-            return Result.success("获取导师信息成功", advisorInfo);
-        } catch (Exception e) {
-            log.error("获取导师信息失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取导师信息失败: " + "系统异常，请稍后重试");
-        }
+        Long studentId = UserBusinessInfoUtils.getCurrentUserId();
+        log.info("获取导师信息 - 学生ID: {}", studentId);
+        
+        // advisorInfo 为 null 表示该学生还没有导师：正常状态，照样 200 返回，
+        // 前端按空态渲染，不要当成错误。
+        AdvisorInfoVO advisorInfo = studentMessageService.getAdvisorInfo(studentId);
+        return Result.success("获取导师信息成功", advisorInfo);
     }
 }

@@ -40,13 +40,8 @@ public class StudentCheckRuleController {
     @GetMapping("/current")
     @Operation(summary = "获取当前查重规则", description = "获取当前登录学生生效的查重规则（含按学院/专业解析出的通过阈值）")
     public Result<StudentCheckRuleVO> getCurrentCheckRule(
-            @RequestHeader("Authorization") String token) {
-        try {
-            Long studentId = jwtUtils.getUserIdFromToken(token);
-            return studentCheckRuleService.getCurrentCheckRule(studentId);
-        } catch (Exception e) {
-            log.error("获取当前查重规则失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取查重规则失败");
-        }
+            @RequestHeader("Authorization") String token) throws Exception {
+        Long studentId = jwtUtils.getUserIdFromToken(token);
+        return studentCheckRuleService.getCurrentCheckRule(studentId);
     }
 }

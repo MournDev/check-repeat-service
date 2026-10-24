@@ -59,12 +59,7 @@ public class MessageTemplateController {
             @RequestParam(required = false) String templateName) {
         log.info("接收消息模板列表请求: page={}, size={}, templateType={}, templateName={}",
                 page, size, templateType, templateName);
-        try {
-            return Result.success(messageTemplateService.getTemplatePage(templateType, templateName, page, size));
-        } catch (Exception e) {
-            log.error("查询消息模板列表失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "查询消息模板列表失败: " + "系统异常，请稍后重试");
-        }
+        return Result.success(messageTemplateService.getTemplatePage(templateType, templateName, page, size));
     }
 
     /**
@@ -72,16 +67,11 @@ public class MessageTemplateController {
      */
     @GetMapping("/code/{templateCode}")
     public Result<MessageTemplate> getTemplateByCode(@PathVariable("templateCode") String templateCode) {
-        try {
-            MessageTemplate template = messageTemplateService.getTemplateByCode(templateCode);
-            if (template == null) {
-                return Result.error(ResultCode.RESOURCE_NOT_FOUND, "消息模板不存在");
-            }
-            return Result.success(template);
-        } catch (Exception e) {
-            log.error("按编码查询消息模板失败: code={}, {}", templateCode, e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "按编码查询消息模板失败: " + "系统异常，请稍后重试");
+        MessageTemplate template = messageTemplateService.getTemplateByCode(templateCode);
+        if (template == null) {
+            return Result.error(ResultCode.RESOURCE_NOT_FOUND, "消息模板不存在");
         }
+        return Result.success(template);
     }
 
     /**
@@ -89,12 +79,7 @@ public class MessageTemplateController {
      */
     @GetMapping("/type/{templateType}")
     public Result<List<MessageTemplate>> getTemplatesByType(@PathVariable("templateType") String templateType) {
-        try {
-            return Result.success(messageTemplateService.getTemplatesByType(templateType));
-        } catch (Exception e) {
-            log.error("按类型查询消息模板失败: type={}, {}", templateType, e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "按类型查询消息模板失败: " + "系统异常，请稍后重试");
-        }
+        return Result.success(messageTemplateService.getTemplatesByType(templateType));
     }
 
     /**
@@ -105,16 +90,11 @@ public class MessageTemplateController {
     @PreAuthorize("hasAuthority('SUPER_ADMIN')")
     public Result<Long> createTemplate(@Valid @RequestBody MessageTemplateReq req) {
         log.info("接收新增消息模板请求: code={}, name={}", req.getTemplateCode(), req.getTemplateName());
-        try {
-            // template_code 是唯一键，先给出可读的提示；并发下仍由库的唯一约束兜底
-            if (messageTemplateService.getTemplateByCode(req.getTemplateCode()) != null) {
-                return Result.error(ResultCode.PARAM_ERROR, "模板编码已存在：" + req.getTemplateCode());
-            }
-            return Result.success("创建成功", messageTemplateService.createTemplate(req));
-        } catch (Exception e) {
-            log.error("新增消息模板失败: code={}, {}", req.getTemplateCode(), e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "新增消息模板失败: " + "系统异常，请稍后重试");
+        // template_code 是唯一键，先给出可读的提示；并发下仍由库的唯一约束兜底
+        if (messageTemplateService.getTemplateByCode(req.getTemplateCode()) != null) {
+            return Result.error(ResultCode.PARAM_ERROR, "模板编码已存在：" + req.getTemplateCode());
         }
+        return Result.success("创建成功", messageTemplateService.createTemplate(req));
     }
 
     /**
@@ -128,15 +108,10 @@ public class MessageTemplateController {
         if (req.getId() == null) {
             return Result.error(ResultCode.PARAM_ERROR, "模板ID不能为空");
         }
-        try {
-            if (!messageTemplateService.updateTemplate(req)) {
-                return Result.error(ResultCode.RESOURCE_NOT_FOUND, "消息模板不存在");
-            }
-            return Result.success("更新成功", null);
-        } catch (Exception e) {
-            log.error("更新消息模板失败: id={}, {}", req.getId(), e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "更新消息模板失败: " + "系统异常，请稍后重试");
+        if (!messageTemplateService.updateTemplate(req)) {
+            return Result.error(ResultCode.RESOURCE_NOT_FOUND, "消息模板不存在");
         }
+        return Result.success("更新成功", null);
     }
 
     /**
@@ -147,15 +122,10 @@ public class MessageTemplateController {
     @PreAuthorize("hasAuthority('SUPER_ADMIN')")
     public Result<String> deleteTemplate(@PathVariable("id") Long id) {
         log.info("接收删除消息模板请求: id={}", id);
-        try {
-            if (!messageTemplateService.deleteTemplate(id)) {
-                return Result.error(ResultCode.RESOURCE_NOT_FOUND, "消息模板不存在");
-            }
-            return Result.success("删除成功", null);
-        } catch (Exception e) {
-            log.error("删除消息模板失败: id={}, {}", id, e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "删除消息模板失败: " + "系统异常，请稍后重试");
+        if (!messageTemplateService.deleteTemplate(id)) {
+            return Result.error(ResultCode.RESOURCE_NOT_FOUND, "消息模板不存在");
         }
+        return Result.success("删除成功", null);
     }
 
     /**
@@ -172,15 +142,10 @@ public class MessageTemplateController {
         if (isActive == null || (isActive != 0 && isActive != 1)) {
             return Result.error(ResultCode.PARAM_ERROR, "启用状态只能是0或1");
         }
-        try {
-            if (!messageTemplateService.updateTemplateStatus(id, isActive)) {
-                return Result.error(ResultCode.RESOURCE_NOT_FOUND, "消息模板不存在");
-            }
-            return Result.success(isActive == 1 ? "已启用" : "已禁用", null);
-        } catch (Exception e) {
-            log.error("更新消息模板状态失败: id={}, {}", id, e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "更新消息模板状态失败: " + "系统异常，请稍后重试");
+        if (!messageTemplateService.updateTemplateStatus(id, isActive)) {
+            return Result.error(ResultCode.RESOURCE_NOT_FOUND, "消息模板不存在");
         }
+        return Result.success(isActive == 1 ? "已启用" : "已禁用", null);
     }
 
     /**
@@ -194,16 +159,11 @@ public class MessageTemplateController {
                                                    @RequestBody(required = false) Map<String, Object> variables) {
         log.info("接收消息模板渲染请求: code={}, 变量数={}",
                 templateCode, variables == null ? 0 : variables.size());
-        try {
-            TemplateRenderVO rendered = messageTemplateService.renderTemplate(
-                    templateCode, variables == null ? Collections.emptyMap() : variables);
-            if (rendered == null) {
-                return Result.error(ResultCode.RESOURCE_NOT_FOUND, "消息模板不存在");
-            }
-            return Result.success(rendered);
-        } catch (Exception e) {
-            log.error("渲染消息模板失败: code={}, {}", templateCode, e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "渲染消息模板失败: " + "系统异常，请稍后重试");
+        TemplateRenderVO rendered = messageTemplateService.renderTemplate(
+                templateCode, variables == null ? Collections.emptyMap() : variables);
+        if (rendered == null) {
+            return Result.error(ResultCode.RESOURCE_NOT_FOUND, "消息模板不存在");
         }
+        return Result.success(rendered);
     }
 }

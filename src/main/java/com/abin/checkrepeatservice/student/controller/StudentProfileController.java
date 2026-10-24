@@ -36,15 +36,10 @@ public class StudentProfileController {
      */
     @GetMapping
     @Operation(summary = "获取个人资料", description = "获取当前登录学生的个人资料信息")
-    public Result<StudentProfileDTO> getProfile(@RequestHeader("Authorization") String token) {
-        try {
-            Long studentId = jwtUtils.getUserIdFromToken(token);
-            log.info("学生请求获取个人资料: studentId={}", studentId);
-            return studentProfileService.getStudentProfile(studentId);
-        } catch (Exception e) {
-            log.error("获取个人资料失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取个人资料失败: " + "系统异常，请稍后重试");
-        }
+    public Result<StudentProfileDTO> getProfile(@RequestHeader("Authorization") String token) throws Exception {
+        Long studentId = jwtUtils.getUserIdFromToken(token);
+        log.info("学生请求获取个人资料: studentId={}", studentId);
+        return studentProfileService.getStudentProfile(studentId);
     }
 
     /**
@@ -54,15 +49,10 @@ public class StudentProfileController {
     @Operation(summary = "更新个人资料", description = "更新学生的个人资料信息")
     public Result<String> updateProfile(
             @RequestHeader("Authorization") String token,
-            @RequestBody @Valid UpdateProfileReq updateReq) {
-        try {
-            Long studentId = jwtUtils.getUserIdFromToken(token);
-            log.info("学生请求更新个人资料: studentId={}", studentId);
-            return studentProfileService.updateProfile(studentId, updateReq);
-        } catch (Exception e) {
-            log.error("更新个人资料失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "更新个人资料失败: " + "系统异常，请稍后重试");
-        }
+            @RequestBody @Valid UpdateProfileReq updateReq) throws Exception {
+        Long studentId = jwtUtils.getUserIdFromToken(token);
+        log.info("学生请求更新个人资料: studentId={}", studentId);
+        return studentProfileService.updateProfile(studentId, updateReq);
     }
 
     /**
@@ -70,15 +60,10 @@ public class StudentProfileController {
      */
     @GetMapping("/advisor")
     @Operation(summary = "获取导师信息", description = "获取当前指导教师的信息")
-    public Result<StudentProfileDTO.AdvisorInfo> getAdvisorInfo(@RequestHeader("Authorization") String token) {
-        try {
-            Long studentId = jwtUtils.getUserIdFromToken(token);
-            log.info("学生请求获取导师信息: studentId={}", studentId);
-            return studentProfileService.getAdvisorInfo(studentId);
-        } catch (Exception e) {
-            log.error("获取导师信息失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取导师信息失败: " + "系统异常，请稍后重试");
-        }
+    public Result<StudentProfileDTO.AdvisorInfo> getAdvisorInfo(@RequestHeader("Authorization") String token) throws Exception {
+        Long studentId = jwtUtils.getUserIdFromToken(token);
+        log.info("学生请求获取导师信息: studentId={}", studentId);
+        return studentProfileService.getAdvisorInfo(studentId);
     }
 
     /**
@@ -89,15 +74,10 @@ public class StudentProfileController {
     public Result<String> sendMessageToAdvisor(
             @RequestHeader("Authorization") String token,
             @Parameter(description = "导师ID") @RequestParam Long advisorId,
-            @Parameter(description = "消息内容") @RequestParam String content) {
-        try {
-            Long studentId = jwtUtils.getUserIdFromToken(token);
-            log.info("学生向导师发送消息: studentId={}, advisorId={}", studentId, advisorId);
-            return studentProfileService.sendMessageToAdvisor(studentId, advisorId, content);
-        } catch (Exception e) {
-            log.error("发送消息失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "发送消息失败: " + "系统异常，请稍后重试");
-        }
+            @Parameter(description = "消息内容") @RequestParam String content) throws Exception {
+        Long studentId = jwtUtils.getUserIdFromToken(token);
+        log.info("学生向导师发送消息: studentId={}, advisorId={}", studentId, advisorId);
+        return studentProfileService.sendMessageToAdvisor(studentId, advisorId, content);
     }
 
     /**
@@ -109,14 +89,9 @@ public class StudentProfileController {
             @RequestHeader("Authorization") String token,
             @Parameter(description = "导师ID") @RequestParam Long advisorId,
             @Parameter(description = "页码") @RequestParam(defaultValue = "1") Integer pageNum,
-            @Parameter(description = "每页大小") @RequestParam(defaultValue = "10") Integer pageSize) {
-        try {
-            Long studentId = jwtUtils.getUserIdFromToken(token);
-            log.info("学生请求获取沟通记录: studentId={}, advisorId={}", studentId, advisorId);
-            return studentProfileService.getCommunicationHistory(studentId, advisorId, pageNum, pageSize);
-        } catch (Exception e) {
-            log.error("获取沟通记录失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取沟通记录失败: " + "系统异常，请稍后重试");
-        }
+            @Parameter(description = "每页大小") @RequestParam(defaultValue = "10") Integer pageSize) throws Exception {
+        Long studentId = jwtUtils.getUserIdFromToken(token);
+        log.info("学生请求获取沟通记录: studentId={}, advisorId={}", studentId, advisorId);
+        return studentProfileService.getCommunicationHistory(studentId, advisorId, pageNum, pageSize);
     }
 }

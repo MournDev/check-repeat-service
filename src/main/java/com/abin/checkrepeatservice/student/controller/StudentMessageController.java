@@ -48,16 +48,11 @@ public class StudentMessageController {
     @GetMapping("/sessions")
     @ApiOperation("获取消息会话列表")
     public Result<List<MessageSessionVO>> getMessageSessions() {
-        try {
-            Long studentId = UserBusinessInfoUtils.getCurrentUserId();
-            log.info("获取消息会话列表 -学ID: {}", studentId);
-            
-            List<MessageSessionVO> sessions = studentMessageService.getMessageSessions(studentId);
-            return Result.success("获取会话列表成功", sessions);
-        } catch (Exception e) {
-            log.error("获取消息会话列表失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取会话列表失败: " + "系统异常，请稍后重试");
-        }
+        Long studentId = UserBusinessInfoUtils.getCurrentUserId();
+        log.info("获取消息会话列表 -学ID: {}", studentId);
+        
+        List<MessageSessionVO> sessions = studentMessageService.getMessageSessions(studentId);
+        return Result.success("获取会话列表成功", sessions);
     }
 
     /**
@@ -70,19 +65,12 @@ public class StudentMessageController {
             @RequestParam Long sessionId,
             @RequestParam(defaultValue = "1") Integer pageNum,
             @RequestParam(defaultValue = "20") Integer pageSize) {
-        try {
-            Long studentId = UserBusinessInfoUtils.getCurrentUserId();
-            log.info("获取消息列表 -学ID: {}, 会话ID: {}, 页码: {}, 页大小: {}", 
-                    studentId, sessionId, pageNum, pageSize);
-            
-            Page<MessageVO> messages = studentMessageService.getMessageList(studentId, sessionId, pageNum, pageSize);
-            return Result.success("获取消息列表成功", messages);
-        } catch (BusinessException e) {
-            throw e;
-        } catch (Exception e) {
-            log.error("获取消息列表失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取消息列表失败: " + "系统异常，请稍后重试");
-        }
+        Long studentId = UserBusinessInfoUtils.getCurrentUserId();
+        log.info("获取消息列表 -学ID: {}, 会话ID: {}, 页码: {}, 页大小: {}", 
+                studentId, sessionId, pageNum, pageSize);
+        
+        Page<MessageVO> messages = studentMessageService.getMessageList(studentId, sessionId, pageNum, pageSize);
+        return Result.success("获取消息列表成功", messages);
     }
 
     /**
@@ -92,19 +80,12 @@ public class StudentMessageController {
     @PostMapping("/send")
     @ApiOperation("发送消息")
     public Result<MessageVO> sendMessage(@Valid @RequestBody MessageSendDTO sendDTO) {
-        try {
-            Long studentId = UserBusinessInfoUtils.getCurrentUserId();
-            log.info("发送消息 -学ID: {}, 会话ID: {},接收者ID: {}", 
-                    studentId, sendDTO.getSessionId(), sendDTO.getReceiverId());
-            
-            MessageVO message = studentMessageService.sendMessage(studentId, sendDTO);
-            return Result.success("消息发送成功", message);
-        } catch (BusinessException e) {
-            throw e;
-        } catch (Exception e) {
-            log.error("发送消息失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "消息发送失败: " + "系统异常，请稍后重试");
-        }
+        Long studentId = UserBusinessInfoUtils.getCurrentUserId();
+        log.info("发送消息 -学ID: {}, 会话ID: {},接收者ID: {}", 
+                studentId, sendDTO.getSessionId(), sendDTO.getReceiverId());
+        
+        MessageVO message = studentMessageService.sendMessage(studentId, sendDTO);
+        return Result.success("消息发送成功", message);
     }
 
     /**
@@ -114,17 +95,12 @@ public class StudentMessageController {
     @PostMapping("/upload")
     @ApiOperation("上传文件")
     public Result<FileUploadVO> uploadFile(@RequestParam("file") MultipartFile file) {
-        try {
-            Long studentId = UserBusinessInfoUtils.getCurrentUserId();
-            log.info("上传文件 - 学生ID: {}, 文件名: {}, 文件大小: {}", 
-                    studentId, file.getOriginalFilename(), file.getSize());
-            
-            FileUploadVO fileVO = studentMessageService.uploadFile(file, studentId);
-            return Result.success("文件上传成功", fileVO);
-        } catch (Exception e) {
-            log.error("文件上传失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "文件上传失败: " + "系统异常，请稍后重试");
-        }
+        Long studentId = UserBusinessInfoUtils.getCurrentUserId();
+        log.info("上传文件 - 学生ID: {}, 文件名: {}, 文件大小: {}", 
+                studentId, file.getOriginalFilename(), file.getSize());
+        
+        FileUploadVO fileVO = studentMessageService.uploadFile(file, studentId);
+        return Result.success("文件上传成功", fileVO);
     }
 
     /**
@@ -159,31 +135,19 @@ public class StudentMessageController {
     @DeleteMapping("/session/{sessionId}/clear")
     @ApiOperation("清空消息")
     public Result<String> clearMessages(@PathVariable String sessionId) {
-        try {
-            Long studentId = UserBusinessInfoUtils.getCurrentUserId();
-            
-            // 验证sessionId参数
-            if (sessionId == null || "null".equals(sessionId) || sessionId.isEmpty()) {
-                return Result.error(ResultCode.PARAM_ERROR, "会话ID不能为空");
-            }
-            
-            Long sessionIdLong;
-            try {
-                sessionIdLong = Long.parseLong(sessionId);
-            } catch (NumberFormatException e) {
-                return Result.error(ResultCode.PARAM_ERROR, "会话ID格式不正确");
-            }
-            
-            log.info("清空消息 - 学生ID: {}, 会话ID: {}", studentId, sessionIdLong);
-            
-            studentMessageService.clearMessages(studentId, sessionIdLong);
-            return Result.success("清空消息成功");
-        } catch (BusinessException e) {
-            throw e;
-        } catch (Exception e) {
-            log.error("清空消息失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "清空消息失败: " + "系统异常，请稍后重试");
+        Long studentId = UserBusinessInfoUtils.getCurrentUserId();
+        
+        // 验证sessionId参数
+        if (sessionId == null || "null".equals(sessionId) || sessionId.isEmpty()) {
+            return Result.error(ResultCode.PARAM_ERROR, "会话ID不能为空");
         }
+        
+        Long sessionIdLong = Long.parseLong(sessionId);
+        
+        log.info("清空消息 - 学生ID: {}, 会话ID: {}", studentId, sessionIdLong);
+        
+        studentMessageService.clearMessages(studentId, sessionIdLong);
+        return Result.success("清空消息成功");
     }
 
     /**
@@ -227,18 +191,11 @@ public class StudentMessageController {
     @GetMapping("/shared-files")
     @ApiOperation("获取共享文件列表")
     public Result<List<SharedFileVO>> getSharedFiles(@RequestParam Long sessionId) {
-        try {
-            Long studentId = UserBusinessInfoUtils.getCurrentUserId();
-            log.info("获取共享文件列表 - 学生ID: {}, 会话ID: {}", studentId, sessionId);
-            
-            List<SharedFileVO> files = studentMessageService.getSharedFiles(studentId, sessionId);
-            return Result.success("获取共享文件列表成功", files);
-        } catch (BusinessException e) {
-            throw e;
-        } catch (Exception e) {
-            log.error("获取共享文件列表失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取共享文件列表失败: " + "系统异常，请稍后重试");
-        }
+        Long studentId = UserBusinessInfoUtils.getCurrentUserId();
+        log.info("获取共享文件列表 - 学生ID: {}, 会话ID: {}", studentId, sessionId);
+        
+        List<SharedFileVO> files = studentMessageService.getSharedFiles(studentId, sessionId);
+        return Result.success("获取共享文件列表成功", files);
     }
 
     /**
@@ -285,31 +242,19 @@ public class StudentMessageController {
     @PutMapping("/session/{sessionId}/read")
     @ApiOperation("标记消息已读")
     public Result<String> markMessagesRead(@PathVariable String sessionId) {
-        try {
-            Long studentId = UserBusinessInfoUtils.getCurrentUserId();
-            
-            // 验证sessionId参数
-            if (sessionId == null || "null".equals(sessionId) || sessionId.isEmpty()) {
-                return Result.error(ResultCode.PARAM_ERROR, "会话ID不能为空");
-            }
-            
-            Long sessionIdLong;
-            try {
-                sessionIdLong = Long.parseLong(sessionId);
-            } catch (NumberFormatException e) {
-                return Result.error(ResultCode.PARAM_ERROR, "会话ID格式不正确");
-            }
-            
-            log.info("标记消息已读 - 学生ID: {}, 会话ID: {}", studentId, sessionIdLong);
-            
-            studentMessageService.markMessagesRead(studentId, sessionIdLong);
-            return Result.success("标记消息已读成功");
-        } catch (BusinessException e) {
-            throw e;
-        } catch (Exception e) {
-            log.error("标记消息已读失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "标记消息已读失败: " + "系统异常，请稍后重试");
+        Long studentId = UserBusinessInfoUtils.getCurrentUserId();
+        
+        // 验证sessionId参数
+        if (sessionId == null || "null".equals(sessionId) || sessionId.isEmpty()) {
+            return Result.error(ResultCode.PARAM_ERROR, "会话ID不能为空");
         }
+        
+        Long sessionIdLong = Long.parseLong(sessionId);
+        
+        log.info("标记消息已读 - 学生ID: {}, 会话ID: {}", studentId, sessionIdLong);
+        
+        studentMessageService.markMessagesRead(studentId, sessionIdLong);
+        return Result.success("标记消息已读成功");
     }
 
     /**
@@ -319,29 +264,19 @@ public class StudentMessageController {
     @DeleteMapping("/{messageId}/recall")
     @ApiOperation("撤回消息")
     public Result<String> recallMessage(@PathVariable String messageId) {
-        try {
-            Long studentId = UserBusinessInfoUtils.getCurrentUserId();
-            
-            // 验证messageId参数
-            if (messageId == null || "null".equals(messageId) || messageId.isEmpty()) {
-                return Result.error(ResultCode.PARAM_ERROR, "消息ID不能为空");
-            }
-            
-            Long messageIdLong;
-            try {
-                messageIdLong = Long.parseLong(messageId);
-            } catch (NumberFormatException e) {
-                return Result.error(ResultCode.PARAM_ERROR, "消息ID格式不正确");
-            }
-            
-            log.info("撤回消息 - 学生ID: {},消息ID: {}", studentId, messageIdLong);
-            
-            studentMessageService.recallMessage(studentId, messageIdLong);
-            return Result.success("消息撤回成功");
-        } catch (Exception e) {
-            log.error("撤回消息失败", e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "消息撤回失败: " + "系统异常，请稍后重试");
+        Long studentId = UserBusinessInfoUtils.getCurrentUserId();
+        
+        // 验证messageId参数
+        if (messageId == null || "null".equals(messageId) || messageId.isEmpty()) {
+            return Result.error(ResultCode.PARAM_ERROR, "消息ID不能为空");
         }
+        
+        Long messageIdLong = Long.parseLong(messageId);
+        
+        log.info("撤回消息 - 学生ID: {},消息ID: {}", studentId, messageIdLong);
+        
+        studentMessageService.recallMessage(studentId, messageIdLong);
+        return Result.success("消息撤回成功");
     }
 
 }

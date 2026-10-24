@@ -19,14 +19,7 @@ public class CheckTaskController {
      */
     @PostMapping("/create")
     public Result<CheckResultVO> createCheckTask(@RequestParam Long paperId) {
-        try {
-            return checkTaskService.createCheckTask(paperId);
-        } catch (BusinessException e) {
-            // 业务异常（无权限/额度不足等）必须原样交给全局处理器，不能抹成 500
-            throw e;
-        } catch (Exception e) {
-            return Result.error(ResultCode.SYSTEM_ERROR, "系统异常：");
-        }
+        return checkTaskService.createCheckTask(paperId);
     }
 
     /**
@@ -34,13 +27,7 @@ public class CheckTaskController {
      */
     @GetMapping("/result")
     public Result<CheckResultVO> getCheckResult(@RequestParam Long paperId) {
-        try {
-            CheckResultVO resultVO = checkTaskService.getCheckResult(paperId);
-            return Result.success("查询成功", resultVO);
-        } catch (BusinessException e) {
-            throw e;
-        } catch (Exception e) {
-            return Result.error(ResultCode.SYSTEM_ERROR, "系统异常：");
-        }
+        CheckResultVO resultVO = checkTaskService.getCheckResult(paperId);
+        return Result.success("查询成功", resultVO);
     }
 }

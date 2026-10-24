@@ -136,17 +136,12 @@ public class FileUploadController {
      */
     @GetMapping("/check")
     public Result<FileUploadResponse> checkFileByMd5(@RequestParam String md5) {
-        try {
-            FileInfo fileInfo = fileService.getByMd5(md5);
-            if (fileInfo != null) {
-                FileUploadResponse response = buildFileUploadResponse(fileInfo, true);
-                return Result.success("文件已存在", response);
-            } else {
-                return Result.error(ResultCode.RESOURCE_NOT_FOUND, "文件不存在");
-            }
-        } catch (Exception e) {
-            log.error("文件检查失败 - MD5: {}", md5, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "文件检查失败");
+        FileInfo fileInfo = fileService.getByMd5(md5);
+        if (fileInfo != null) {
+            FileUploadResponse response = buildFileUploadResponse(fileInfo, true);
+            return Result.success("文件已存在", response);
+        } else {
+            return Result.error(ResultCode.RESOURCE_NOT_FOUND, "文件不存在");
         }
     }
 
@@ -155,22 +150,17 @@ public class FileUploadController {
      */
     @GetMapping("/info")
     public Result<FileInfo> getFileInfo(@RequestParam Long fileId) {
-        try {
-            FileInfo fileInfo = fileService.getById(fileId);
-            if (fileInfo == null) {
-                return Result.error(ResultCode.RESOURCE_NOT_FOUND, "文件不存在");
-            }
-            // 安全修复（P0）：文件元数据归属校验，修复 fileId 可枚举导致的信息泄露
-            if (!canAccessFile(fileInfo)) {
-                log.warn("文件信息越权访问拦截 - fileId: {}, userId: {}",
-                        fileId, UserBusinessInfoUtils.getCurrentUserId());
-                return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权访问该文件");
-            }
-            return Result.success(fileInfo);
-        } catch (Exception e) {
-            log.error("获取文件信息失败 - 文件ID: {}", fileId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取文件信息失败");
+        FileInfo fileInfo = fileService.getById(fileId);
+        if (fileInfo == null) {
+            return Result.error(ResultCode.RESOURCE_NOT_FOUND, "文件不存在");
         }
+        // 安全修复（P0）：文件元数据归属校验，修复 fileId 可枚举导致的信息泄露
+        if (!canAccessFile(fileInfo)) {
+            log.warn("文件信息越权访问拦截 - fileId: {}, userId: {}",
+                    fileId, UserBusinessInfoUtils.getCurrentUserId());
+            return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权访问该文件");
+        }
+        return Result.success(fileInfo);
     }
 
     /**
@@ -182,27 +172,21 @@ public class FileUploadController {
             @PathVariable(required = false) String fileName,
             HttpServletRequest request) {
 
-        try {
-            // 1. 获取文件信息
-            FileInfo fileInfo = fileService.getById(fileId);
-            if (fileInfo == null || fileInfo.getStoragePath() == null) {
-                log.error("文件不存在或未找到存储路径 - fileId: {}", fileId);
-                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
-            }
-
-            // 安全修复（P0）：下载归属校验，修复仅凭可枚举 fileId 即可下载任意论文/附件的 IDOR
-            if (!canAccessFile(fileInfo)) {
-                log.warn("文件下载越权访问拦截 - fileId: {}, userId: {}",
-                        fileId, UserBusinessInfoUtils.getCurrentUserId());
-                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
-            }
-
-            return serveInlineFile(fileInfo, fileName);
-
-        } catch (Exception e) {
-            log.error("文件下载异常 - fileId: {}", fileId, e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
+        // 1. 获取文件信息
+        FileInfo fileInfo = fileService.getById(fileId);
+        if (fileInfo == null || fileInfo.getStoragePath() == null) {
+            log.error("文件不存在或未找到存储路径 - fileId: {}", fileId);
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
         }
+
+        // 安全修复（P0）：下载归属校验，修复仅凭可枚举 fileId 即可下载任意论文/附件的 IDOR
+        if (!canAccessFile(fileInfo)) {
+            log.warn("文件下载越权访问拦截 - fileId: {}, userId: {}",
+                    fileId, UserBusinessInfoUtils.getCurrentUserId());
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
+        }
+
+        return serveInlineFile(fileInfo, fileName);
     }
 
     /**
@@ -260,14 +244,7 @@ public class FileUploadController {
      */
     @GetMapping("/preview-url/{fileId}")
     public Result<Map<String, String>> getPreviewUrl(@PathVariable Long fileId) {
-        try {
-            return Result.success(filePreviewService.getPreviewInfo(fileId));
-        } catch (IllegalArgumentException e) {
-            return Result.error(ResultCode.RESOURCE_NOT_FOUND, e.getMessage());
-        } catch (Exception e) {
-            log.error("获取预览地址失败 - fileId: {}", fileId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取预览地址失败");
-        }
+        return Result.success(filePreviewService.getPreviewInfo(fileId));
     }
 
     /**
@@ -396,11 +373,7 @@ public class FileUploadController {
         log.info("接收智能预览请求 - paperId: {}", paperId);
         // 安全修复（P0）：报告预览做论文归属校验（学生本人 / 指导教师 / 管理员）
         Long paperIdLong;
-        try {
-            paperIdLong = Long.parseLong(paperId);
-        } catch (NumberFormatException e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("论文ID格式非法");
-        }
+        paperIdLong = Long.parseLong(paperId);
         PaperInfo paper = paperInfoMapper.selectById(paperIdLong);
         if (paper == null) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body("论文不存在");

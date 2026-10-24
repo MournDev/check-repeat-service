@@ -61,12 +61,7 @@ public class KnowledgeAdminController {
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String status) {
         log.info("接收知识库文章管理列表请求: page={}, size={}, keyword={}, status={}", page, size, keyword, status);
-        try {
-            return Result.success(knowledgeArticleService.getAdminArticlePage(keyword, status, page, size));
-        } catch (Exception e) {
-            log.error("查询知识库文章管理列表失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "查询知识库文章管理列表失败: " + "系统异常，请稍后重试");
-        }
+        return Result.success(knowledgeArticleService.getAdminArticlePage(keyword, status, page, size));
     }
 
     /**
@@ -76,13 +71,8 @@ public class KnowledgeAdminController {
     @OperationLog(type = "knowledge_article_create", description = "新增知识库文章")
     public Result<Long> createArticle(@Valid @RequestBody KnowledgeArticleReq req) {
         log.info("接收新增知识库文章请求: title={}", req.getTitle());
-        try {
-            Long id = knowledgeArticleService.createArticle(req);
-            return Result.success("创建成功", id);
-        } catch (Exception e) {
-            log.error("新增知识库文章失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "新增知识库文章失败: " + "系统异常，请稍后重试");
-        }
+        Long id = knowledgeArticleService.createArticle(req);
+        return Result.success("创建成功", id);
     }
 
     /**
@@ -93,15 +83,10 @@ public class KnowledgeAdminController {
     public Result<String> updateArticle(@PathVariable("id") Long id,
                                         @Valid @RequestBody KnowledgeArticleReq req) {
         log.info("接收更新知识库文章请求: id={}, title={}", id, req.getTitle());
-        try {
-            if (!knowledgeArticleService.updateArticle(id, req)) {
-                return Result.error(ResultCode.RESOURCE_NOT_FOUND, "文章不存在或已删除");
-            }
-            return Result.success("更新成功", null);
-        } catch (Exception e) {
-            log.error("更新知识库文章失败: id={}, {}", id, e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "更新知识库文章失败: " + "系统异常，请稍后重试");
+        if (!knowledgeArticleService.updateArticle(id, req)) {
+            return Result.error(ResultCode.RESOURCE_NOT_FOUND, "文章不存在或已删除");
         }
+        return Result.success("更新成功", null);
     }
 
     /**
@@ -118,15 +103,10 @@ public class KnowledgeAdminController {
         if (status == null || !VALID_STATUS.contains(status)) {
             return Result.error(ResultCode.PARAM_ERROR, "文章状态只能是DRAFT、PUBLISHED或ARCHIVED");
         }
-        try {
-            if (!knowledgeArticleService.updateArticleStatus(id, status)) {
-                return Result.error(ResultCode.RESOURCE_NOT_FOUND, "文章不存在或已删除");
-            }
-            return Result.success("PUBLISHED".equals(status) ? "已发布" : "已下架", null);
-        } catch (Exception e) {
-            log.error("更新知识库文章状态失败: id={}, status={}, {}", id, status, e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "更新知识库文章状态失败: " + "系统异常，请稍后重试");
+        if (!knowledgeArticleService.updateArticleStatus(id, status)) {
+            return Result.error(ResultCode.RESOURCE_NOT_FOUND, "文章不存在或已删除");
         }
+        return Result.success("PUBLISHED".equals(status) ? "已发布" : "已下架", null);
     }
 
     /**
@@ -136,14 +116,9 @@ public class KnowledgeAdminController {
     @OperationLog(type = "knowledge_article_delete", description = "删除知识库文章")
     public Result<String> deleteArticle(@PathVariable("id") Long id) {
         log.info("接收删除知识库文章请求: id={}", id);
-        try {
-            if (!knowledgeArticleService.deleteArticle(id)) {
-                return Result.error(ResultCode.RESOURCE_NOT_FOUND, "文章不存在或已删除");
-            }
-            return Result.success("删除成功", null);
-        } catch (Exception e) {
-            log.error("删除知识库文章失败: id={}, {}", id, e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "删除知识库文章失败: " + "系统异常，请稍后重试");
+        if (!knowledgeArticleService.deleteArticle(id)) {
+            return Result.error(ResultCode.RESOURCE_NOT_FOUND, "文章不存在或已删除");
         }
+        return Result.success("删除成功", null);
     }
 }

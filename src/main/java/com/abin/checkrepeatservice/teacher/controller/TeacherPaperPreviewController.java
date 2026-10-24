@@ -55,49 +55,43 @@ public class TeacherPaperPreviewController {
     public ResponseEntity<?> previewPaper(
             @Parameter(description = "论文ID") @PathVariable Long paperId) {
         
-        try {
-            Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
-            log.info("教师请求预览论文原文 - 教师ID: {}, 论文ID: {}", teacherId, paperId);
+        Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
+        log.info("教师请求预览论文原文 - 教师ID: {}, 论文ID: {}", teacherId, paperId);
 
-            // 1. 验证论文存在性和权限
-            PaperInfo paperInfo = paperInfoMapper.selectById(paperId);
-            if (paperInfo == null) {
-                log.warn("论文不存在 - 论文ID: {}", paperId);
-                return ResponseEntity.notFound().build();
-            }
-
-            // 2. 验证教师权限（只能预览自己指导的学生论文）
-            if (!paperInfo.getTeacherId().equals(teacherId)) {
-                log.warn("无权限预览论文 - 教师ID: {}, 论文ID: {}, 论文指导教师ID: {}", 
-                        teacherId, paperId, paperInfo.getTeacherId());
-                return ResponseEntity.status(403).body("无权限预览此论文");
-            }
-
-            // 3. 验证论文状态（确保论文已提交且未删除）
-            if (paperInfo.getIsDeleted() == 1) {
-                log.warn("论文已被删除 - 论文ID: {}", paperId);
-                return ResponseEntity.notFound().build();
-            }
-
-            // 4. 验证文件存在性
-            Long fileId = paperInfo.getFileId();
-            if (fileId == null) {
-                log.warn("论文文件不存在 - 论文 ID: {}", paperId);
-                return ResponseEntity.notFound().build();
-            }
-
-            // 5. 调用智能预览服务
-            ResponseEntity<?> previewResponse = filePreviewService.smartPreview(fileId);
-            
-            log.info("论文原文预览成功 - 教师ID: {}, 论文ID: {}, 文件ID: {}", 
-                    teacherId, paperId, fileId);
-            
-            return previewResponse;
-
-        } catch (Exception e) {
-            log.error("论文原文预览失败 - 论文ID: {}", paperId, e);
-            return ResponseEntity.status(500).body("预览服务暂时不可用");
+        // 1. 验证论文存在性和权限
+        PaperInfo paperInfo = paperInfoMapper.selectById(paperId);
+        if (paperInfo == null) {
+            log.warn("论文不存在 - 论文ID: {}", paperId);
+            return ResponseEntity.notFound().build();
         }
+
+        // 2. 验证教师权限（只能预览自己指导的学生论文）
+        if (!paperInfo.getTeacherId().equals(teacherId)) {
+            log.warn("无权限预览论文 - 教师ID: {}, 论文ID: {}, 论文指导教师ID: {}", 
+                    teacherId, paperId, paperInfo.getTeacherId());
+            return ResponseEntity.status(403).body("无权限预览此论文");
+        }
+
+        // 3. 验证论文状态（确保论文已提交且未删除）
+        if (paperInfo.getIsDeleted() == 1) {
+            log.warn("论文已被删除 - 论文ID: {}", paperId);
+            return ResponseEntity.notFound().build();
+        }
+
+        // 4. 验证文件存在性
+        Long fileId = paperInfo.getFileId();
+        if (fileId == null) {
+            log.warn("论文文件不存在 - 论文 ID: {}", paperId);
+            return ResponseEntity.notFound().build();
+        }
+
+        // 5. 调用智能预览服务
+        ResponseEntity<?> previewResponse = filePreviewService.smartPreview(fileId);
+        
+        log.info("论文原文预览成功 - 教师ID: {}, 论文ID: {}, 文件ID: {}", 
+                teacherId, paperId, fileId);
+        
+        return previewResponse;
     }
 
     /**
@@ -110,67 +104,53 @@ public class TeacherPaperPreviewController {
     public Result<PaperPreviewInfoDTO> getPaperPreviewInfo(
             @Parameter(description = "论文ID") @PathVariable Long paperId) {
         
-        try {
-            Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
-            log.info("获取论文预览信息 - 教师ID: {}, 论文ID: {}", teacherId, paperId);
+        Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
+        log.info("获取论文预览信息 - 教师ID: {}, 论文ID: {}", teacherId, paperId);
 
-            // 1. 验证论文存在性和权限
-            PaperInfo paperInfo = paperInfoMapper.selectById(paperId);
-            if (paperInfo == null) {
-                return Result.error(404, "论文不存在");
-            }
-
-            // 2. 验证教师权限
-            if (!paperInfo.getTeacherId().equals(teacherId)) {
-                return Result.error(403, "无权限查看此论文");
-            }
-
-            // 3. 构造预览信息DTO
-            PaperPreviewInfoDTO previewInfo = new PaperPreviewInfoDTO();
-            previewInfo.setPaperId(paperInfo.getId());
-            previewInfo.setPaperTitle(paperInfo.getPaperTitle());
-            previewInfo.setStudentId(paperInfo.getStudentId());
-            previewInfo.setPaperStatus(paperInfo.getPaperStatus());
-            previewInfo.setSubmitTime(paperInfo.getSubmitTime());
-            previewInfo.setFileId(paperInfo.getFileId());
-            previewInfo.setHasFile(paperInfo.getFileId() != null);
-            
-            // 4. 补充文件详细信息（如果文件存在）
-            if (previewInfo.getHasFile()) {
-                try {
-                    FileInfo fileInfo = fileService.getById(paperInfo.getFileId());
-                    if (fileInfo != null) {
-                        previewInfo.setFileName(fileInfo.getOriginalFilename());
-                        previewInfo.setFileSize(fileInfo.getFileSize());
-                        previewInfo.setFileSizeDesc(fileInfo.getFileSizeDesc());
-                        previewInfo.setFileType(getFileExtension(fileInfo.getOriginalFilename()));
-                        previewInfo.setWordCount(fileInfo.getWordCount());
-                        previewInfo.setUploadTime(fileInfo.getUploadTime());
-                    }
-                } catch (Exception e) {
-                    log.warn("获取文件详细信息失败: {}", e.getMessage());
-                }
-            }
-            
-            // 5. 获取学生姓名
-            try {
-                SysUser student = sysUserService.getById(paperInfo.getStudentId());
-                if (student != null) {
-                    previewInfo.setStudentName(student.getRealName());
-                    previewInfo.setStudentNo(student.getUsername());
-                }
-            } catch (Exception e) {
-                log.warn("获取学生信息失败: {}", e.getMessage());
-            }
-            
-            log.info("获取论文预览信息成功 - 教师ID: {}, 论文ID: {}, 文件ID: {}", 
-                    teacherId, paperId, paperInfo.getFileId());
-            return Result.success("获取预览信息成功", previewInfo);
-
-        } catch (Exception e) {
-            log.error("获取论文预览信息失败 - 论文ID: {}", paperId, e);
-            return Result.error(500, "获取预览信息失败: " + "系统异常，请稍后重试");
+        // 1. 验证论文存在性和权限
+        PaperInfo paperInfo = paperInfoMapper.selectById(paperId);
+        if (paperInfo == null) {
+            return Result.error(404, "论文不存在");
         }
+
+        // 2. 验证教师权限
+        if (!paperInfo.getTeacherId().equals(teacherId)) {
+            return Result.error(403, "无权限查看此论文");
+        }
+
+        // 3. 构造预览信息DTO
+        PaperPreviewInfoDTO previewInfo = new PaperPreviewInfoDTO();
+        previewInfo.setPaperId(paperInfo.getId());
+        previewInfo.setPaperTitle(paperInfo.getPaperTitle());
+        previewInfo.setStudentId(paperInfo.getStudentId());
+        previewInfo.setPaperStatus(paperInfo.getPaperStatus());
+        previewInfo.setSubmitTime(paperInfo.getSubmitTime());
+        previewInfo.setFileId(paperInfo.getFileId());
+        previewInfo.setHasFile(paperInfo.getFileId() != null);
+        
+        // 4. 补充文件详细信息（如果文件存在）
+        if (previewInfo.getHasFile()) {
+            FileInfo fileInfo = fileService.getById(paperInfo.getFileId());
+            if (fileInfo != null) {
+                previewInfo.setFileName(fileInfo.getOriginalFilename());
+                previewInfo.setFileSize(fileInfo.getFileSize());
+                previewInfo.setFileSizeDesc(fileInfo.getFileSizeDesc());
+                previewInfo.setFileType(getFileExtension(fileInfo.getOriginalFilename()));
+                previewInfo.setWordCount(fileInfo.getWordCount());
+                previewInfo.setUploadTime(fileInfo.getUploadTime());
+            }
+        }
+        
+        // 5. 获取学生姓名
+        SysUser student = sysUserService.getById(paperInfo.getStudentId());
+        if (student != null) {
+            previewInfo.setStudentName(student.getRealName());
+            previewInfo.setStudentNo(student.getUsername());
+        }
+        
+        log.info("获取论文预览信息成功 - 教师ID: {}, 论文ID: {}, 文件ID: {}", 
+                teacherId, paperId, paperInfo.getFileId());
+        return Result.success("获取预览信息成功", previewInfo);
     }
 
     /**
@@ -199,17 +179,13 @@ public class TeacherPaperPreviewController {
         contentDTO.setWordCount(paperInfo.getWordCount());
 
         if (paperInfo.getFileId() != null) {
-            try {
-                FileInfo fileInfo = fileService.getById(paperInfo.getFileId());
-                if (fileInfo != null) {
-                    contentDTO.setFileSize(fileInfo.getFileSizeDesc());
-                    contentDTO.setFileType(getFileExtension(fileInfo.getOriginalFilename()));
-                    if (contentDTO.getWordCount() == null) {
-                        contentDTO.setWordCount(fileInfo.getWordCount());
-                    }
+            FileInfo fileInfo = fileService.getById(paperInfo.getFileId());
+            if (fileInfo != null) {
+                contentDTO.setFileSize(fileInfo.getFileSizeDesc());
+                contentDTO.setFileType(getFileExtension(fileInfo.getOriginalFilename()));
+                if (contentDTO.getWordCount() == null) {
+                    contentDTO.setWordCount(fileInfo.getWordCount());
                 }
-            } catch (Exception e) {
-                log.warn("获取论文文件信息失败: paperId={}, error={}", paperId, e.getMessage());
             }
         }
 

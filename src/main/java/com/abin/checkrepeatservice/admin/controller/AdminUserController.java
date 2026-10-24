@@ -46,12 +46,7 @@ public class AdminUserController {
         
         log.info("接收获取用户列表请求: page={}, size={}, userType={}, status={}, keyword={}",
                 page, size, userType, status, keyword);
-        try {
-            return adminUserService.getUserList(page, size, userType, status, keyword);
-        } catch (Exception e) {
-            log.error("获取用户列表失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取用户列表失败: " + "系统异常，请稍后重试");
-        }
+        return adminUserService.getUserList(page, size, userType, status, keyword);
     }
 
     /**
@@ -61,12 +56,7 @@ public class AdminUserController {
     @OperationLog(type = "admin_user_create", description = "管理员创建用户", recordResult = true)
     public Result<Map<String, Object>> createUser(@Valid @RequestBody UserCreateReq createReq) {
         log.info("接收创建用户请求: username={}", createReq.getUsername());
-        try {
-            return adminUserService.createUser(createReq);
-        } catch (Exception e) {
-            log.error("创建用户失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "创建用户失败: " + "系统异常，请稍后重试");
-        }
+        return adminUserService.createUser(createReq);
     }
 
     /**
@@ -77,12 +67,7 @@ public class AdminUserController {
     public Result<String> updateUser(@PathVariable Long userId,
                                      @Valid @RequestBody UserUpdateReq updateReq) {
         log.info("接收更新用户信息请求: userId={}", userId);
-        try {
-            return adminUserService.updateUser(userId, updateReq);
-        } catch (Exception e) {
-            log.error("更新用户信息失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "更新用户信息失败: " + "系统异常，请稍后重试");
-        }
+        return adminUserService.updateUser(userId, updateReq);
     }
 
     /**
@@ -92,12 +77,7 @@ public class AdminUserController {
     @OperationLog(type = "admin_user_delete", description = "管理员删除用户")
     public Result<String> deleteUser(@PathVariable Long userId) {
         log.info("接收删除用户请求: userId={}", userId);
-        try {
-            return adminUserService.deleteUser(userId);
-        } catch (Exception e) {
-            log.error("删除用户失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "删除用户失败: " + "系统异常，请稍后重试");
-        }
+        return adminUserService.deleteUser(userId);
     }
 
     /**
@@ -107,12 +87,7 @@ public class AdminUserController {
     @OperationLog(type = "admin_user_batch_delete", description = "管理员批量删除用户")
     public Result<String> batchDeleteUsers(@Valid @RequestBody BatchDeleteReq batchReq) {
         log.info("接收批量删除用户请求: userIds={}", batchReq.getUserIds());
-        try {
-            return adminUserService.batchDeleteUsers(batchReq);
-        } catch (Exception e) {
-            log.error("批量删除用户失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "批量删除用户失败: " + "系统异常，请稍后重试");
-        }
+        return adminUserService.batchDeleteUsers(batchReq);
     }
 
     /**
@@ -124,12 +99,7 @@ public class AdminUserController {
                                            @RequestBody Map<String, Integer> requestBody) {
         Integer status = requestBody.get("status");
         log.info("接收更新用户状态请求: userId={}, status={}", userId, status);
-        try {
-            return adminUserService.updateUserStatus(userId, status);
-        } catch (Exception e) {
-            log.error("更新用户状态失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "更新用户状态失败: " + "系统异常，请稍后重试");
-        }
+        return adminUserService.updateUserStatus(userId, status);
     }
 
     /**
@@ -140,12 +110,7 @@ public class AdminUserController {
     public Result<String> resetPassword(@PathVariable Long userId,
                                         @Valid @RequestBody ResetPasswordReq resetReq) {
         log.info("接收重置用户密码请求: userId={}", userId);
-        try {
-            return adminUserService.resetPassword(userId, resetReq);
-        } catch (Exception e) {
-            log.error("重置用户密码失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "重置用户密码失败: " + "系统异常，请稍后重试");
-        }
+        return adminUserService.resetPassword(userId, resetReq);
     }
 
     /**
@@ -154,12 +119,7 @@ public class AdminUserController {
     @GetMapping("/{userId}")
     public Result<UserInfoDTO> getUserDetail(@PathVariable Long userId) {
         log.info("接收获取用户详细信息请求: userId={}", userId);
-        try {
-            return adminUserService.getUserDetail(userId);
-        } catch (Exception e) {
-            log.error("获取用户详细信息失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取用户详细信息失败: " + "系统异常，请稍后重试");
-        }
+        return adminUserService.getUserDetail(userId);
     }
 
     /**
@@ -172,11 +132,6 @@ public class AdminUserController {
             @RequestParam(defaultValue = "10") Integer size) {
         
         log.info("接收获取用户登录历史请求: userId={}, page={}, size={}", userId, page, size);
-        try {
-            return adminUserService.getUserLoginHistory(userId, page, size);
-        } catch (Exception e) {
-            log.error("获取用户登录历史失败: {}", e.getMessage(), e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "获取用户登录历史失败: " + "系统异常，请稍后重试");
-        }
+        return adminUserService.getUserLoginHistory(userId, page, size);
     }
 }
