@@ -7,16 +7,20 @@ import com.abin.checkrepeatservice.common.constant.PaperNoticeConstants;
 import com.abin.checkrepeatservice.common.enums.CheckTaskStatusEnum;
 import com.abin.checkrepeatservice.common.statemachine.CheckTaskStateMachine;
 import com.abin.checkrepeatservice.notification.service.NotificationService;
+import com.abin.checkrepeatservice.pojo.entity.CheckReport;
 import com.abin.checkrepeatservice.pojo.entity.CheckTask;
 import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
+import com.abin.checkrepeatservice.student.mapper.CheckReportMapper;
 import com.abin.checkrepeatservice.student.mapper.CheckTaskMapper;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * 查重任务失败统一恢复服务。
@@ -42,6 +46,9 @@ public class CheckTaskFailureRecoveryService {
 
     @Resource
     private PaperInfoMapper paperInfoMapper;
+
+    @Resource
+    private CheckReportMapper checkReportMapper;
 
     @Resource
     private NotificationService notificationService;
@@ -80,6 +87,10 @@ public class CheckTaskFailureRecoveryService {
             return false;
         }
 
+        // 失败任务不应再保留报告：历史异常路径或并发生成的报告若残留，
+        // 报告列表就会出现"有报告、却没有已完成查重任务"的脏数据
+        clearOrphanReports(taskId);
+
         try {
             collegeQuotaService.refundForFailedTask(taskId);
         } catch (Exception e) {
@@ -91,6 +102,30 @@ public class CheckTaskFailureRecoveryService {
         restorePaperStatus(paper);
         notifyStudent(paper, failReason);
         return true;
+    }
+
+    /**
+     * 清理失败任务残留的报告（软删除），并清空任务上的 report_id。
+     * 失败任务的口径是"没有有效报告"，报告文件本身不必删除，下载口已不可达。
+     */
+    private void clearOrphanReports(Long taskId) {
+        try {
+            List<CheckReport> reports = checkReportMapper.selectList(
+                    new LambdaQueryWrapper<CheckReport>()
+                            .eq(CheckReport::getTaskId, taskId));
+            for (CheckReport report : reports) {
+                checkReportMapper.deleteById(report.getId());
+            }
+            checkTaskMapper.update(null, new LambdaUpdateWrapper<CheckTask>()
+                    .eq(CheckTask::getId, taskId)
+                    .set(CheckTask::getReportId, null));
+            if (!reports.isEmpty()) {
+                log.warn("已清理失败任务的残留报告 - taskId={}, reportCount={}", taskId, reports.size());
+            }
+        } catch (Exception e) {
+            // 清理失败不影响失败恢复主流程，残留数据由后续核查兜底
+            log.error("清理失败任务残留报告异常 - taskId={}", taskId, e);
+        }
     }
 
     /**

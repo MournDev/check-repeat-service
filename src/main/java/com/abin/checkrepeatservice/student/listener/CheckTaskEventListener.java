@@ -207,12 +207,14 @@ public class CheckTaskEventListener {
             // 7. 推送进度：生成报告
             publishProgress(taskId, paperId, "REPORT_GENERATING", 80, "正在生成查重报告...", 10);
 
-            // 8. 生成查重报告（含 P5 报告验真码 content_hash）
-            CheckReport checkReport = generateCheckReport(checkTask, effectiveRateValue, repeatDetails, maxPerSource, citationRate);
+            // 8. 构建报告记录（仅内存组装，report_no/相对路径/验真哈希在此算好，不落库）
+            CheckReport checkReport = buildCheckReportRecord(checkTask, effectiveRateValue,
+                    repeatDetails, maxPerSource, citationRate);
 
-            // 9-11. 任务完成态、任务业务字段、论文状态必须同一事务：
+            // 9-11. 报告落库、任务完成态、任务业务字段、论文状态必须同一事务：
             //     任一步失败都整体回滚，任务保持 checking，由外层 catch 统一转 failure 并退款，
-            //     避免“任务已完成、论文仍 checking”的假成功状态。
+            //     避免“任务已完成、论文仍 checking”的假成功状态，
+            //     也避免报告先落库、任务却失败而在 check_report 里留下孤儿报告。
             final CheckReport finalReport = checkReport;
             final PaperInfo paperForUpdate = paperInfo;
             transactionTemplate.executeWithoutResult(status -> {
@@ -223,6 +225,8 @@ public class CheckTaskEventListener {
                 if (!completed) {
                     throw new IllegalStateException("任务成功态流转失败（可能已被超时扫描改写）");
                 }
+
+                checkReportMapper.insert(finalReport);
 
                 // 业务字段单独更新（P0-1）：禁止再用执行前查出的 checkTask 全量回写状态
                 checkTaskMapper.update(null, new LambdaUpdateWrapper<CheckTask>()
@@ -237,6 +241,10 @@ public class CheckTaskEventListener {
 
                 updatePaperSuccess(paperForUpdate, effectiveRate);
             });
+
+            // 11.1 事务提交后再落盘 PDF：文件生成失败不回滚已完成的查重结论，
+            //      下载/预览端在文件缺失时会按库中数据重新生成
+            generateReportFile(checkTask, finalReport, effectiveRateValue);
 
             // 12. 写入详细查重结果（含 P5 句级命中明细批量落库）
             writeCheckResultDetail(taskId, paperId, effectiveRateValue, maxPerSource, citationRate,
@@ -350,27 +358,11 @@ public class CheckTaskEventListener {
     }
 
     /**
-     * 生成查重报告
+     * 构建查重报告记录（只在内存中组装，落库由任务完成事务统一负责）。
      */
-    private CheckReport generateCheckReport(com.abin.checkrepeatservice.pojo.entity.CheckTask checkTask,
-                                           BigDecimal checkRate, List<Map<String, Object>> repeatDetails,
-                                           BigDecimal maxPerSource, BigDecimal citationRate) {
-        // 使用 CheckTaskServiceImpl 中的方法
-        try {
-            // 反射调用或重新实现
-            return createCheckReport(checkTask, checkRate, repeatDetails, maxPerSource, citationRate);
-        } catch (Exception e) {
-            log.error("生成查重报告失败", e);
-            throw new RuntimeException("生成查重报告失败：" + e.getMessage());
-        }
-    }
-
-    /**
-     * 创建查重报告（简化版）
-     */
-    private CheckReport createCheckReport(com.abin.checkrepeatservice.pojo.entity.CheckTask checkTask,
-                                         BigDecimal checkRate, List<Map<String, Object>> repeatDetails,
-                                         BigDecimal maxPerSource, BigDecimal citationRate) {
+    private CheckReport buildCheckReportRecord(CheckTask checkTask,
+                                              BigDecimal checkRate, List<Map<String, Object>> repeatDetails,
+                                              BigDecimal maxPerSource, BigDecimal citationRate) {
         // 1. 生成报告编号：基于任务ID（雪花唯一），不再用毫秒时间戳
         //    —— 批量查重并发完成时同毫秒会撞 uk_report_no，直接导致报告落库失败
         String reportNo = "REPORT" + checkTask.getId();
@@ -395,15 +387,23 @@ public class CheckTaskEventListener {
         // 异步线程无登录上下文，不能调 UserBusinessInfoUtils.setAuditField（必抛未登录异常）；
         // createBy 直接继承任务创建人（即发起查重的学生），时间/isDeleted 由 MyMetaObjectHandler 兜底填充
         checkReport.setCreateBy(checkTask.getCreateBy());
-        checkReportMapper.insert(checkReport);
-
-        // 4. 落盘 PDF：路径统一走配置根目录，确保预览/下载能直接读到文件
-        String absolutePath = reportPathResolver.toAbsolute(reportPath);
-        reportPathResolver.ensureParentDirectory(absolutePath);
-        pdfReportGenerator.generatePdfToFile(
-                buildReportPreviewDTO(checkTask, checkReport, checkRate), absolutePath);
-
         return checkReport;
+    }
+
+    /**
+     * 落盘 PDF 报告文件。
+     * 报告记录已随任务完成态提交，落盘失败不回滚结论，下载/预览端可按库中数据重新生成。
+     */
+    private void generateReportFile(CheckTask checkTask, CheckReport checkReport, BigDecimal checkRate) {
+        try {
+            String absolutePath = reportPathResolver.toAbsolute(checkReport.getReportPath());
+            reportPathResolver.ensureParentDirectory(absolutePath);
+            pdfReportGenerator.generatePdfToFile(
+                    buildReportPreviewDTO(checkTask, checkReport, checkRate), absolutePath);
+        } catch (Exception e) {
+            log.error("查重报告文件生成失败（报告记录已入库，下载时可重新生成）- 任务 ID: {}, 报告 ID: {}",
+                    checkTask.getId(), checkReport.getId(), e);
+        }
     }
 
     /**
