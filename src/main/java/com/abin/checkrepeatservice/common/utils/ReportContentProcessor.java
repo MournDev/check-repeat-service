@@ -1,6 +1,5 @@
 package com.abin.checkrepeatservice.common.utils;
 
-import cn.hutool.core.lang.TypeReference;
 import com.abin.checkrepeatservice.common.Exception.BusinessException;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.mapper.FileInfoMapper;
@@ -10,6 +9,7 @@ import com.abin.checkrepeatservice.student.dto.ReportPreviewDTO;
 
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
 import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.TypeReference;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -19,6 +19,8 @@ import java.math.BigDecimal;
 import java.nio.file.Paths;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -142,16 +144,11 @@ public class ReportContentProcessor {
         rateStat.setRepeatRate(BigDecimal.valueOf(repeatRate));
         rateStat.setOriginalRate(100.0 - repeatRate);
 
-        // 解析重复详情，统计重复段落数
-        List<Map<String, Object>> repeatDetails = JSON.parseObject(
-                checkReport.getRepeatDetails(),
-                new TypeReference<List<Map<String, Object>>>() {}
-        );
-        // 总段落数（从论文文本分段后统计）
-        PaperInfo paperInfo = paperInfoMapper.selectById(checkTask.getPaperId());
-        // 重复段落数（去重统计，避免同一段落匹配多个来源）
-        List<Integer> repeatParaNos = repeatDetails.stream()
-                .map(detail -> (Integer) detail.get("paragraphNo"))
+        // 解析重复详情，统计重复段落数（详情中可能只有整体相似记录、没有段落序号，此时按 0 计）
+        List<Integer> repeatParaNos = parseRepeatDetails(checkReport.getRepeatDetails()).stream()
+                .map(detail -> detail.get("paragraphNo"))
+                .filter(Number.class::isInstance)
+                .map(no -> ((Number) no).intValue())
                 .distinct()
                 .collect(Collectors.toList());
         rateStat.setRepeatParagraphCount(repeatParaNos.size());
@@ -168,13 +165,11 @@ public class ReportContentProcessor {
         // 1. 文本分段（按句号/问号/感叹号分割）
         List<String> rawParagraphs = splitTextToParagraphs(paperText);
         // 2. 解析重复详情
-        List<Map<String, Object>> repeatDetails = JSON.parseObject(
-                repeatDetailsJson,
-                new TypeReference<List<Map<String, Object>>>() {}
-        );
-        // 3. 按段落序号分组重复详情
+        List<Map<String, Object>> repeatDetails = parseRepeatDetails(repeatDetailsJson);
+        // 3. 按段落序号分组重复详情（只有整体相似记录、没有段落序号的详情不参与段落标红）
         Map<Integer, List<Map<String, Object>>> repeatByParaNo = repeatDetails.stream()
-                .collect(Collectors.groupingBy(detail -> (Integer) detail.get("paragraphNo")));
+                .filter(detail -> detail.get("paragraphNo") instanceof Number)
+                .collect(Collectors.groupingBy(detail -> ((Number) detail.get("paragraphNo")).intValue()));
 
         // 4. 构建分段DTO（含标红）
         List<ReportPreviewDTO.ReportParagraphDTO> paragraphDTOs = new ArrayList<>();
@@ -195,7 +190,9 @@ public class ReportContentProcessor {
                 List<Map<String, Object>> paraRepeatDetails = repeatByParaNo.get(paraNo);
                 // 计算该段落最大相似度
                 double maxSimilarity = paraRepeatDetails.stream()
-                        .mapToDouble(detail -> (Double) detail.get("similarity"))
+                        .map(detail -> detail.get("similarity"))
+                        .filter(Number.class::isInstance)
+                        .mapToDouble(similarity -> ((Number) similarity).doubleValue())
                         .max()
                         .orElse(0.0);
                 paraDTO.setSimilarity(maxSimilarity);
@@ -203,14 +200,13 @@ public class ReportContentProcessor {
 
                 // 标红重复片段（简化逻辑：标红相似度最高的片段）
                 Map<String, Object> maxSimilarDetail = paraRepeatDetails.stream()
-                        .max((d1, d2) -> Double.compare(
-                                (Double) d1.get("similarity"),
-                                (Double) d2.get("similarity")
-                        ))
+                        .filter(detail -> detail.get("similarity") instanceof Number)
+                        .max(Comparator.comparingDouble(detail -> ((Number) detail.get("similarity")).doubleValue()))
                         .orElse(null);
                 if (maxSimilarDetail != null) {
-                    String repeatFragment = (String) maxSimilarDetail.get("repeatFragment");
-                    if (content.contains(repeatFragment)) {
+                    Object fragment = maxSimilarDetail.get("repeatFragment");
+                    if (fragment instanceof String repeatFragment
+                            && !repeatFragment.isEmpty() && content.contains(repeatFragment)) {
                         // 用<span>标签包裹标红片段
                         String highlightedContent = content.replace(
                                 repeatFragment,
@@ -222,7 +218,9 @@ public class ReportContentProcessor {
 
                 // 关联相似来源ID
                 List<Long> sourceIds = paraRepeatDetails.stream()
-                        .map(detail -> (Long) detail.get("sourceId"))
+                        .map(detail -> detail.get("sourceId"))
+                        .filter(Number.class::isInstance)
+                        .map(sourceId -> ((Number) sourceId).longValue())
                         .distinct()
                         .collect(Collectors.toList());
                 paraDTO.setSourceIds(sourceIds);
@@ -243,39 +241,74 @@ public class ReportContentProcessor {
      * 构建相似来源列表
      */
     private List<ReportPreviewDTO.ReportSimilarSourceDTO> buildSimilarSources(String repeatDetailsJson) {
-        List<Map<String, Object>> repeatDetails = JSON.parseObject(
-                repeatDetailsJson,
-                new TypeReference<List<Map<String, Object>>>() {}
-        );
-        // 去重相似来源（按sourceId分组）
-        Map<Long, Map<String, Object>> sourceMap = repeatDetails.stream()
-                .collect(Collectors.toMap(
-                        detail -> (Long) detail.get("sourceId"),
-                        detail -> detail,
-                        (d1, d2) -> {
-                            // 合并相同来源的最大相似度
-                            double maxSimilarity = Math.max(
-                                    (Double) d1.get("similarity"),
-                                    (Double) d2.get("similarity")
-                            );
-                            d1.put("similarity", maxSimilarity);
-                            return d1;
-                        }
-                ));
+        List<Map<String, Object>> repeatDetails = parseRepeatDetails(repeatDetailsJson);
+        // 去重相似来源：优先按 sourceId 分组；只有整体相似记录时按「来源名称 + 链接」兜底
+        Map<String, Map<String, Object>> sourceMap = new LinkedHashMap<>();
+        for (Map<String, Object> detail : repeatDetails) {
+            Object sourceId = detail.get("sourceId");
+            Object sourceName = firstNonNull(detail.get("sourceName"), detail.get("source"));
+            Object sourceUrl = firstNonNull(detail.get("sourceUrl"), detail.get("reportUrl"));
+            String key = sourceId != null
+                    ? "id:" + sourceId
+                    : "name:" + sourceName + "|url:" + sourceUrl;
+            Map<String, Object> existing = sourceMap.get(key);
+            if (existing == null || toDouble(detail.get("similarity")) > toDouble(existing.get("similarity"))) {
+                // 保留相似度更高的一条
+                sourceMap.put(key, detail);
+            }
+        }
 
         // 转换为DTO
         return sourceMap.values().stream()
                 .map(detail -> {
                     ReportPreviewDTO.ReportSimilarSourceDTO sourceDTO = new ReportPreviewDTO.ReportSimilarSourceDTO();
-                    sourceDTO.setSourceId((Long) detail.get("sourceId"));
-                    sourceDTO.setSourceName((String) detail.get("sourceName"));
-                    sourceDTO.setSourceType((String) detail.get("sourceType"));
-                    sourceDTO.setSourceUrl((String) detail.get("sourceUrl"));
-                    sourceDTO.setMaxSimilarity((Double) detail.get("similarity"));
+                    Object sourceId = detail.get("sourceId");
+                    sourceDTO.setSourceId(sourceId instanceof Number ? ((Number) sourceId).longValue() : null);
+                    Object sourceName = firstNonNull(detail.get("sourceName"), detail.get("source"));
+                    sourceDTO.setSourceName(sourceName instanceof String ? (String) sourceName : null);
+                    Object sourceType = detail.get("sourceType");
+                    sourceDTO.setSourceType(sourceType instanceof String ? (String) sourceType : null);
+                    Object sourceUrl = firstNonNull(detail.get("sourceUrl"), detail.get("reportUrl"));
+                    sourceDTO.setSourceUrl(sourceUrl instanceof String ? (String) sourceUrl : null);
+                    sourceDTO.setMaxSimilarity(toDouble(detail.get("similarity")));
                     return sourceDTO;
                 })
                 .sorted((s1, s2) -> Double.compare(s2.getMaxSimilarity(), s1.getMaxSimilarity())) // 按相似度降序
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * 解析 repeat_details JSON：兼容空串、非法 JSON 与「整体相似记录」两种形态，
+     * 解析失败时按空详情处理，避免预览接口整体 500。
+     */
+    private List<Map<String, Object>> parseRepeatDetails(String repeatDetailsJson) {
+        if (repeatDetailsJson == null || repeatDetailsJson.isBlank()) {
+            return new ArrayList<>();
+        }
+        try {
+            List<Map<String, Object>> details = JSON.parseObject(
+                    repeatDetailsJson,
+                    new TypeReference<List<Map<String, Object>>>() {
+                    });
+            return details == null ? new ArrayList<>() : details;
+        } catch (Exception e) {
+            log.warn("重复详情 JSON 解析失败，按空详情处理：{}", e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+    /**
+     * 重复详情里的数值可能是 BigDecimal/Double/Integer，统一按 double 取值。
+     */
+    private double toDouble(Object value) {
+        return value instanceof Number ? ((Number) value).doubleValue() : 0.0;
+    }
+
+    /**
+     * 取第一个非空的来源字段（兼容 source/sourceName、reportUrl/sourceUrl 两套键名）
+     */
+    private Object firstNonNull(Object primary, Object fallback) {
+        return primary != null ? primary : fallback;
     }
 
     /**
