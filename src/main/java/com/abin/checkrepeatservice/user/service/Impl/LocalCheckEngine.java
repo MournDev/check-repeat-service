@@ -108,6 +108,7 @@ public class LocalCheckEngine implements CheckEngine {
         // 不视为引擎故障；但库中有论文却一篇都没比对上，则属于引擎故障，必须抛出。
         boolean libraryEmpty = paperList.isEmpty();
         int comparedCount = 0;
+        int failedCount = 0;
         double maxSimilarity = 0.0;
         String mostSimilarPaperTitle = "";
         BigInteger mostSimilarSimHash = BigInteger.ZERO;
@@ -129,6 +130,9 @@ public class LocalCheckEngine implements CheckEngine {
                     libraryData = loadLibraryPaperData(paper);
                 }
                 if (libraryData == null) {
+                    failedCount++;
+                    log.error("比对库论文正文/分词为空，无法参与比对 - paperId={}, contentPath={}, segmentedPath={}",
+                            paper.getId(), paper.getContentPath(), paper.getSegmentedPath());
                     continue;
                 }
                 // 成功加载比对数据即视为本篇完成比对（海明预筛跳过也属正常比对结果）
@@ -161,14 +165,27 @@ public class LocalCheckEngine implements CheckEngine {
                     mostSimilarSimHash = libraryData.getSimHash();
                 }
             } catch (Exception e) {
-                log.error("比对库中论文失败（ID：{}）：", paper.getId(), e);
-                continue; // 单篇论文比对失败，不影响整体流程
+                failedCount++;
+                log.error("比对库论文处理失败 - paperId={}, contentPath={}",
+                        paper.getId(), paper.getContentPath(), e);
+                continue; // 单篇失败先继续，最终按失败率决定是否让任务失败
             }
         }
 
         // M1.2：库中有论文但一篇都没能加载/比对成功 → 引擎故障，不允许静默返回 0%
         if (!libraryEmpty && comparedCount == 0) {
             throw new RuntimeException("比对库论文全部读取失败，无法完成查重（库内论文数：" + paperList.size() + "）");
+        }
+
+        // P1-11：单篇失败可以容忍，但失败率超过 10% 时结果可信度已不可接受，
+        // 直接抛出让任务落 failure + 退额度，避免返回被严重低估的相似度。
+        if (!libraryEmpty) {
+            double failureRate = (double) failedCount / paperList.size();
+            if (failureRate > 0.10d) {
+                throw new RuntimeException(String.format(
+                        "比对库论文失败率过高（失败 %d/%d，%.1f%%），无法保证查重结果可信",
+                        failedCount, paperList.size(), failureRate * 100));
+            }
         }
 
         // ===== P5 句级分析：候选论文句级标注 + 总相似比/单篇最大相似比/引用率 =====
