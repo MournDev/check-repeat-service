@@ -73,11 +73,24 @@ public class DetectionCacheService {
     @Value("${check.local.cache-expire-hours:24}")
     private long ttlHours;
 
+    /**
+     * 缓存容量配置上限（MB），来源 cache.max-size-mb。
+     * 实际生效值还会被 JVM 堆的 25% 硬夹取，见 {@link #resolveCapacityBytes(Integer)}。
+     */
+    @Value("${cache.max-size-mb:256}")
+    private int configuredMaxSizeMb;
+
     /** 当前策略：lru / fifo / ttl（volatile 保证配置热更新后的可见性） */
     private volatile String strategy = "lru";
 
-    /** 容量上限（字节），默认 1024MB，与 PerformanceConfigDTO 默认值一致 */
-    private volatile long maxWeightBytes = 1024L * 1024 * 1024;
+    /**
+     * 容量上限（字节）。
+     *
+     * 原默认值为 1024MB，而生产堆只有 -Xmx768m——缓存能涨到比堆还大，
+     * 命中率越高越早 OOM。现改为“配置值（默认 256MB）与堆内存 25% 取小”，
+     * 运行期热更新同样走该夹取逻辑。</p>
+     */
+    private volatile long maxWeightBytes = 256L * 1024 * 1024;
 
     /**
      * 委托容器。synchronized 保护；accessOrder 由策略决定：
@@ -98,6 +111,9 @@ public class DetectionCacheService {
      */
     @PostConstruct
     public void init() {
+        // 先按“配置上限 + 堆 25%”落一次安全值：即使库里的性能配置缺失/损坏，
+        // 也绝不会停留在未经堆夹取的默认容量上
+        this.maxWeightBytes = resolveCapacityBytes(null);
         try {
             SystemConfig config = systemConfigMapper.selectByConfigKey(CONFIG_KEY);
             if (config != null && config.getConfigValue() != null) {
@@ -107,14 +123,38 @@ public class DetectionCacheService {
                         this.strategy = dto.getCacheStrategy();
                     }
                     if (dto.getCacheSize() != null) {
-                        this.maxWeightBytes = dto.getCacheSize() * 1024L * 1024;
+                        this.maxWeightBytes = resolveCapacityBytes(dto.getCacheSize());
                     }
                 }
             }
         } catch (Exception e) {
-            log.warn("启动时读取性能配置失败，检测缓存使用默认参数（lru/1024MB）: {}", e.getMessage());
+            log.warn("启动时读取性能配置失败，检测缓存使用默认参数（lru/{}MB）: {}",
+                    configuredMaxSizeMb, e.getMessage());
         }
-        log.info("检测缓存已初始化: 策略={}, 容量={}MB", strategy, maxWeightBytes / 1024 / 1024);
+        log.info("检测缓存已初始化: 策略={}, 容量={}MB（配置上限={}MB, 堆上限={}MB）",
+                strategy, maxWeightBytes / 1024 / 1024, configuredMaxSizeMb,
+                Runtime.getRuntime().maxMemory() / 4 / 1024 / 1024);
+    }
+
+    /**
+     * 计算实际生效的缓存容量：配置值（MB）与 JVM 堆的 25% 取小。
+     *
+     * <p>堆上限是硬约束，管理端把 cacheSize 调到 1024 甚至 10000 也不会突破，
+     * 避免“调大缓存反而更快 OOM”。</p>
+     */
+    private long resolveCapacityBytes(Integer sizeMb) {
+        int mb = (sizeMb == null || sizeMb <= 0) ? configuredMaxSizeMb : sizeMb;
+        if (mb <= 0) {
+            mb = 256;
+        }
+        long configuredBytes = mb * 1024L * 1024;
+        long heapCapBytes = Runtime.getRuntime().maxMemory() / 4;
+        long effective = Math.min(configuredBytes, heapCapBytes);
+        if (effective < configuredBytes) {
+            log.warn("检测缓存容量 {}MB 超过堆内存 25% 上限 {}MB，已按堆上限生效",
+                    mb, heapCapBytes / 1024 / 1024);
+        }
+        return effective;
     }
 
     /**
@@ -157,8 +197,8 @@ public class DetectionCacheService {
      */
     public void reconfigure(String newStrategy, Integer newSizeMb) {
         String targetStrategy = (newStrategy == null || newStrategy.isBlank()) ? strategy : newStrategy;
-        long targetMaxBytes = (newSizeMb == null || newSizeMb <= 0)
-                ? maxWeightBytes : newSizeMb * 1024L * 1024;
+        // 热更新同样受“配置上限 + 堆 25%”夹取，防止管理端写入超大值后 OOM
+        long targetMaxBytes = resolveCapacityBytes(newSizeMb);
 
         synchronized (this) {
             LinkedHashMap<String, CacheEntry> old = this.delegate;
