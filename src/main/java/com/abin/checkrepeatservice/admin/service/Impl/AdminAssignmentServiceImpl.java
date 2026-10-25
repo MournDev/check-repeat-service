@@ -5,6 +5,8 @@ import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.common.enums.UserTypeEnum;
 import com.abin.checkrepeatservice.common.constant.DictConstants;
+import com.abin.checkrepeatservice.common.component.PaperStageGate;
+import com.abin.checkrepeatservice.common.datascope.DataScopeResolver;
 import com.abin.checkrepeatservice.admin.dto.AssignmentRuleConfigDTO;
 import com.abin.checkrepeatservice.mapper.SysUserMapper;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
@@ -18,6 +20,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.Resource;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -41,43 +45,53 @@ public class AdminAssignmentServiceImpl implements AdminAssignmentService {
 
     // M2.2 阶段门收口：论文状态流转统一校验（默认影子模式，只告警不阻断）
     @Resource
-    private com.abin.checkrepeatservice.common.component.PaperStageGate paperStageGate;
+    private PaperStageGate paperStageGate;
 
     // 治理项：数据范围统一裁决（分配列表与统计按角色范围收窄）
     @Resource
-    private com.abin.checkrepeatservice.common.datascope.DataScopeResolver dataScopeResolver;
+    private DataScopeResolver dataScopeResolver;
 
     @Override
     public Result<Map<String, Object>> getAssignmentStats() {
         try {
             Map<String, Object> stats = new HashMap<>();
-            
-            // 未分配学生数 - 没有指导老师的论文
-            // 待分配=已提交但还没指定导师，值就是 pending；字典里没有 "approved"
-            // （审核通过是 completed），写成 "approved" 这个条件恒不成立，统计永远是 0。
-            LambdaQueryWrapper<PaperInfo> unassignedWrapper = new LambdaQueryWrapper<>();
-            unassignedWrapper.isNull(PaperInfo::getTeacherId)
+
+            // 待分配学生：未指定导师且仍为 pending 的论文，按学生去重（与卡片文案一致）
+            LambdaQueryWrapper<PaperInfo> pendingWrapper = new LambdaQueryWrapper<>();
+            pendingWrapper.select(PaperInfo::getStudentId)
+                           .isNull(PaperInfo::getTeacherId)
                            .eq(PaperInfo::getPaperStatus, DictConstants.PaperStatus.PENDING);
-            dataScopeResolver.applyPaperScope(unassignedWrapper);
-            int unassignedStudents = paperInfoMapper.selectCount(unassignedWrapper).intValue();
-            stats.put("unassignedStudents", unassignedStudents);
-            
-            // 可用教师数 - 可以接受更多学生的教师
+            dataScopeResolver.applyPaperScope(pendingWrapper);
+            long pendingStudents = countDistinctStudents(pendingWrapper);
+
+            // 已分配学生：已有导师的论文，按学生去重
+            LambdaQueryWrapper<PaperInfo> assignedWrapper = new LambdaQueryWrapper<>();
+            assignedWrapper.select(PaperInfo::getStudentId)
+                           .isNotNull(PaperInfo::getTeacherId);
+            dataScopeResolver.applyPaperScope(assignedWrapper);
+            long assignedStudents = countDistinctStudents(assignedWrapper);
+
+            // 指导老师：启用的教师账号
             LambdaQueryWrapper<SysUser> teacherWrapper = new LambdaQueryWrapper<>();
-            teacherWrapper.eq(SysUser::getUserType, "teacher")
-                         .eq(SysUser::getStatus, 1); // 启用状态
-            int availableTeachers = sysUserMapper.selectCount(teacherWrapper).intValue();
-            stats.put("availableTeachers", availableTeachers);
-            
-            // 平均指导数
+            teacherWrapper.eq(SysUser::getUserType, UserTypeEnum.TEACHER.getCode())
+                         .eq(SysUser::getStatus, 1);
             List<SysUser> teachers = sysUserMapper.selectList(teacherWrapper);
-            double avgLoad = teachers.isEmpty() ? 0 : 
-                teachers.stream()
-                       .mapToInt(SysUser::getCurrentAdvisorCount)
-                       .average()
-                       .orElse(0);
-            stats.put("avgLoad", Math.round(avgLoad));
-            
+            int advisorsCount = teachers.size();
+
+            // 平均指导数：教师当前指导学生数的平均值，保留 1 位小数（口径与列表一致，不再用四舍五入整数）
+            double avgLoad = teachers.stream()
+                    .map(SysUser::getCurrentAdvisorCount)
+                    .filter(Objects::nonNull)
+                    .mapToInt(Integer::intValue)
+                    .average()
+                    .orElse(0);
+            BigDecimal avgAssigned = BigDecimal.valueOf(avgLoad).setScale(1, RoundingMode.HALF_UP);
+
+            stats.put("pendingStudents", pendingStudents);
+            stats.put("assignedStudents", assignedStudents);
+            stats.put("advisorsCount", advisorsCount);
+            stats.put("avgAssigned", avgAssigned);
+
             // 今日分配数 - 今天创建的有指导老师的论文
             LocalDateTime todayStart = LocalDate.now().atStartOfDay();
             LambdaQueryWrapper<PaperInfo> todayWrapper = new LambdaQueryWrapper<>();
@@ -86,13 +100,22 @@ public class AdminAssignmentServiceImpl implements AdminAssignmentService {
             dataScopeResolver.applyPaperScope(todayWrapper);
             int todayAssignments = paperInfoMapper.selectCount(todayWrapper).intValue();
             stats.put("todayAssignments", todayAssignments);
-            
+
             log.info("获取分配统计信息成功: {}", stats);
             return Result.success(stats);
         } catch (Exception e) {
             log.error("获取分配统计信息失败: {}", e.getMessage(), e);
             return Result.error(ResultCode.SYSTEM_ERROR, "获取分配统计信息失败");
         }
+    }
+
+    /** 按 student_id 去重计数；空学生不计入 */
+    private long countDistinctStudents(LambdaQueryWrapper<PaperInfo> wrapper) {
+        return paperInfoMapper.selectList(wrapper).stream()
+                .map(PaperInfo::getStudentId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .count();
     }
 
     @Override
@@ -132,18 +155,21 @@ public class AdminAssignmentServiceImpl implements AdminAssignmentService {
             Page<Map<String, Object>> resultMap = new Page<>(resultPage.getCurrent(), resultPage.getSize(), resultPage.getTotal());
             List<Map<String, Object>> records = resultPage.getRecords().stream().map(paper -> {
                 Map<String, Object> record = new HashMap<>();
+                // 论文ID：分配导师时回传给后端（singleAssign 的 studentId 实际就是论文ID）
                 record.put("id", String.valueOf(paper.getId()));
+                record.put("paperId", String.valueOf(paper.getId()));
                 record.put("title", paper.getPaperTitle());
-                record.put("studentId", paper.getStudentId() == null ? null : String.valueOf(paper.getStudentId()));
 
-                // 获取学生信息（取自批量预载 Map）
                 SysUser student = paper.getStudentId() == null ? null : studentMap.get(paper.getStudentId());
+                // 学生用户ID：查看学生详情时使用，不能与论文ID混用
+                record.put("studentId", student == null ? null : String.valueOf(student.getId()));
                 if (student != null) {
-                    record.put("name", student.getRealName());
-                    record.put("major", student.getMajorId());
+                    record.put("studentNo", student.getUsername());   // 学号 = username
+                    record.put("studentName", student.getRealName());
+                    record.put("majorName", student.getMajor());
                     record.put("grade", student.getGrade());
                     record.put("collegeId", student.getCollegeId());
-                    
+
                     // 获取研究兴趣
                     List<String> interests = Arrays.asList(Optional.ofNullable(student.getResearchDirection())
                         .orElse("").split(","))
@@ -152,7 +178,8 @@ public class AdminAssignmentServiceImpl implements AdminAssignmentService {
                         .collect(Collectors.toList());
                     record.put("interests", interests);
                 }
-                
+                record.put("submitTime", paper.getSubmitTime() != null
+                        ? paper.getSubmitTime() : paper.getCreateTime());
                 return record;
             }).collect(Collectors.toList());
             
@@ -172,7 +199,7 @@ public class AdminAssignmentServiceImpl implements AdminAssignmentService {
             Page<SysUser> userPage = new Page<>(page, size);
             
             LambdaQueryWrapper<SysUser> wrapper = new LambdaQueryWrapper<>();
-            wrapper.eq(SysUser::getUserType, "teacher")
+            wrapper.eq(SysUser::getUserType, UserTypeEnum.TEACHER.getCode())
                    .eq(SysUser::getStatus, 1);
             
             // 关键词搜索
@@ -496,7 +523,7 @@ public class AdminAssignmentServiceImpl implements AdminAssignmentService {
         try {
             // 构建更新条件：只更新教师用户
             LambdaQueryWrapper<SysUser> wrapper = new LambdaQueryWrapper<>();
-            wrapper.eq(SysUser::getUserType, "teacher");
+            wrapper.eq(SysUser::getUserType, UserTypeEnum.TEACHER.getCode());
             
             // 创建更新对象
             SysUser updateUser = new SysUser();
