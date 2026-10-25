@@ -8,6 +8,7 @@ import com.abin.checkrepeatservice.common.cache.DetectionCacheService;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.common.event.SecurityConfigChangedEvent;
 import com.abin.checkrepeatservice.pojo.entity.SystemConfig;
+import com.abin.checkrepeatservice.student.service.Impl.StudentDashboardService;
 import com.alibaba.fastjson2.JSON;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -49,6 +50,13 @@ public class SystemConfigServiceImpl implements SystemConfigService {
 
     @Autowired
     private ApplicationEventPublisher eventPublisher;
+
+    /**
+     * 学生工作台服务：时间节点读取复用其 getDeadlines 实现。
+     * 必须使用注入的 Spring Bean，禁止 new（新建实例的 @Resource mapper 全为 null）。
+     */
+    @Autowired
+    private StudentDashboardService studentDashboardService;
     
     // 配置键常量
     private static final String PERFORMANCE_CONFIG_KEY = "performance";
@@ -319,10 +327,8 @@ public class SystemConfigServiceImpl implements SystemConfigService {
         
     @Override
     public com.abin.checkrepeatservice.student.dto.DeadlinesDTO getDeadlines() {
-        // 直接调用 StudentDashboardService 的方法（已实现从数据库读取）
-        // 这里为了简化，直接复用逻辑
-        return new com.abin.checkrepeatservice.student.service.Impl.StudentDashboardService()
-            .getDeadlines();
+        // 复用 StudentDashboardService 的数据库读取逻辑（注入的 Bean，mapper 已正常注入）
+        return studentDashboardService.getDeadlines();
     }
         
     @Override
