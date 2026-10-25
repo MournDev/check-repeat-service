@@ -112,17 +112,16 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
         Long ownerId = studentId != null ? studentId : currentUserId;
         if (ownerId == null) {
             log.error("创建查重任务失败：未传入归属学生且无登录上下文 - paperId={}", paperId);
-            return Result.error(ResultCode.NOT_LOGIN, "无法确定论文归属学生，请重新登录后再试");
+            throw new BusinessException(ResultCode.NOT_LOGIN, "无法确定论文归属学生，请重新登录后再试", null);
         }
 
-        // 第一道并发闸门：同一论文 5 秒短锁，避免两个请求同时走到数据库。
         // Redis 异常时放行，最终由事务内的 paper_info 行锁 + 活跃任务二次校验兜底。
         String lockKey = "check:task:create:lock:" + paperId;
         String lockToken = UUID.randomUUID().toString();
         if (!tryAcquirePaperCheckLock(lockKey, lockToken)) {
             log.warn("同一论文查重任务创建锁未获取 - paperId={}", paperId);
-            return Result.error(ResultCode.BUSINESS_NO_REPEAT,
-                    "该论文已有查重任务正在创建，请勿重复提交");
+            throw new BusinessException(ResultCode.BUSINESS_NO_REPEAT,
+                    "该论文已有查重任务正在创建，请勿重复提交", null);
         }
         try {
             return doCreateCheckTask(paperId, ownerId, currentUserId);
@@ -147,7 +146,8 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
 
         if (!validationResult.isSuccess()) {
             log.warn("查重前置校验失败 - 论文 ID: {}, 原因：{}", paperId, validationResult.getMessage());
-            return Result.error(ResultCode.BUSINESS_NO_REPEAT, validationResult.getMessage());
+            throw new BusinessException(ResultCode.BUSINESS_NO_REPEAT,
+                    validationResult.getMessage(), null);
         }
 
         PaperInfo paperInfo = validationResult.getPaper();
@@ -156,7 +156,8 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
             CheckResultVO checkResultVO = transactionTemplate.execute(status ->
                     createCheckTaskInTransaction(paperId, paperInfo, ownerId));
             if (checkResultVO == null) {
-                return Result.error(ResultCode.SYSTEM_ERROR, "查重任务创建失败：事务未返回结果");
+                throw new BusinessException(ResultCode.SYSTEM_ERROR,
+                        "查重任务创建失败：事务未返回结果", null);
             }
 
             log.info("查重任务创建成功 - 任务 ID: {}, 论文 ID: {}, 预估时长：{}秒",
@@ -165,9 +166,9 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
             return Result.success("查重任务创建成功，预计" + estimateDuration(paperInfo.getWordCount()) +
                                 "秒内完成（当前排队位置：#" + getQueuePosition() + "）", checkResultVO);
         } catch (BusinessException e) {
-            // 额度不足等业务异常：保留原错误码（409），不再统一抹成 500
+            // 额度不足等业务异常：继续抛给全局处理器，确保 HTTP 状态码为 400/409，而不是 200
             log.warn("创建查重任务业务校验失败 - 论文 ID: {}, 原因：{}", paperId, e.getMessage());
-            return Result.error(e.getResultCode(), e.getMessage());
+            throw e;
         } catch (Exception e) {
             log.error("创建查重任务失败 - 论文 ID: {}", paperId, e);
             return Result.error(ResultCode.SYSTEM_ERROR, "查重任务创建失败：系统异常，请稍后重试");

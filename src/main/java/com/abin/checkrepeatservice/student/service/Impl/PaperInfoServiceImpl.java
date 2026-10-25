@@ -818,13 +818,13 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
             PaperInfo paperInfo = paperInfoMapper.selectById(paperId);
             if (paperInfo == null) {
                 log.warn("论文不存在 - 论文 ID: {}", paperId);
-                return false;
+                throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "论文不存在或已删除", null);
             }
                 
             // 2. 验证论文归属
             if (!paperInfo.getStudentId().equals(studentId)) {
                 log.warn("无权限撤回他人论文 - 论文 ID: {}, 学生 ID: {}", paperId, studentId);
-                return false;
+                throw new BusinessException(ResultCode.PERMISSION_NO_ACCESS, "无权限撤回他人论文", null);
             }
                 
             // 3. 验证论文状态：只有待分配/已分配可撤回；查重中直接拦截，
