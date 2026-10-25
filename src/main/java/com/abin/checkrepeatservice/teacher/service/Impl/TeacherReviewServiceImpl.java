@@ -202,6 +202,11 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
         }
         // 清洗审核意见（防XSS）
         String cleanedOpinion = reviewAttachUtils.cleanReviewOpinion(reviewOpinion);
+        // 退回必须写明可执行的修改意见，前端按钮禁用只是体验层，后端必须兜底
+        if (reviewStatus == DictConstants.ReviewStatus.REJECT && !StringUtils.hasText(cleanedOpinion)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR,
+                    "退回修改时必须填写审核意见", null);
+        }
 
         // 2. 上传审核附件（若有）
         ReviewAttachUtils.AttachInfo attachInfo = null;
