@@ -28,6 +28,7 @@ import com.abin.checkrepeatservice.pojo.entity.PaperReminderLog;
 import com.abin.checkrepeatservice.pojo.entity.ReviewRecord;
 import com.abin.checkrepeatservice.pojo.entity.SysUser;
 import com.abin.checkrepeatservice.teacher.mapper.ReviewRecordMapper;
+import com.abin.checkrepeatservice.common.service.FilePreviewService;
 import com.abin.checkrepeatservice.common.service.FileService;
 import com.abin.checkrepeatservice.pojo.entity.FileInfo;
 import com.abin.checkrepeatservice.detection.service.EnhancedSimilarityDetectionService;
@@ -79,6 +80,9 @@ public class AdminPaperServiceImpl implements AdminPaperService {
     
     @Resource
     private FileService fileService;
+
+    @Resource
+    private FilePreviewService filePreviewService;
     
     @Resource
     private EnhancedSimilarityDetectionService detectionService;
@@ -181,7 +185,7 @@ public class AdminPaperServiceImpl implements AdminPaperService {
             }
             
             // 专业筛选（通过专业名称关联查询）
-            // S11 安全修复：inSql 字符串拼接存在 SQL 注入，改用 apply {0} 参数绑定
+            // 安全修复：inSql 字符串拼接存在 SQL 注入，改用 apply {0} 参数绑定
             if (majorName != null && !majorName.isEmpty()) {
                 wrapper.apply("major_id IN (SELECT id FROM major WHERE major_name LIKE CONCAT('%', {0}, '%') AND is_deleted = 0)", majorName);
             }
@@ -268,6 +272,11 @@ public class AdminPaperServiceImpl implements AdminPaperService {
                 return Result.error(ResultCode.PARAM_ERROR, "无效的审核结果");
             }
 
+            // 代审退回必须写明意见，避免学生收到空白退回
+            if ("rejected".equals(auditResult) && (auditComment == null || auditComment.isBlank())) {
+                throw new BusinessException(ResultCode.PARAM_ERROR, "退回时必须填写审核意见", null);
+            }
+
             // 审核来源不由客户端决定：管理端入口统一按管理员代审落库
             String auditSource = AUDIT_SOURCE_ADMIN_PROXY;
             String normalizedProxyReason = normalizeProxyReason(proxyReason);
@@ -326,9 +335,9 @@ public class AdminPaperServiceImpl implements AdminPaperService {
                     paperId, auditResult, fromStatus, reviewRecord.getId(), operatorId);
             return Result.success("论文审核成功", data);
         } catch (BusinessException e) {
-            // S12：阶段门 40305 等业务异常透传原错误码，不降级为 500
+            // 业务异常必须抛给全局处理器，确保 HTTP 状态码是 400/403/409，而不是 200
             log.warn("论文审核被拦截: paperId={}, code={}, msg={}", paperId, e.getResultCode().getCode(), e.getMessage());
-            return Result.error(e.getResultCode(), e.getMessage());
+            throw e;
         } catch (Exception e) {
             log.error("论文审核失败: paperId={}", paperId, e);
             return Result.error(ResultCode.SYSTEM_ERROR, "论文审核失败: " + "系统异常，请稍后重试");
@@ -737,6 +746,26 @@ public class AdminPaperServiceImpl implements AdminPaperService {
                 throw new BusinessException(ResultCode.SYSTEM_ERROR, "论文下载失败，请稍后重试");
             }
         }
+    }
+
+    @Override
+    public Result<Map<String, String>> getPaperPreviewUrl(Long paperId) {
+        PaperInfo paperInfo = paperInfoMapper.selectById(paperId);
+        if (paperInfo == null || Integer.valueOf(1).equals(paperInfo.getIsDeleted())) {
+            throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "论文不存在或已删除");
+        }
+        if (!dataScopeResolver.canAccessPaper(paperInfo)) {
+            throw new BusinessException(ResultCode.PERMISSION_NO_ACCESS, "无权预览该论文");
+        }
+        if (paperInfo.getFileId() == null) {
+            throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "论文文件不存在或已被清理");
+        }
+
+        Map<String, String> previewInfo = filePreviewService.getPreviewInfo(paperInfo.getFileId());
+        Map<String, String> data = new HashMap<>(previewInfo);
+        data.put("paperId", String.valueOf(paperId));
+        data.put("previewUrl", previewInfo.get("url"));
+        return Result.success("获取预览URL成功", data);
     }
     
     @Override
@@ -1237,6 +1266,12 @@ public class AdminPaperServiceImpl implements AdminPaperService {
                 PaperInfo paper = paperInfoMapper.selectById(paperId);
                 if (paper == null || Integer.valueOf(1).equals(paper.getIsDeleted())) {
                     failReasons.add("论文ID：" + paperId + "，原因：论文不存在或已删除");
+                    continue;
+                }
+                // 催办前必须确认论文真的超过 SLA，避免对未超期论文误发提醒
+                if (paper.getSubmitTime() == null
+                        || !paper.getSubmitTime().plusHours(overdueSlaHours).isBefore(now)) {
+                    failReasons.add("论文ID：" + paperId + "，原因：该论文未超期");
                     continue;
                 }
                 Long teacherId = paper.getTeacherId();

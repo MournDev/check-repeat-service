@@ -227,6 +227,15 @@ public class AdminPaperController {
         log.info("接收下载论文文件请求: paperId={}", paperId);
         adminPaperService.downloadPaper(paperId, response);
     }
+
+    /**
+     * 获取论文预览地址（管理员）
+     */
+    @GetMapping("/{paperId:[0-9]+}/preview-url")
+    public Result<Map<String, String>> getPaperPreviewUrl(@PathVariable Long paperId) {
+        log.info("接收管理员论文预览请求: paperId={}", paperId);
+        return adminPaperService.getPaperPreviewUrl(paperId);
+    }
     
     /**
      * 内部查重检测

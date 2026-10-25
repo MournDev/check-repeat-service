@@ -12,8 +12,10 @@ import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
 import com.abin.checkrepeatservice.teacher.dto.*;
 import com.abin.checkrepeatservice.teacher.service.TeacherStudentManagementService;
 import com.abin.checkrepeatservice.user.service.SysUserService;
+import com.alibaba.excel.EasyExcel;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.annotation.JsonFormat;
+import jakarta.servlet.http.HttpServletResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -23,6 +25,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -30,20 +33,6 @@ import java.util.Objects;
 /**
  * 教师学生管理控制器
  * 提供学生列表、统计、分配、消息等完整功能
- * 
- * 接口路径说明：
- * - 学生列表：GET /api/teacher/students
- * - 删除学生：DELETE /api/teacher/students/{studentId}
- * - 学生统计：GET /api/teacher/students/statistics (注意：不是/stats以避免与仪表盘冲突)
- * - 分配导师：POST /api/teacher/students/{studentId}/assign-advisor
- * - 发送消息：POST /api/teacher/students/messages/send
- * - 批量分配：POST /api/teacher/students/batch-assign-advisor
- * - 批量发送：POST /api/teacher/students/messages/batch-send
- * - 批量删除：DELETE /api/teacher/students/batch-delete
- * - 添加学生：POST /api/teacher/students/add
- * - 数据导出：GET /api/teacher/students/export
- * - 数据导入：POST /api/teacher/students/import
- * - 学生论文信息：GET /api/teacher/students/{studentId}/paper (新增)
  */
 @RestController
 @RequestMapping("/api/teacher/students")
@@ -291,6 +280,31 @@ public class TeacherStudentManagementController {
         return studentManagementService.addStudent(addStudentDTO);
     }
     
+    /**
+     * 8.1 下载学生导入模板（仅管理员）
+     * GET /api/teacher/students/import-template
+     */
+    @GetMapping("/import-template")
+    @PreAuthorize("hasAuthority('ADMIN')")
+    @Operation(summary = "下载学生导入模板", description = "下载批量导入学生使用的 Excel 模板（仅管理员）")
+    public void downloadImportTemplate(HttpServletResponse response) throws Exception {
+        List<List<String>> head = new ArrayList<>();
+        head.add(List.of("学号"));
+        head.add(List.of("姓名"));
+        head.add(List.of("学院"));
+        head.add(List.of("专业"));
+        head.add(List.of("年级"));
+        head.add(List.of("邮箱"));
+
+        response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        response.setCharacterEncoding("UTF-8");
+        response.setHeader("Content-Disposition", "attachment; filename=student_import_template.xlsx");
+        EasyExcel.write(response.getOutputStream())
+                .head(head)
+                .sheet("学生导入模板")
+                .doWrite(new ArrayList<>());
+    }
+
     /**
      * 8. 数据导入接口
      * POST /api/teacher/students/import

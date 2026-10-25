@@ -62,6 +62,11 @@ public interface AdminPaperService {
      * 下载论文文件（流式输出真实文件字节）
      */
     void downloadPaper(Long paperId, HttpServletResponse response);
+
+    /**
+     * 获取管理员预览论文原文的地址（direct / kkfileview）
+     */
+    Result<Map<String, String>> getPaperPreviewUrl(Long paperId);
     
     /**
      * 校内查重检测

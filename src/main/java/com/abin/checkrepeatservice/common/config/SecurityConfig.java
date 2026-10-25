@@ -159,6 +159,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.DELETE, "/api/teacher/students/**").hasAuthority("ADMIN")
                         .requestMatchers("/api/teacher/students/add",
                                 "/api/teacher/students/import",
+                                "/api/teacher/students/import-template",
                                 "/api/teacher/students/batch-assign-advisor").hasAuthority("ADMIN")
                         // 教师接口：仅教师角色可访问
                         .requestMatchers("/api/teacher/**").hasAuthority("TEACHER")
