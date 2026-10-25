@@ -8,6 +8,8 @@ import com.abin.checkrepeatservice.admin.vo.AdminReportListItemVO;
 import com.abin.checkrepeatservice.admin.vo.AdminReportStatsVO;
 import com.abin.checkrepeatservice.common.Exception.BusinessException;
 import com.abin.checkrepeatservice.common.Result;
+import com.abin.checkrepeatservice.common.component.ReportPathResolver;
+import com.abin.checkrepeatservice.common.datascope.DataScopeResolver;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.common.utils.PdfReportGenerator;
 import com.abin.checkrepeatservice.common.utils.ReportContentProcessor;
@@ -26,13 +28,20 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.io.BufferedOutputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -63,10 +72,17 @@ public class AdminReportServiceImpl implements AdminReportService {
 
     // 治理项：数据范围统一裁决（报告列表/统计/详情/导出按角色范围收窄）
     @Resource
-    private com.abin.checkrepeatservice.common.datascope.DataScopeResolver dataScopeResolver;
+    private DataScopeResolver dataScopeResolver;
 
     /** 文件名中的非法字符（避免报告编号污染文件名/ZIP条目） */
     private static final String ILLEGAL_FILENAME_CHARS = "[\\\\/:*?\"<>|\\r\\n]";
+
+    /** 单次批量导出的报告数量上限（防止接口被打爆） */
+    private static final int MAX_EXPORT_COUNT = 100;
+
+    /** 报告路径解析：库里存相对路径，按配置根目录解析到绝对路径 */
+    @Resource
+    private ReportPathResolver reportPathResolver;
 
     @Override
     public Result<Page<AdminReportListItemVO>> getReportList(
@@ -252,13 +268,20 @@ public class AdminReportServiceImpl implements AdminReportService {
             // 文案当成 extraData 丢掉，必须用三参形式显式传 null
             throw new BusinessException(ResultCode.PARAM_ERROR, "请选择要导出的报告", null);
         }
+        if (ids.size() > MAX_EXPORT_COUNT) {
+            throw new BusinessException(ResultCode.PARAM_ERROR,
+                    "单次最多导出 " + MAX_EXPORT_COUNT + " 份报告，当前选择 " + ids.size() + " 份", null);
+        }
+
+        // 去重：同一 reportId 重复出现会让 ZipEntry 同名冲突
+        List<Long> distinctIds = new ArrayList<>(new LinkedHashSet<>(ids));
 
         // 前端根据选中数量固定下载文件名（单个 .pdf / 多个 .zip），因此这里必须
         // 按数量返回对应容器类型，否则单份导出会得到被改名为 .pdf 的 ZIP
-        if (ids.size() == 1) {
-            exportSinglePdf(ids.get(0), response);
+        if (distinctIds.size() == 1) {
+            exportSinglePdf(distinctIds.get(0), response);
         } else {
-            exportZip(ids, response);
+            exportZip(distinctIds, response);
         }
     }
 
@@ -314,16 +337,27 @@ public class AdminReportServiceImpl implements AdminReportService {
         }
     }
 
+    /** ZIP 条目：只保留“磁盘路径 + 条目名”，不持有 PDF 字节 */
+    private record ZipItem(Path path, String entryName) {
+    }
+
     /**
-     * 导出多份报告为 ZIP
-     * 先全部渲染到内存再写响应头：这样“一份都没成功”时能返回可读的错误提示，
-     * 而不是丢给前端一个 22 字节的空 ZIP。管理员一次最多勾选一页（≤100 份），内存可接受。
+     *
+     * <p>旧实现把每份 PDF 重新渲染成 byte[] 并全部攒在 List 里，100 份报告就是
+     * 几十~上百 MB 堆内存。现在分两遍：</p>
+     * <ol>
+     *   <li><b>校验遍</b>：只查元数据 + 判断磁盘文件是否存在，收集“路径 + 条目名”；</li>
+     *   <li><b>输出遍</b>：设置响应头后，用 {@link Files#copy(Path, java.io.OutputStream)}
+     *       把磁盘上已有的 PDF 流式写入 ZIP，全程不把文件内容读进堆。</li>
+     * </ol>
+     * 校验遍为空时在写响应头之前就抛错，避免给前端留下残缺 ZIP。
      * 部分失败时跳过该份、其余照常打包，并记 WARN 日志。
      */
     private void exportZip(List<Long> ids, HttpServletResponse response) {
-        List<String> entryNames = new ArrayList<>();
-        List<byte[]> pdfs = new ArrayList<>();
+        List<ZipItem> items = new ArrayList<>();
+        Set<String> usedEntryNames = new HashSet<>();
 
+        // 第一遍：只做元数据校验与路径解析，不读取 PDF 内容
         for (Long reportId : ids) {
             try {
                 CheckReport report = adminReportMapper.selectById(reportId);
@@ -342,36 +376,58 @@ public class AdminReportServiceImpl implements AdminReportService {
                     log.warn("报告超出当前数据范围，跳过导出: reportId={}", reportId);
                     continue;
                 }
-                byte[] pdf = renderPdf(report, task);
-                entryNames.add(safeFileName(report.getReportNo()) + ".pdf");
-                pdfs.add(pdf);
+                File pdfFile = reportPathResolver.toFile(report.getReportPath());
+                if (pdfFile == null || !pdfFile.isFile()) {
+                    log.warn("报告文件不存在，跳过导出: reportId={}, path={}",
+                            reportId, report.getReportPath());
+                    continue;
+                }
+                String entryName = uniqueEntryName(
+                        safeFileName(report.getReportNo()) + ".pdf", usedEntryNames);
+                items.add(new ZipItem(pdfFile.toPath(), entryName));
             } catch (Exception e) {
                 log.warn("报告导出失败，已跳过: reportId={}, 原因={}", reportId, e.getMessage());
             }
         }
 
-        if (pdfs.isEmpty()) {
+        if (items.isEmpty()) {
             throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "所选报告均无法导出", null);
         }
 
         try {
             response.setContentType("application/zip");
             response.setHeader("Content-Disposition", "attachment; filename=\"reports.zip\"");
-            try (ZipOutputStream zipOut = new ZipOutputStream(response.getOutputStream())) {
-                for (int i = 0; i < pdfs.size(); i++) {
-                    zipOut.putNextEntry(new ZipEntry(entryNames.get(i)));
-                    zipOut.write(pdfs.get(i));
+            try (ZipOutputStream zipOut = new ZipOutputStream(
+                    new BufferedOutputStream(response.getOutputStream()))) {
+                for (ZipItem item : items) {
+                    zipOut.putNextEntry(new ZipEntry(item.entryName()));
+                    // 流式拷贝：Files.copy 不会关闭 zipOut，也不会把文件读进内存
+                    Files.copy(item.path(), zipOut);
                     zipOut.closeEntry();
                 }
             }
             response.flushBuffer();
-            if (pdfs.size() < ids.size()) {
-                log.warn("部分报告导出失败已跳过: 成功={}, 请求总数={}", pdfs.size(), ids.size());
+            if (items.size() < ids.size()) {
+                log.warn("部分报告导出失败已跳过: 成功={}, 请求总数={}", items.size(), ids.size());
             }
         } catch (IOException e) {
             log.error("批量导出报告失败: ids={}", ids, e);
             throw new BusinessException(ResultCode.SYSTEM_ERROR, "批量导出报告失败", null);
         }
+    }
+
+    /**
+     * 生成不重复的 ZIP 条目名（重复 reportNo 时追加 _2、_3…，避免 ZipException）。
+     */
+    private String uniqueEntryName(String baseName, Set<String> usedNames) {
+        String candidate = baseName;
+        int sequence = 2;
+        while (!usedNames.add(candidate)) {
+            String prefix = baseName.endsWith(".pdf")
+                    ? baseName.substring(0, baseName.length() - 4) : baseName;
+            candidate = prefix + "_" + sequence++ + ".pdf";
+        }
+        return candidate;
     }
 
     /**
