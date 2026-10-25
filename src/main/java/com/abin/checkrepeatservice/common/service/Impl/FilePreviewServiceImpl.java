@@ -1,8 +1,10 @@
 package com.abin.checkrepeatservice.common.service.Impl;
 
 import com.abin.checkrepeatservice.common.component.ReportPathResolver;
+import com.abin.checkrepeatservice.common.jwt.PreviewSignedUrlService;
 import com.abin.checkrepeatservice.common.service.FilePreviewService;
 import com.abin.checkrepeatservice.common.service.FileService;
+import com.abin.checkrepeatservice.common.service.KkFileViewHealthService;
 import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
 import com.abin.checkrepeatservice.pojo.entity.CheckReport;
 import com.abin.checkrepeatservice.pojo.entity.CheckTask;
@@ -16,12 +18,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.*;
-import org.springframework.http.client.ClientHttpRequestExecution;
-import org.springframework.http.client.ClientHttpRequestInterceptor;
-import org.springframework.http.client.ClientHttpResponse;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
 
 import java.io.File;
 import java.io.IOException;
@@ -46,10 +43,14 @@ public class FilePreviewServiceImpl implements FilePreviewService {
 
     // 安全修复（S2 配套）：kkFileView 回调走签名取文件端点
     @Autowired
-    private com.abin.checkrepeatservice.common.jwt.PreviewSignedUrlService previewSignedUrlService;
+    private PreviewSignedUrlService previewSignedUrlService;
 
     @Value("${app.host:192.168.1.149}")
     private String serverHost;
+
+    /** 回源协议：内网容器间默认 http，可配置为 https（不再硬编码） */
+    @Value("${app.scheme:http}")
+    private String serverScheme;
 
     @Value("${server.port:8080}")
     private String serverPort;
@@ -67,17 +68,9 @@ public class FilePreviewServiceImpl implements FilePreviewService {
     @Autowired
     private ReportPathResolver reportPathResolver;
 
-
-    private final RestTemplate restTemplate;
-
-    public FilePreviewServiceImpl() {
-        this.restTemplate = new RestTemplate();
-        // 设置连接超时和读取超时
-        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
-        requestFactory.setConnectTimeout(5000); // 5秒连接超时
-        requestFactory.setReadTimeout(30000);   // 30秒读取超时
-        restTemplate.setRequestFactory(requestFactory);
-    }
+    // kkFileView 可用性缓存：请求线程只读，不发起网络探测
+    @Autowired
+    private KkFileViewHealthService kkFileViewHealthService;
 
     @Override
     public ResponseEntity<Resource> directPreview(Long fileId) {
@@ -160,8 +153,6 @@ public class FilePreviewServiceImpl implements FilePreviewService {
         log.info("执行KKFileView代理预览 - url: {}", url);
 
         try {
-            // 安全修复（P0）：SSRF 防护——仅允许白名单 host 或公网地址，
-            // 阻断借 kkFileView 探测内网/云元数据地址的请求
             safePreviewUrlValidator.validate(url);
             // 直接代理到KKFileView
             return proxyToKKFileViewForUrl(url);
@@ -445,7 +436,8 @@ public class FilePreviewServiceImpl implements FilePreviewService {
             String callbackFileName = (fileName != null && fileName.matches("[A-Za-z0-9._-]+"))
                     ? fileName
                     : (fileExtension.isEmpty() ? "preview" : "preview." + fileExtension);
-            String fileUrl = String.format("http://%s:%s%s/api/file/preview-fetch-report/%s/%s?pt=%s",
+            String fileUrl = String.format("%s://%s:%s%s/api/file/preview-fetch-report/%s/%s?pt=%s",
+                    serverScheme,
                     serverHost,
                     serverPort,
                     appContext,
@@ -464,18 +456,9 @@ public class FilePreviewServiceImpl implements FilePreviewService {
 
             log.info("KKFileView报告预览地址已生成 - reportId: {}, base: {}", reportId, kkfileviewUrl);
 
-            // 测试KKFileView服务是否可用
-            try {
-                ResponseEntity<String> testResponse = restTemplate.getForEntity(
-                        kkfileviewUrl + "/index", String.class);
-
-                if (!testResponse.getStatusCode().is2xxSuccessful()) {
-                    log.warn("KKFileView服务不可用，状态码: {}", testResponse.getStatusCode());
-                    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
-                            .body("预览服务暂时不可用");
-                }
-            } catch (Exception e) {
-                log.warn("KKFileView服务连接失败: {}", e.getMessage());
+            // 性能修复（H8）：只读后台缓存的健康状态，请求线程不再同步 ping /index
+            if (!kkFileViewHealthService.isAvailable()) {
+                log.warn("KKFileView缓存状态为不可用，报告预览降级 - reportId: {}", reportId);
                 return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                         .body("预览服务暂时不可用");
             }
@@ -500,17 +483,9 @@ public class FilePreviewServiceImpl implements FilePreviewService {
             // 1. 构建 kkFileView 预览页地址（含绑定 fileId、10 分钟有效的回源签名）
             String kkFileViewPreviewUrl = buildKKFileViewUrl(fileId, fileInfo, userId);
 
-            // 2. 测试KKFileView服务是否可用
-            try {
-                ResponseEntity<String> testResponse = restTemplate.getForEntity(
-                        kkfileviewUrl + "/index", String.class);
-
-                if (!testResponse.getStatusCode().is2xxSuccessful()) {
-                    log.warn("KKFileView服务不可用，状态码: {}", testResponse.getStatusCode());
-                    return fallbackToDownload(fileInfo, userId);
-                }
-            } catch (Exception e) {
-                log.warn("KKFileView服务连接失败: {}", e.getMessage());
+            // 2. 只读后台缓存的健康状态，不再在请求线程里同步探测（最多 30s）
+            if (!kkFileViewHealthService.isAvailable()) {
+                log.warn("KKFileView缓存状态为不可用，文件预览降级为下载 - fileId: {}", fileId);
                 return fallbackToDownload(fileInfo, userId);
             }
             HttpHeaders headers = new HttpHeaders();
@@ -526,7 +501,8 @@ public class FilePreviewServiceImpl implements FilePreviewService {
      * 构建 kkFileView 预览页地址（浏览器最终要打开的地址）。
      */
     private String buildKKFileViewUrl(Long fileId, FileInfo fileInfo, Long userId) {
-        String fileUrl = String.format("http://%s:%s%s/api/file/preview-fetch/%s/%s?pt=%s",
+        String fileUrl = String.format("%s://%s:%s%s/api/file/preview-fetch/%s/%s?pt=%s",
+                serverScheme,
                 serverHost,
                 serverPort,
                 appContext,
@@ -560,28 +536,6 @@ public class FilePreviewServiceImpl implements FilePreviewService {
         return (originalFilename != null && originalFilename.matches("[A-Za-z0-9._-]+"))
                 ? originalFilename
                 : (fileExtension.isEmpty() ? "preview" : "preview." + fileExtension);
-    }
-
-    /**
-     * 构建文件下载 URL
-     */
-    private String buildFileDownloadUrl(Long fileId) {
-        try {
-            FileInfo fileInfo = fileService.getById(fileId);
-            // 使用宿主机的IP地址，而不是localhost
-            String fileUrl = String.format("http://%s:%s%s/api/file/download/%s/%s",
-                    serverHost,
-                    serverPort,
-                    fileId,
-                    URLEncoder.encode(fileInfo.getOriginalFilename(), StandardCharsets.UTF_8));
-
-            log.info("构建文件下载URL（宿主机地址）: {}", fileUrl);
-            return fileUrl;
-
-        } catch (Exception e) {
-            log.error("构建下载URL失败", e);
-            throw new RuntimeException("构建下载URL失败", e);
-        }
     }
 
     private ResponseEntity<?> fallbackToDownload(FileInfo fileInfo, Long userId) {
@@ -643,47 +597,4 @@ public class FilePreviewServiceImpl implements FilePreviewService {
         return lastDotIndex > -1 ? filename.substring(lastDotIndex + 1) : "";
     }
 
-    /**
-     * 创建配置好的RestTemplate
-     */
-    private RestTemplate createRestTemplate() {
-        RestTemplate restTemplate = new RestTemplate();
-
-        // 设置连接超时
-        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(10000);  // 10秒连接超时
-        factory.setReadTimeout(30000);     // 30秒读取超时
-        restTemplate.setRequestFactory(factory);
-
-        // 添加请求拦截器
-        restTemplate.setInterceptors(Collections.singletonList(new RestTemplateLoggingInterceptor()));
-
-        return restTemplate;
-    }
-
-    /**
-     * RestTemplate日志拦截器
-     */
-    private static class RestTemplateLoggingInterceptor implements ClientHttpRequestInterceptor {
-        @Override
-        public ClientHttpResponse intercept(HttpRequest request, byte[] body,
-                                            ClientHttpRequestExecution execution) throws IOException {
-            long startTime = System.currentTimeMillis();
-
-            try {
-                ClientHttpResponse response = execution.execute(request, body);
-                long duration = System.currentTimeMillis() - startTime;
-
-                log.debug("HTTP请求: {} {}, 耗时: {}ms, 状态: {}",
-                        request.getMethod(), request.getURI(), duration, response.getStatusCode());
-
-                return response;
-            } catch (IOException e) {
-                long duration = System.currentTimeMillis() - startTime;
-                log.error("HTTP请求失败: {} {}, 耗时: {}ms",
-                        request.getMethod(), request.getURI(), duration, e);
-                throw e;
-            }
-        }
-    }
 }
