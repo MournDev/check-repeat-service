@@ -22,6 +22,7 @@ import com.abin.checkrepeatservice.teacher.dto.ReviewResultDTO;
 import com.abin.checkrepeatservice.teacher.mapper.PaperCheckSignoffMapper;
 import com.abin.checkrepeatservice.teacher.mapper.ReviewAssignmentMapper;
 import com.abin.checkrepeatservice.teacher.mapper.ReviewRecordMapper;
+import com.abin.checkrepeatservice.teacher.mapper.ReviewTemplateMapper;
 import com.abin.checkrepeatservice.teacher.service.TeacherReviewService;
 import com.abin.checkrepeatservice.teacher.vo.PendingStatsVO;
 import com.abin.checkrepeatservice.teacher.vo.TodayReviewedVO;
@@ -32,6 +33,7 @@ import com.abin.checkrepeatservice.user.service.InstantMessageService;
 import com.abin.checkrepeatservice.user.service.MessageService;
 import com.abin.checkrepeatservice.user.service.Impl.NotificationFacadeService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -110,6 +112,9 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
 
     @Resource
     private PaperCheckSignoffMapper paperCheckSignoffMapper;
+
+    @Resource
+    private ReviewTemplateMapper reviewTemplateMapper;
 
     @Resource
     private ReviewAssignmentMapper reviewAssignmentMapper;
@@ -345,7 +350,13 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
             }
         }
 
-        // 4. 构建返回结果
+        // 4. 模板使用留痕：与审核记录同一事务，提交失败一起回滚。
+        //    只在至少一篇审核成功时计数，避免整批失败却把模板次数加上去。
+        if (successCount > 0 && operateReq.getTemplateId() != null) {
+            recordTemplateUsage(operateReq.getTemplateId(), currentTeacherId);
+        }
+
+        // 5. 构建返回结果
         Map<String, Object> resultMap = new HashMap<>(4);
         resultMap.put("totalCount", paperIds.size());
         resultMap.put("successCount", successCount);
@@ -353,6 +364,29 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
         resultMap.put("failReasons", failReasons);
 
         return Result.success("审核操作完成", resultMap);
+    }
+
+    /**
+     * 审核实际使用模板后累加使用次数（与审核记录同一事务）。
+     * 只允许记录当前教师可见的模板（本人创建或公开），避免拿任意 ID 刷计数。
+     */
+    private void recordTemplateUsage(Long templateId, Long teacherId) {
+        try {
+            int rows = reviewTemplateMapper.update(null, new LambdaUpdateWrapper<ReviewTemplate>()
+                    .eq(ReviewTemplate::getId, templateId)
+                    .and(w -> w.eq(ReviewTemplate::getCreateBy, teacherId)
+                            .or()
+                            .eq(ReviewTemplate::getIsPublic, true))
+                    .setSql("usage_count = COALESCE(usage_count, 0) + 1")
+                    .set(ReviewTemplate::getLastUsed, LocalDateTime.now()));
+            if (rows == 0) {
+                log.warn("审核使用的模板不存在、已删除或不可见 - templateId={}, teacherId={}",
+                        templateId, teacherId);
+            }
+        } catch (Exception e) {
+            // 计数失败不影响审核结论落库，由调用方事务决定是否回滚
+            log.error("累加模板使用次数失败 - templateId={}", templateId, e);
+        }
     }
 
     @Override

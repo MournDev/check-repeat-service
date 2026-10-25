@@ -18,8 +18,8 @@ import java.util.List;
  */
 public interface ReviewTemplateService {
 
-    /** 当前教师可见的模板列表（自己的 + 公开的），按最后使用时间倒序 */
-    List<ReviewTemplateVO> list();
+    /** 当前教师可见的模板列表（自己的 + 公开的），按最后使用时间倒序；scenario 非空时按场景过滤 */
+    List<ReviewTemplateVO> list(String scenario);
 
     /** 新建模板，创建人由审计字段自动填充 */
     ReviewTemplateVO create(ReviewTemplateSaveReq req);

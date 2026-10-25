@@ -43,20 +43,47 @@ public class ReviewTemplateServiceImpl implements ReviewTemplateService {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Override
-    public List<ReviewTemplateVO> list() {
+    public List<ReviewTemplateVO> list(String scenario) {
         Long currentUserId = UserBusinessInfoUtils.getCurrentUserId();
-        List<ReviewTemplate> rows = reviewTemplateMapper.selectList(
-                new LambdaQueryWrapper<ReviewTemplate>()
-                        // 「自己的 或 公开的」必须整体括起来：不括的话 or 会把后面的条件
-                        // 从 and 链里拆出去，等于没有权限过滤。isDeleted 由 @TableLogic 自动加。
-                        .and(w -> w.eq(ReviewTemplate::getCreateBy, currentUserId)
-                                .or()
-                                .eq(ReviewTemplate::getIsPublic, true))
-                        // last_used 为 NULL 的是从未用过的新模板，MySQL 里 NULL 在 DESC 下排在最后，
-                        // 再按 id 倒序兜底，保证顺序稳定
-                        .orderByDesc(ReviewTemplate::getLastUsed)
-                        .orderByDesc(ReviewTemplate::getId));
+        LambdaQueryWrapper<ReviewTemplate> wrapper = new LambdaQueryWrapper<>();
+        // 「自己的 或 公开的」必须整体括起来：不括的话 or 会把后面的条件
+        // 从 and 链里拆出去，等于没有权限过滤。isDeleted 由 @TableLogic 自动加。
+        wrapper.and(w -> w.eq(ReviewTemplate::getCreateBy, currentUserId)
+                .or()
+                .eq(ReviewTemplate::getIsPublic, true));
+
+        // 场景过滤：category 存的是动作类型（approve/reject/...），scenarios 存的是审核阶段
+        // （初审/复审/终审）。历史种子数据只有前者能命中，所以两个字段都匹配，
+        // 既兼容存量数据，也支持后续在 scenarios 里写 REJECT/PASS。
+        String normalizedScenario = scenario == null ? null : scenario.trim().toUpperCase();
+        if (StringUtils.hasText(normalizedScenario)) {
+            String category = mapScenarioToCategory(normalizedScenario);
+            if (category != null) {
+                wrapper.and(w -> w.eq(ReviewTemplate::getCategory, category)
+                        .or()
+                        .like(ReviewTemplate::getScenarios, normalizedScenario));
+            } else {
+                wrapper.like(ReviewTemplate::getScenarios, normalizedScenario);
+            }
+        }
+
+        // last_used 为 NULL 的是从未用过的新模板，MySQL 里 NULL 在 DESC 下排在最后，
+        // 再按 id 倒序兜底，保证顺序稳定
+        wrapper.orderByDesc(ReviewTemplate::getLastUsed)
+                .orderByDesc(ReviewTemplate::getId);
+        List<ReviewTemplate> rows = reviewTemplateMapper.selectList(wrapper);
         return rows.stream().map(this::toVO).collect(Collectors.toList());
+    }
+
+    /** 场景参数 → 模板分类；未知场景返回 null，仅按 scenarios 模糊匹配 */
+    private String mapScenarioToCategory(String scenario) {
+        return switch (scenario) {
+            case "PASS", "APPROVE" -> "approve";
+            case "REJECT" -> "reject";
+            case "MODIFY" -> "modify";
+            case "SUGGEST" -> "suggest";
+            default -> null;
+        };
     }
 
     @Override

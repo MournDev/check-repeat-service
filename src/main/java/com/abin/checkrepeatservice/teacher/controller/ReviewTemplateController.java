@@ -26,10 +26,11 @@ public class ReviewTemplateController {
     @Resource
     private ReviewTemplateService reviewTemplateService;
 
-    /** 当前教师可见的模板列表（自己的 + 公开的） */
+    /** 当前教师可见的模板列表（自己的 + 公开的）；scenario 用于按通过/退回场景过滤 */
     @GetMapping("/getTemplatesList")
-    public Result<List<ReviewTemplateVO>> getTemplatesList() {
-        return Result.success(reviewTemplateService.list());
+    public Result<List<ReviewTemplateVO>> getTemplatesList(
+            @RequestParam(value = "scenario", required = false) String scenario) {
+        return Result.success(reviewTemplateService.list(scenario));
     }
 
     /** 新建模板 */
