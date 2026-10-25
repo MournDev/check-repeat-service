@@ -223,9 +223,9 @@ public class AdminPaperController {
      * 下载论文文件
      */
     @GetMapping("/{paperId:[0-9]+}/download")
-    public Result<String> downloadPaper(@PathVariable Long paperId) {
+    public void downloadPaper(@PathVariable Long paperId, HttpServletResponse response) {
         log.info("接收下载论文文件请求: paperId={}", paperId);
-        return adminPaperService.downloadPaper(paperId);
+        adminPaperService.downloadPaper(paperId, response);
     }
     
     /**

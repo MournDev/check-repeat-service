@@ -10,6 +10,7 @@ import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.Exception.BusinessException;
 import com.abin.checkrepeatservice.common.component.PaperStageGate;
 import com.abin.checkrepeatservice.common.constant.DictConstants;
+import com.abin.checkrepeatservice.common.datascope.DataScopeResolver;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.common.utils.SemesterUtils;
 import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
@@ -42,6 +43,13 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.Resource;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -80,7 +88,7 @@ public class AdminPaperServiceImpl implements AdminPaperService {
 
     // 治理项：数据范围统一裁决（管理员角色可按学院/专业/教师/本人收窄）
     @Resource
-    private com.abin.checkrepeatservice.common.datascope.DataScopeResolver dataScopeResolver;
+    private DataScopeResolver dataScopeResolver;
 
     @Resource
     private PaperStatusLogService paperStatusLogService;
@@ -676,37 +684,58 @@ public class AdminPaperServiceImpl implements AdminPaperService {
     }
     
     @Override
-    public Result<String> downloadPaper(Long paperId) {
+    public void downloadPaper(Long paperId, HttpServletResponse response) {
+        // 1. 论文存在性、数据范围、文件元数据校验：未写响应前一律抛业务异常，
+        //    由 GlobalExceptionHandler 返回友好的 JSON 404/403。
+        PaperInfo paperInfo = paperInfoMapper.selectById(paperId);
+        if (paperInfo == null || Integer.valueOf(1).equals(paperInfo.getIsDeleted())) {
+            throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "论文不存在或已删除");
+        }
+        if (!dataScopeResolver.canAccessPaper(paperInfo)) {
+            throw new BusinessException(ResultCode.PERMISSION_NO_ACCESS, "无权下载该论文");
+        }
+        if (paperInfo.getFileId() == null) {
+            throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "论文文件不存在");
+        }
+        FileInfo fileInfo = fileService.getById(paperInfo.getFileId());
+        if (fileInfo == null || fileInfo.getStoragePath() == null || fileInfo.getStoragePath().isBlank()) {
+            throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "论文文件不存在");
+        }
+
+        // 2. 统一用 FileService 解析物理路径（兼容相对路径与 Windows 开发环境）
+        File file = fileService.resolveStoredFile(fileInfo.getStoragePath());
+        if (file == null || !file.exists() || file.isDirectory()) {
+            log.warn("论文文件缺失 - paperId={}, fileId={}, path={}",
+                    paperId, paperInfo.getFileId(), fileInfo.getStoragePath());
+            throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "论文文件不存在或已丢失");
+        }
+
+        // 3. 流式输出真实文件字节，避免前端拿到 JSON 链接当文件下载
+        String fileName = fileInfo.getOriginalFilename() == null || fileInfo.getOriginalFilename().isBlank()
+                ? "论文_" + paperId : fileInfo.getOriginalFilename();
+        String encodedFileName = URLEncoder.encode(fileName, StandardCharsets.UTF_8).replace("+", "%20");
         try {
-            // 获取论文信息
-            PaperInfo paperInfo = paperInfoMapper.selectById(paperId);
-            if (paperInfo == null || paperInfo.getIsDeleted() == 1) {
-                return Result.error(ResultCode.PARAM_ERROR, "论文不存在");
+            String contentType = Files.probeContentType(file.toPath());
+            response.setContentType(contentType == null ? "application/octet-stream" : contentType);
+            response.setContentLengthLong(file.length());
+            response.setHeader("Content-Disposition",
+                    "attachment; filename=\"" + encodedFileName + "\"; filename*=UTF-8''" + encodedFileName);
+            response.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+            response.setHeader("Pragma", "no-cache");
+            response.setDateHeader("Expires", 0);
+
+            try (InputStream in = Files.newInputStream(file.toPath());
+                 OutputStream out = response.getOutputStream()) {
+                in.transferTo(out);
+                out.flush();
             }
-            if (!dataScopeResolver.canAccessPaper(paperInfo)) {
-                return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权下载该论文");
+            log.info("管理员下载论文成功: paperId={}, fileId={}, fileName={}",
+                    paperId, fileInfo.getId(), fileName);
+        } catch (IOException e) {
+            log.error("管理员下载论文失败: paperId={}", paperId, e);
+            if (!response.isCommitted()) {
+                throw new BusinessException(ResultCode.SYSTEM_ERROR, "论文下载失败，请稍后重试");
             }
-            
-            // 检查是否有文件
-            if (paperInfo.getFileId() == null) {
-                return Result.error(ResultCode.PARAM_ERROR, "论文文件不存在");
-            }
-            
-            // 获取文件信息
-            FileInfo fileInfo = fileService.getById(paperInfo.getFileId());
-            if (fileInfo == null) {
-                return Result.error(ResultCode.PARAM_ERROR, "文件信息不存在");
-            }
-            
-            // 构造文件下载链接
-            String downloadUrl = "/api/file/download/" + paperInfo.getFileId();
-            
-            log.info("论文文件下载准备就绪: paperId={}, fileName={}", paperId, fileInfo.getOriginalFilename());
-            return Result.success("论文文件下载链接生成成功", downloadUrl);
-            
-        } catch (Exception e) {
-            log.error("论文文件下载失败: paperId={}", paperId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "论文文件下载失败: " + "系统异常，请稍后重试");
         }
     }
     

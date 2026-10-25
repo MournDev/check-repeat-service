@@ -59,9 +59,9 @@ public interface AdminPaperService {
     void exportPaperList(Map<String, Object> params, HttpServletResponse response);
     
     /**
-     * 下载论文文件
+     * 下载论文文件（流式输出真实文件字节）
      */
-    Result<String> downloadPaper(Long paperId);
+    void downloadPaper(Long paperId, HttpServletResponse response);
     
     /**
      * 校内查重检测
