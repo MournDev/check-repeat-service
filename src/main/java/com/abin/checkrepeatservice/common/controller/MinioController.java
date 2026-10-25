@@ -2,7 +2,9 @@ package com.abin.checkrepeatservice.common.controller;
 
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
+import com.alibaba.fastjson2.JSON;
 import io.minio.*;
+import io.minio.errors.ErrorResponseException;
 import io.minio.messages.Item;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
@@ -164,7 +166,11 @@ public class MinioController {
             IOUtils.copy(in, response.getOutputStream());
         } catch (Exception e) {
             log.error("下载文件失败: {}", fileName, e);
-            reject(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "文件下载失败");
+            if (isObjectMissing(e)) {
+                reject(response, HttpServletResponse.SC_NOT_FOUND, "文件不存在或已被清理");
+            } else {
+                reject(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "文件下载失败");
+            }
         } finally {
             if (in != null) {
                 try {
@@ -231,9 +237,26 @@ public class MinioController {
         try {
             response.setStatus(status);
             response.setContentType("application/json;charset=UTF-8");
-            response.getWriter().write(Result.error(ResultCode.PARAM_ERROR, message).toString());
+            ResultCode resultCode = status == HttpServletResponse.SC_NOT_FOUND
+                    ? ResultCode.RESOURCE_NOT_FOUND
+                    : status == HttpServletResponse.SC_BAD_REQUEST
+                    ? ResultCode.PARAM_ERROR
+                    : ResultCode.SYSTEM_ERROR;
+            response.getWriter().write(JSON.toJSONString(Result.error(resultCode, message)));
         } catch (IOException ioException) {
             log.error("发送错误响应失败", ioException);
         }
+    }
+
+    /**
+     * MinIO 对象不存在（NoSuchKey/NoSuchObject）判定
+     */
+    private boolean isObjectMissing(Exception e) {
+        if (!(e instanceof ErrorResponseException)) {
+            return false;
+        }
+        ErrorResponseException ere = (ErrorResponseException) e;
+        String code = ere.errorResponse() == null ? null : ere.errorResponse().code();
+        return "NoSuchKey".equals(code) || "NoSuchObject".equals(code);
     }
 }

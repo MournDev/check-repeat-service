@@ -1,6 +1,8 @@
 package com.abin.checkrepeatservice.common.service.Impl;
 
+import com.abin.checkrepeatservice.common.Exception.BusinessException;
 import com.abin.checkrepeatservice.common.component.ReportPathResolver;
+import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.common.jwt.PreviewSignedUrlService;
 import com.abin.checkrepeatservice.common.service.FilePreviewService;
 import com.abin.checkrepeatservice.common.service.FileService;
@@ -61,9 +63,6 @@ public class FilePreviewServiceImpl implements FilePreviewService {
     @Value("${server.servlet.context-path}")
     private String appContext;
 
-    @Value("${file.upload.base-path}")
-    private String uploadBasePath;
-
     // 报告路径统一解析：库里存相对路径，按配置根目录解析到绝对路径
     @Autowired
     private ReportPathResolver reportPathResolver;
@@ -77,14 +76,12 @@ public class FilePreviewServiceImpl implements FilePreviewService {
         try {
             FileInfo fileInfo = fileService.getById(fileId);
             if (fileInfo == null) {
-                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+                throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "文件不存在或已被清理", null);
             }
 
-            String fileStoragePath = fileInfo.getStoragePath();
-            File file = new File(uploadBasePath + fileStoragePath);
-
-            if (!file.exists()) {
-                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+            File file = fileService.resolveStoredFile(fileInfo.getStoragePath());
+            if (file == null || !file.exists()) {
+                throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "文件不存在或已被清理", null);
             }
 
             Resource resource = new FileSystemResource(file);
@@ -96,6 +93,8 @@ public class FilePreviewServiceImpl implements FilePreviewService {
                             "inline; filename=\"" + URLEncoder.encode(fileInfo.getOriginalFilename(), StandardCharsets.UTF_8) + "\"")
                     .body(resource);
 
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             log.error("直接预览失败 - fileId: {}", fileId, e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
@@ -201,8 +200,7 @@ public class FilePreviewServiceImpl implements FilePreviewService {
             FileInfo fileInfo = fileService.getById(fileId);
             if (fileInfo == null) {
                 log.error("文件不存在 - fileId: {}", fileId);
-                return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                        .body("文件不存在");
+                throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "文件不存在或已被清理", null);
             }
 
             String fileName = fileInfo.getOriginalFilename();
@@ -234,6 +232,8 @@ public class FilePreviewServiceImpl implements FilePreviewService {
             log.info("其他类型文件尝试直接预览 - fileId: {}", fileId);
             return directPreview(fileId);
 
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             log.error("智能预览失败 - fileId: {}", fileId, e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -254,7 +254,15 @@ public class FilePreviewServiceImpl implements FilePreviewService {
     public Map<String, String> getPreviewInfo(Long fileId) {
         FileInfo fileInfo = fileService.getById(fileId);
         if (fileInfo == null) {
-            throw new IllegalArgumentException("文件不存在");
+            throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "文件不存在或已被清理", null);
+        }
+        // 签发预览地址前先校验物理文件，避免前端拿到 200 的地址后再看到 404 白屏
+        if (fileInfo.getStoragePath() == null || fileInfo.getStoragePath().isBlank()) {
+            throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "文件不存在或已被清理", null);
+        }
+        File physicalFile = fileService.resolveStoredFile(fileInfo.getStoragePath());
+        if (physicalFile == null || !physicalFile.exists()) {
+            throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "文件不存在或已被清理", null);
         }
 
         String fileExtension = getFileExtension(fileInfo.getOriginalFilename()).toLowerCase();
@@ -313,16 +321,14 @@ public class FilePreviewServiceImpl implements FilePreviewService {
             CheckTask checkTask = checkTaskMapper.selectOne(taskQueryWrapper);
             if (checkTask == null) {
                 log.error("未找到已完成的查重任务 - paperId: {}", paperId);
-                return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                        .body("未找到已完成的查重任务");
+                throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "查重报告不存在或已被清理", null);
             }
 
             // 2. 获取查重报告
             CheckReport checkReport = checkReportMapper.selectById(checkTask.getReportId());
             if (checkReport == null) {
                 log.error("查重报告不存在 - reportId: {}", checkTask.getReportId());
-                return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                        .body("查重报告不存在");
+                throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "查重报告不存在或已被清理", null);
             }
 
             // 3. 获取报告文件信息（report_path 可能是存量绝对路径或新相对路径）
@@ -330,8 +336,7 @@ public class FilePreviewServiceImpl implements FilePreviewService {
             File reportFile = reportPathResolver.toFile(reportPath);
             if (reportFile == null || !reportFile.exists()) {
                 log.error("报告文件不存在 - path: {}", reportPath);
-                return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                        .body("报告文件不存在");
+                throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "报告文件不存在或已被清理", null);
             }
 
             String fileName = reportFile.getName();
@@ -366,6 +371,8 @@ public class FilePreviewServiceImpl implements FilePreviewService {
             log.info("其他类型报告文件尝试直接预览 - paperId: {}", paperId);
             return directPreviewReport(reportPath, fileName);
 
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             log.error("智能预览查重报告失败 - paperId: {}", paperId, e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -380,7 +387,7 @@ public class FilePreviewServiceImpl implements FilePreviewService {
         try {
             File file = reportPathResolver.toFile(reportPath);
             if (file == null || !file.exists()) {
-                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+                throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "报告文件不存在或已被清理", null);
             }
 
             Resource resource = new FileSystemResource(file);
@@ -392,6 +399,8 @@ public class FilePreviewServiceImpl implements FilePreviewService {
                             "inline; filename=\"" + URLEncoder.encode(fileName, StandardCharsets.UTF_8) + "\"")
                     .body(resource);
 
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             log.error("直接预览报告失败 - path: {}", reportPath, e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
@@ -407,13 +416,13 @@ public class FilePreviewServiceImpl implements FilePreviewService {
         if (checkReport == null || Integer.valueOf(1).equals(checkReport.getIsDeleted())
                 || checkReport.getReportPath() == null) {
             log.warn("报告不存在或已删除 - reportId: {}", reportId);
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+            throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "报告不存在或已被清理", null);
         }
         String reportPath = checkReport.getReportPath();
         File file = reportPathResolver.toFile(reportPath);
         if (file == null || !file.exists()) {
             log.error("报告文件不存在 - reportId: {}, path: {}", reportId, reportPath);
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+            throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "报告文件不存在或已被清理", null);
         }
         log.info("签名取报告文件 - reportId: {}", reportId);
         String actualFileName = (fileName != null && !fileName.trim().isEmpty()) ? fileName : file.getName();

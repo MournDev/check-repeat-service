@@ -165,9 +165,9 @@ public class FileUploadController {
     public Result<FileInfo> getFileInfo(@RequestParam Long fileId) {
         FileInfo fileInfo = fileService.getById(fileId);
         if (fileInfo == null) {
-            return Result.error(ResultCode.RESOURCE_NOT_FOUND, "文件不存在");
+            throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "文件不存在或已被清理", null);
         }
-        // 安全修复（P0）：文件元数据归属校验，修复 fileId 可枚举导致的信息泄露
+        // 文件元数据归属校验，修复 fileId 可枚举导致的信息泄露
         if (!canAccessFile(fileInfo)) {
             log.warn("文件信息越权访问拦截 - fileId: {}, userId: {}",
                     fileId, UserBusinessInfoUtils.getCurrentUserId());
@@ -189,7 +189,7 @@ public class FileUploadController {
         FileInfo fileInfo = fileService.getById(fileId);
         if (fileInfo == null || fileInfo.getStoragePath() == null) {
             log.error("文件不存在或未找到存储路径 - fileId: {}", fileId);
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+            throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "文件不存在或已被清理", null);
         }
 
         // 安全修复（P0）：下载归属校验，修复仅凭可枚举 fileId 即可下载任意论文/附件的 IDOR
@@ -220,7 +220,7 @@ public class FileUploadController {
 
         FileInfo fileInfo = fileService.getById(fileId);
         if (fileInfo == null || fileInfo.getStoragePath() == null) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+            throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "文件不存在或已被清理", null);
         }
         log.info("预览签名取文件 - fileId: {}", fileId);
         return serveInlineFile(fileInfo, fileName);
@@ -259,7 +259,7 @@ public class FileUploadController {
     public Result<Map<String, String>> getPreviewUrl(@PathVariable Long fileId) {
         FileInfo fileInfo = fileService.getById(fileId);
         if (fileInfo == null) {
-            return Result.error(ResultCode.RESOURCE_NOT_FOUND, "文件不存在");
+            throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "文件不存在或已被清理", null);
         }
         // 安全修复（P0）：签发预览令牌前必须做归属校验。
         // 此前该入口只要求登录，任意学生枚举 fileId 即可拿到他人论文的签名下载地址。
@@ -286,7 +286,7 @@ public class FileUploadController {
 
         if (!file.exists()) {
             log.error("文件不存在 - fileId: {}, 路径: {}", fileInfo.getId(), fileStoragePath);
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+            throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "文件不存在或已被清理", null);
         }
 
         Resource resource = new FileSystemResource(file);
