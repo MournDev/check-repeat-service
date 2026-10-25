@@ -1,9 +1,11 @@
 package com.abin.checkrepeatservice.common.controller;
 
+import com.abin.checkrepeatservice.common.Exception.BusinessException;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.VO.FileUploadResponse;
 import com.abin.checkrepeatservice.common.component.ReportPathResolver;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
+import com.abin.checkrepeatservice.common.jwt.PreviewSignedUrlService;
 import com.abin.checkrepeatservice.common.service.FilePreviewService;
 import com.abin.checkrepeatservice.common.service.FileService;
 import com.abin.checkrepeatservice.common.service.Impl.FileValidationService;
@@ -15,6 +17,7 @@ import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
 import com.abin.checkrepeatservice.student.mapper.CheckReportMapper;
 import com.abin.checkrepeatservice.student.mapper.CheckTaskMapper;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,6 +38,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -67,9 +71,9 @@ public class FileUploadController {
     @Autowired
     private FilePreviewService filePreviewService;
 
-    // 安全修复（S2 配套）：kkFileView 服务端回调无法携带 JWT，改用绑定单文件、10 分钟有效的签名 URL
+    //kkFileView 服务端回调无法携带 JWT，改用绑定单文件、10 分钟有效的签名 URL
     @Autowired
-    private com.abin.checkrepeatservice.common.jwt.PreviewSignedUrlService previewSignedUrlService;
+    private PreviewSignedUrlService previewSignedUrlService;
 
     // 报告路径统一解析：库里存相对路径，按配置根目录解析到绝对路径
     @Autowired
@@ -86,7 +90,6 @@ public class FileUploadController {
             ) {
 
         try {
-            // 安全修复（P0）：文件归属人一律以 JWT 当前登录人为准，忽略前端传入的 userId，
             // 防止匿名/越权用户把文件挂到他人名下。该接口已由 SecurityConfig 要求登录。
             Long actualUserId = UserBusinessInfoUtils.getCurrentUserId();
             if (actualUserId == null) {
@@ -102,21 +105,29 @@ public class FileUploadController {
                 return Result.error(ResultCode.PARAM_ERROR, validationResult.getMessage());
             }
 
-            // 2. 获取文件字节数组并计算文件 MD5（用于秒传和校验）
-            byte[] fileBytes = file.getBytes();
-            String fileMd5 = fileService.calculateFileMd5FromBytes(fileBytes);
+            // 2. 流式计算 MD5（不再把整包文件读进堆，避免并发上传打爆内存）
+            String fileMd5 = fileService.calculateFileMd5(file);
 
-
-            // 3. 检查是否已存在相同文件（秒传功能）
+            // 3. 秒传：先找自己的同 MD5 文件；他人文件只复用物理存储，归属必须隔离
+            FileInfo ownedFile = fileService.getByMd5AndUser(fileMd5, actualUserId);
+            if (ownedFile != null) {
+                log.info("文件已存在且归属当前用户，使用秒传 - 文件 ID: {}", ownedFile.getId());
+                return Result.success("文件上传成功（秒传）",
+                        buildFileUploadResponse(ownedFile, true));
+            }
             FileInfo existingFile = fileService.getByMd5(fileMd5);
             if (existingFile != null) {
-                log.info("文件已存在，使用秒传 - 文件 ID: {}", existingFile.getId());
-                FileUploadResponse response = buildFileUploadResponse(existingFile, true);
-                return Result.success("文件上传成功（秒传）", response);
+                // 关键：不能把他人 fileId 直接交给当前用户（等价于越权下载权），
+                // 新建一条归属于当前用户的逻辑记录，共享同一份物理文件。
+                FileInfo sharedFile = fileService.createSharedRecord(existingFile, actualUserId);
+                log.info("命中他人同 MD5 文件，已创建隔离归属的逻辑记录 - 新文件 ID: {}, 物理来源 ID: {}",
+                        sharedFile.getId(), existingFile.getId());
+                return Result.success("文件上传成功（秒传）",
+                        buildFileUploadResponse(sharedFile, true));
             }
 
             // 4. 执行文件上传（归属人取 JWT 当前登录人，忽略前端 userId）
-            Long fileId = fileService.uploadFile(file, actualUserId);
+            Long fileId = fileService.uploadFile(file, actualUserId, fileMd5);
 
             // 5. 获取文件信息
             FileInfo fileInfo = fileService.getById(fileId);
@@ -136,7 +147,9 @@ public class FileUploadController {
      */
     @GetMapping("/check")
     public Result<FileUploadResponse> checkFileByMd5(@RequestParam String md5) {
-        FileInfo fileInfo = fileService.getByMd5(md5);
+        // 秒传探测只允许命中当前用户自己的文件：否则等于把他人 fileId 交给调用方
+        Long currentUserId = UserBusinessInfoUtils.getCurrentUserId();
+        FileInfo fileInfo = fileService.getByMd5AndUser(md5, currentUserId);
         if (fileInfo != null) {
             FileUploadResponse response = buildFileUploadResponse(fileInfo, true);
             return Result.success("文件已存在", response);
@@ -244,6 +257,17 @@ public class FileUploadController {
      */
     @GetMapping("/preview-url/{fileId}")
     public Result<Map<String, String>> getPreviewUrl(@PathVariable Long fileId) {
+        FileInfo fileInfo = fileService.getById(fileId);
+        if (fileInfo == null) {
+            return Result.error(ResultCode.RESOURCE_NOT_FOUND, "文件不存在");
+        }
+        // 安全修复（P0）：签发预览令牌前必须做归属校验。
+        // 此前该入口只要求登录，任意学生枚举 fileId 即可拿到他人论文的签名下载地址。
+        if (!canAccessFile(fileInfo)) {
+            log.warn("预览地址越权访问拦截 - fileId: {}, userId: {}",
+                    fileId, UserBusinessInfoUtils.getCurrentUserId());
+            throw new BusinessException(ResultCode.PERMISSION_NO_ACCESS, "无权预览该文件", null);
+        }
         return Result.success(filePreviewService.getPreviewInfo(fileId));
     }
 
@@ -453,8 +477,17 @@ public class FileUploadController {
     // ==================== 资源归属校验（安全修复 P0，纵深防御） ====================
 
     /**
-     * 判断当前登录用户能否访问指定文件：
-     * 文件上传人本人、教师（评阅/指导工作需要访问学生论文与附件）、管理员（含超管）放行。
+     * 判断当前登录用户能否访问指定文件。
+     *
+     * <p>安全修复（P0）：原实现对教师角色直接放行（isTeacher() → true），
+     * 任意教师可下载全校论文与附件，属于横向越权。现收敛为：</p>
+     * <ul>
+     *   <li>管理员（含超管）：放行；</li>
+     *   <li>文件上传人本人：放行（覆盖聊天附件等未绑定论文的文件）；</li>
+     *   <li>论文所属学生本人：放行；</li>
+     *   <li>教师：仅当该文件所属论文的 teacher_id 是当前教师时放行（复用
+     *       {@link #canAccessPaper(PaperInfo)} 的“仅本人指导”口径）。</li>
+     * </ul>
      */
     private boolean canAccessFile(FileInfo fileInfo) {
         Long currentUserId = UserBusinessInfoUtils.getCurrentUserId();
@@ -464,11 +497,25 @@ public class FileUploadController {
         if (UserBusinessInfoUtils.isAdmin()) {
             return true;
         }
-        if (UserBusinessInfoUtils.isTeacher()) {
+        // 上传人本人：消息附件等未绑定论文的文件走这一条
+        if (fileInfo.getUploadUserId() != null
+                && fileInfo.getUploadUserId().equals(currentUserId.toString())) {
             return true;
         }
-        return fileInfo.getUploadUserId() != null
-                && fileInfo.getUploadUserId().equals(currentUserId.toString());
+        // 其余情况必须能定位到论文，且命中“学生本人 / 本人指导的教师”才放行
+        boolean teacher = UserBusinessInfoUtils.isTeacher();
+        List<PaperInfo> papers = paperInfoMapper.selectList(
+                new LambdaQueryWrapper<PaperInfo>().eq(PaperInfo::getFileId, fileInfo.getId()));
+        for (PaperInfo paper : papers) {
+            if (currentUserId.equals(paper.getStudentId())) {
+                return true;
+            }
+            if (teacher && paper.getTeacherId() != null
+                    && currentUserId.equals(paper.getTeacherId())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

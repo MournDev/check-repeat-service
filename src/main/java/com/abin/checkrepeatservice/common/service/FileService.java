@@ -10,14 +10,17 @@ import org.springframework.stereotype.Service;
 import jakarta.annotation.PostConstruct;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
+import java.security.DigestInputStream;
+import java.security.MessageDigest;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.HexFormat;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -79,9 +82,23 @@ public class FileService {
     private final Tika tika = new Tika();
 
     /**
-     * 上传文件 - 改进版本
+     * 上传文件（流式，兼容旧调用方）
      */
     public Long uploadFile(MultipartFile file, Long userId) {
+        return uploadFile(file, userId, calculateFileMd5(file));
+    }
+
+    /**
+     * 上传文件 - 流式版本。
+     *
+     * <p>架构修复：不再调用 {@code file.getBytes()}——原实现把整包文件读进堆，
+     * 且控制器与 Service 各读一次（同一文件两份 byte[]），并发上传直接打爆 768MB 堆。
+     * MD5 由调用方流式计算后传入（通常是控制器算一次、这里复用），文件本身通过
+     * {@code transferTo} 直接从临时文件落到目标磁盘。</p>
+     *
+     * @param fileMd5 已流式计算出的文件 MD5，可为空（为空时此处再流式算一次）
+     */
+    public Long uploadFile(MultipartFile file, Long userId, String fileMd5) {
         String originalFilename = file.getOriginalFilename();
         log.info("开始处理文件上传 - 文件名：{}, 用户 ID: {}", originalFilename, userId);
 
@@ -89,18 +106,18 @@ public class FileService {
             // 1. 生成文件 ID
             Long fileId = generateFileId();
 
-            // 2. 计算文件 MD5（使用字节数组方式，避免依赖临时文件）
-            byte[] fileBytes = file.getBytes();
-            String fileMd5 = calculateFileMd5FromBytes(fileBytes);
+            // 2. MD5 兜底（正常路径由控制器传入，避免重复读流）
+            String md5 = (fileMd5 == null || fileMd5.isBlank())
+                    ? calculateFileMd5(file) : fileMd5;
 
-            // 3. 保存文件到磁盘
+            // 3. 保存文件到磁盘（MultipartFile.transferTo，不经过堆）
             String filePath = saveFileToDisk(file, fileId, String.valueOf(userId));
 
-            // 4. 保存文件基本信息到数据库（先不统计字数）
-            FileInfo fileInfo = saveBasicFileInfo(file, fileId, fileMd5, filePath, String.valueOf(userId));
+            // 4. 保存文件基本信息到数据库（字数为 0，稍后异步回填）
+            FileInfo fileInfo = saveBasicFileInfo(file, fileId, md5, filePath, String.valueOf(userId));
 
-            // 5. 异步统计字数并更新数据库
-            asyncCountAndUpdateWordsFromBytes(fileBytes, fileInfo);
+            // 5. 异步统计字数（Tika 全文解析已移出请求线程）
+            asyncCountAndUpdateWords(new File(uploadPath, filePath), fileInfo);
 
             log.info("文件上传成功 - 文件 ID: {}, 文件名：{}, 用户 ID: {}", fileId, originalFilename, userId);
             return fileId;
@@ -112,15 +129,12 @@ public class FileService {
     }
 
     /**
-     * 异步统计字数并更新数据库
+     * 异步统计字数并更新数据库（基于已落盘文件，避免占用请求线程与整包内存）
      */
-    /**
-     * 异步统计字数并更新数据库（基于字节数组）
-     */
-    private void asyncCountAndUpdateWordsFromBytes(byte[] fileBytes, FileInfo fileInfo) {
+    private void asyncCountAndUpdateWords(File savedFile, FileInfo fileInfo) {
         CompletableFuture.runAsync(() -> {
             try {
-                int wordCount = countWordsFromBytes(fileBytes);
+                int wordCount = countWordsFromFile(savedFile);
 
                 // 更新数据库中的字数
                 FileInfo updateInfo = new FileInfo();
@@ -147,31 +161,6 @@ public class FileService {
     }
 
     /**
-     * 方法1：从字节数组统计字数
-     */
-    private int countWordsFromBytes(byte[] fileBytes) throws IOException {
-        try {
-            // 验证字节数组不为空
-            if (fileBytes == null || fileBytes.length == 0) {
-                return 0;
-            }
-
-            // 使用Tika从字节数组解析
-            String content = tika.parseToString(new ByteArrayInputStream(fileBytes));
-
-            if (content == null || content.trim().isEmpty()) {
-                return 0;
-            }
-
-            return countChineseAndEnglish(content.trim());
-
-        } catch (Exception e) {
-            log.warn("从字节数组统计字数失败", e);
-            return 0;
-        }
-    }
-
-    /**
      * 生成文件 ID
      */
     private Long generateFileId() {
@@ -179,22 +168,24 @@ public class FileService {
     }
 
     /**
-     * 计算文件MD5 - 改进版本
+     * 流式计算公式文件 MD5。
+     *
+     * <p>不把文件读进内存：用 8KB 缓冲区边读边摘要，50MB 论文也只占用一个缓冲区。
+     * 计算失败直接抛错，不再返回伪造的 {@code md5_<时间戳>}——那会让秒传与完整性校验
+     * 静默失效。</p>
      */
-    public String calculateFileMd5FromBytes(byte[] fileBytes) {
-        try {
-            java.security.MessageDigest md = java.security.MessageDigest.getInstance("MD5");
-            byte[] digest = md.digest(fileBytes);
-
-            StringBuilder sb = new StringBuilder();
-            for (byte b : digest) {
-                sb.append(String.format("%02x", b));
+    public String calculateFileMd5(MultipartFile file) {
+        try (InputStream inputStream = file.getInputStream();
+             DigestInputStream digestInputStream = new DigestInputStream(
+                     inputStream, MessageDigest.getInstance("MD5"))) {
+            byte[] buffer = new byte[8192];
+            while (digestInputStream.read(buffer) != -1) {
+                // 只做摘要，不保留内容
             }
-            return sb.toString();
-
+            return HexFormat.of().formatHex(digestInputStream.getMessageDigest().digest());
         } catch (Exception e) {
-            log.warn("计算文件MD5失败", e);
-            return "md5_" + System.currentTimeMillis();
+            log.error("计算文件MD5失败 - 文件名：{}", file.getOriginalFilename(), e);
+            throw new RuntimeException("文件MD5计算失败：" + e.getMessage(), e);
         }
     }
 
@@ -260,16 +251,7 @@ public class FileService {
         fileInfo.setUpdateTime(LocalDateTime.now());
 
         fileInfoMapper.insert(fileInfo);
-        // 异步或延迟进行字数统计，避免重复读取已删除的临时文件
-        try {
-            int wordCount = countWordsFromFile(new File(uploadPath, filePath));
-            fileInfo.setWordCount(wordCount);
-            fileInfoMapper.updateById(fileInfo);
-        } catch (Exception e) {
-            log.warn("文件字数统计失败 - 文件 ID: {}", fileId, e);
-            fileInfo.setWordCount(0);
-            fileInfoMapper.updateById(fileInfo);
-        }
+        // 字数统一由 asyncCountAndUpdateWords 在后台回填。
         return fileInfo;
     }
     /**
@@ -405,37 +387,111 @@ public class FileService {
     }
 
     /**
-     * 根据MD5查找文件
+     * 按库里的相对存储路径解析为磁盘文件。
+     *
+     * <p>与上传/删除共用同一 {@code uploadPath}（含 Windows 开发环境的路径重写），
+     * 避免其它服务各自拼路径导致本地能跑、线上找不到文件。</p>
      */
-    public FileInfo getByMd5(String md5) {
-        return fileInfoMapper.selectOne(
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<FileInfo>()
-                        .eq(FileInfo::getMd5, md5));
+    public File resolveStoredFile(String storagePath) {
+        if (storagePath == null || storagePath.isBlank()) {
+            return null;
+        }
+        return new File(uploadPath, storagePath);
     }
 
     /**
-     * 删除文件
+     * 根据 MD5 查找任意一条文件记录。
+     *
+     * <p>秒传共享物理存储后，同一 md5 可能对应多条 file_info 记录，
+     * 必须加 LIMIT 1，否则 selectOne 会抛 TooManyResultsException。</p>
+     */
+    public FileInfo getByMd5(String md5) {
+        if (md5 == null || md5.isBlank()) {
+            return null;
+        }
+        return fileInfoMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<FileInfo>()
+                        .eq(FileInfo::getMd5, md5)
+                        .orderByDesc(FileInfo::getUploadTime)
+                        .last("LIMIT 1"));
+    }
+
+    /**
+     * 根据 MD5 + 上传人查找文件（秒传探测只允许命中自己的文件）
+     */
+    public FileInfo getByMd5AndUser(String md5, Long userId) {
+        if (md5 == null || md5.isBlank() || userId == null) {
+            return null;
+        }
+        return fileInfoMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<FileInfo>()
+                        .eq(FileInfo::getMd5, md5)
+                        .eq(FileInfo::getUploadUserId, String.valueOf(userId))
+                        .orderByDesc(FileInfo::getUploadTime)
+                        .last("LIMIT 1"));
+    }
+
+    /**
+     * 秒传命中他人文件时，创建一条归属于当前用户的逻辑记录。
+     *
+     * <p>安全修复（P0）：不允许把他人 fileId 直接返回给当前用户（等价于越权下载权），
+     * 但物理文件已经存在，无需重复写盘——新记录复用同一 storagePath，仅隔离归属。</p>
+     */
+    public FileInfo createSharedRecord(FileInfo source, Long userId) {
+        if (source == null || userId == null) {
+            throw new IllegalArgumentException("创建共享文件记录失败：来源文件或用户为空");
+        }
+        FileInfo shared = new FileInfo();
+        shared.setOriginalFilename(source.getOriginalFilename());
+        shared.setFileSize(source.getFileSize());
+        shared.setFileSizeDesc(source.getFileSizeDesc());
+        shared.setStoragePath(source.getStoragePath());
+        shared.setMd5(source.getMd5());
+        shared.setWordCount(source.getWordCount() == null ? 0 : source.getWordCount());
+        shared.setUploadTime(LocalDateTime.now());
+        shared.setUploadUserId(String.valueOf(userId));
+        shared.setRemark("秒传复用：物理文件与 fileId=" + source.getId() + " 共享");
+        shared.setCreateTime(LocalDateTime.now());
+        shared.setUpdateTime(LocalDateTime.now());
+        // id 由 @TableId(type = ASSIGN_ID) 生成，避免再撞时间戳主键
+        fileInfoMapper.insert(shared);
+        return shared;
+    }
+
+    /**
+     * 删除文件。
+     *
+     * <p>秒传会让多条记录共享同一个 storagePath，因此必须先删记录、再确认没有其他
+     * 引用，最后才删除物理文件；否则删掉一条记录会连带删掉别人正在用的文件。</p>
      */
     public boolean deleteFile(Long fileId) {
         try {
             FileInfo fileInfo = getById(fileId);
-            if (fileInfo != null) {
-                // 删除磁盘文件
-                String fullPath = Paths.get(uploadPath, fileInfo.getStoragePath()).toString();
-                boolean deleted = Files.deleteIfExists(Paths.get(fullPath));
-    
-                if (deleted) {
-                    log.debug("磁盘文件删除成功：{}", fullPath);
-                }
-    
-                // 删除数据库记录
-                int rows = fileInfoMapper.deleteById(fileId);
-                if (rows > 0) {
-                    log.debug("数据库记录删除成功 - 文件 ID: {}", fileId);
-                    return true;
-                }
+            if (fileInfo == null) {
+                return false;
             }
-            return false;
+            // 先删数据库记录
+            int rows = fileInfoMapper.deleteById(fileId);
+            if (rows <= 0) {
+                return false;
+            }
+            log.debug("数据库记录删除成功 - 文件 ID: {}", fileId);
+
+            // 仍被其他记录引用时保留物理文件（共享存储）
+            Long refCount = fileInfoMapper.selectCount(
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<FileInfo>()
+                            .eq(FileInfo::getStoragePath, fileInfo.getStoragePath()));
+            if (refCount != null && refCount > 0) {
+                log.debug("物理文件仍被 {} 条记录引用，跳过删除：{}", refCount, fileInfo.getStoragePath());
+                return true;
+            }
+
+            String fullPath = Paths.get(uploadPath, fileInfo.getStoragePath()).toString();
+            boolean deleted = Files.deleteIfExists(Paths.get(fullPath));
+            if (deleted) {
+                log.debug("磁盘文件删除成功：{}", fullPath);
+            }
+            return true;
         } catch (Exception e) {
             log.error("删除文件失败 - 文件 ID: {}", fileId, e);
             return false;
