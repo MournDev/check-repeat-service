@@ -1,8 +1,11 @@
 package com.abin.checkrepeatservice.teacher.service.Impl;
 
+import com.abin.checkrepeatservice.common.Exception.BusinessException;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
+import com.abin.checkrepeatservice.common.service.FileService;
 import com.abin.checkrepeatservice.admin.vo.PaperExportExcelVO;
+import com.abin.checkrepeatservice.pojo.entity.FileInfo;
 import com.abin.checkrepeatservice.pojo.entity.PaperCheckSignoff;
 import com.abin.checkrepeatservice.teacher.mapper.PaperCheckSignoffMapper;
 import com.alibaba.excel.EasyExcel;
@@ -19,8 +22,15 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.Resource;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -45,6 +55,9 @@ public class TeacherDashboardServiceImpl implements TeacherDashboardService {
 
     @Resource
     private PaperCheckSignoffMapper paperCheckSignoffMapper;
+
+    @Resource
+    private FileService fileService;
 
     @Override
     public Result<Map<String, Object>> getDashboardStats(Long teacherId) {
@@ -136,11 +149,17 @@ public class TeacherDashboardServiceImpl implements TeacherDashboardService {
             
             for (PaperInfo paper : papers) {
                 Map<String, Object> record = new HashMap<>();
-                record.put("id", paper.getId());
-                
+                // 雪花 ID 必须以字符串下发，Map 中的裸 Long 不受实体 @JsonFormat 约束
+                record.put("id", String.valueOf(paper.getId()));
+
+                // 列表展示字段：提交时间 / 查重率 / 截止时间（沿用 check_time 口径）
+                record.put("submitTime", paper.getSubmitTime());
+                record.put("similarity", paper.getSimilarityRate());
+                record.put("deadline", paper.getCheckTime());
+
                 // paperBaseInfo 对象
                 Map<String, Object> paperBaseInfo = new HashMap<>();
-                paperBaseInfo.put("paperId", paper.getId());
+                paperBaseInfo.put("paperId", String.valueOf(paper.getId()));
                 paperBaseInfo.put("paperTitle", paper.getPaperTitle());
                 
                 SysUser student = studentMap.get(paper.getStudentId());
@@ -223,26 +242,54 @@ public class TeacherDashboardServiceImpl implements TeacherDashboardService {
     }
 
     @Override
-    public Result<String> downloadPaper(Long teacherId, Long paperId) {
+    public void downloadPaper(Long teacherId, Long paperId, HttpServletResponse response) {
+        // 1. 论文存在性与归属校验（只允许下载本人指导的论文）
+        PaperInfo paper = paperInfoMapper.selectById(paperId);
+        if (paper == null || Integer.valueOf(1).equals(paper.getIsDeleted())) {
+            throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "论文不存在或已删除", null);
+        }
+        if (!Objects.equals(paper.getTeacherId(), teacherId)) {
+            throw new BusinessException(ResultCode.PERMISSION_NO_ACCESS, "无权限下载此论文", null);
+        }
+        if (paper.getFileId() == null) {
+            throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "论文文件不存在", null);
+        }
+
+        // 2. 解析物理文件（与上传/预览共用 FileService 的根路径解析，兼容 Windows 开发环境）
+        FileInfo fileInfo = fileService.getById(paper.getFileId());
+        if (fileInfo == null || fileInfo.getStoragePath() == null || fileInfo.getStoragePath().isBlank()) {
+            throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "论文文件不存在", null);
+        }
+        File file = fileService.resolveStoredFile(fileInfo.getStoragePath());
+        if (file == null || !file.exists() || file.isDirectory()) {
+            log.warn("论文文件缺失 - paperId: {}, fileId: {}, path: {}",
+                    paperId, paper.getFileId(), fileInfo.getStoragePath());
+            throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "论文文件不存在或已丢失", null);
+        }
+
+        // 3. 设置下载响应头并流式输出，避免把整份论文读进内存
+        String fileName = fileInfo.getOriginalFilename() == null || fileInfo.getOriginalFilename().isBlank()
+                ? "论文_" + paperId : fileInfo.getOriginalFilename();
+        String encodedFileName = URLEncoder.encode(fileName, StandardCharsets.UTF_8).replace("+", "%20");
         try {
-            // 验证论文是否存在且属于该教师
-            PaperInfo paper = paperInfoMapper.selectById(paperId);
-            if (paper == null) {
-                return Result.error(ResultCode.PARAM_ERROR, "论文不存在");
+            String contentType = Files.probeContentType(file.toPath());
+            response.setContentType(contentType == null ? "application/octet-stream" : contentType);
+            response.setContentLengthLong(file.length());
+            response.setHeader("Content-Disposition",
+                    "attachment; filename=\"" + encodedFileName + "\"; filename*=UTF-8''" + encodedFileName);
+            response.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+            response.setHeader("Pragma", "no-cache");
+            response.setDateHeader("Expires", 0);
+
+            try (InputStream in = Files.newInputStream(file.toPath());
+                 OutputStream out = response.getOutputStream()) {
+                in.transferTo(out);
+                out.flush();
             }
-            
-            if (!paper.getTeacherId().equals(teacherId)) {
-                return Result.error(ResultCode.PARAM_ERROR, "无权限下载此论文");
-            }
-            
-            // 生成下载链接（这里返回文件ID，前端根据文件ID下载）
-            String downloadUrl = "/api/file/download/" + paper.getFileId();
-            
-            log.info("教师{}下载论文{}, 文件ID: {}", teacherId, paperId, paper.getFileId());
-            return Result.success("获取下载链接成功", downloadUrl);
-        } catch (Exception e) {
+            log.info("教师{}下载论文{}成功, 文件ID: {}", teacherId, paperId, paper.getFileId());
+        } catch (IOException e) {
             log.error("论文下载失败: teacherId={}, paperId={}", teacherId, paperId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "论文下载失败: " + "系统异常，请稍后重试");
+            throw new BusinessException(ResultCode.SYSTEM_ERROR, "论文下载失败，请稍后重试", null);
         }
     }
 
@@ -499,7 +546,7 @@ public class TeacherDashboardServiceImpl implements TeacherDashboardService {
             
             for (SysUser student : resultPage.getRecords()) {
                 Map<String, Object> record = new HashMap<>();
-                record.put("studentId", student.getId());
+                record.put("studentId", String.valueOf(student.getId()));
                 record.put("studentName", student.getRealName());
                 record.put("username", student.getUsername());
                 record.put("major", student.getMajor());

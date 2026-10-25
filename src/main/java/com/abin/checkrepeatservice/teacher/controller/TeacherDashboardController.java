@@ -13,6 +13,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
@@ -123,13 +124,14 @@ public class TeacherDashboardController {
      * 5. 论文下载接口
      * GET /api/teacher/papers/{paperId}/download
      */
-    @GetMapping("/papers/{paperId}/download")
-    @Operation(summary = "下载论文文件", description = "下载指定论文的文件")
-    public Result<String> downloadPaper(
-            @Parameter(description = "论文ID") @PathVariable Long paperId) {
+    @GetMapping(value = "/papers/{paperId}/download", produces = MediaType.APPLICATION_OCTET_STREAM_VALUE)
+    @Operation(summary = "下载论文文件", description = "以文件流形式下载指定论文的原文件")
+    public void downloadPaper(
+            @Parameter(description = "论文ID") @PathVariable Long paperId,
+            HttpServletResponse response) {
         Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
         log.info("教师{}请求下载论文{}", teacherId, paperId);
-        return teacherDashboardService.downloadPaper(teacherId, paperId);
+        teacherDashboardService.downloadPaper(teacherId, paperId, response);
     }
 
     /**

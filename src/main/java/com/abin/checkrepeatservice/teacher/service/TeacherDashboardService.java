@@ -2,6 +2,7 @@ package com.abin.checkrepeatservice.teacher.service;
 
 import com.abin.checkrepeatservice.common.Result;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import jakarta.servlet.http.HttpServletResponse;
 
 import java.util.Map;
 
@@ -35,12 +36,12 @@ public interface TeacherDashboardService {
     Result<Map<String, Object>> getStudentStats(Long teacherId);
 
     /**
-     * 下载论文文件
+     * 下载论文文件（直接写入响应流）
      * @param teacherId 教师ID
      * @param paperId 论文ID
-     * @return 文件下载链接
+     * @param response HTTP响应
      */
-    Result<String> downloadPaper(Long teacherId, Long paperId);
+    void downloadPaper(Long teacherId, Long paperId, HttpServletResponse response);
 
     /**
      * 获取审核进度统计
