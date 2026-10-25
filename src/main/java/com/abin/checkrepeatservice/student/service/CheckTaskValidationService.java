@@ -1,6 +1,9 @@
 package com.abin.checkrepeatservice.student.service;
 
+import com.abin.checkrepeatservice.common.Exception.BusinessException;
 import com.abin.checkrepeatservice.common.constant.DictConstants;
+import com.abin.checkrepeatservice.common.enums.ResultCode;
+import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
 import com.abin.checkrepeatservice.pojo.entity.CheckTask;
 import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
 import com.abin.checkrepeatservice.student.mapper.CheckTaskMapper;
@@ -9,12 +12,14 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.Resource;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 查重任务前置校验服务
@@ -36,16 +41,32 @@ public class CheckTaskValidationService {
     @Value("${admin.check-rule.default-interval}")
     private Long checkInterval;
 
-    @Value("${check.task.max-concurrent}")
-    private int maxConcurrentTasks;
+    @Resource
+    private StringRedisTemplate stringRedisTemplate;
+
+    /** 单用户发起查重的最小间隔（秒），用于入口防刷 */
+    @Value("${check.rate-limit.user-window-seconds:30}")
+    private long userRateWindowSeconds;
 
     /**
-     * 完整的查重前置校验
-     * @param paperId 论文 ID
-     * @param studentId 学生 ID
-     * @return 校验结果
+     * 完整的查重前置校验（单次发起：带用户级限流）
      */
     public ValidationResult validateCheckRequest(Long paperId, Long studentId) {
+        return validateCheckRequest(paperId, studentId, true);
+    }
+
+    /**
+     * 完整的查重前置校验。
+     *
+     * @param applyUserRateLimit 是否消耗“单用户 30 秒一次”的限流额度；
+     *                           批量查重由一次用户动作触发，应传 false，避免逐篇被拦。
+     */
+    public ValidationResult validateCheckRequest(Long paperId, Long studentId,
+                                                 boolean applyUserRateLimit) {
+        if (applyUserRateLimit) {
+            enforceUserRateLimit();
+        }
+
         log.info("开始查重前置校验 - 论文 ID: {}, 学生 ID: {}", paperId, studentId);
         
         ValidationResult result = new ValidationResult();
@@ -88,23 +109,53 @@ public class CheckTaskValidationService {
             }
         }
         
-        // 5. 校验系统并发负载
-        long runningCount = getRunningTaskCount();
-        if (runningCount >= maxConcurrentTasks) {
-            int waitMinutes = estimateWaitTime(runningCount);
-            result.setSuccess(false);
-            result.setMessage(String.format("当前系统查重任务繁忙，预计等待%d分钟，请稍后再试", waitMinutes));
-            result.setRetryAfter(waitMinutes * 60L);
-            return result;
-        }
-        
-        // 所有校验通过
+        // 5. 通过：并发容量由 CheckTaskDispatchScheduler 统一控制。
+        //    入口不再按 running 数拒绝，否则 pending 队列永远攒不起来（5000 份场景会
+        //    在 API 层被挡回，而不是进入 DB 队列）。真正防刷由上面的用户级限流负责。
         result.setSuccess(true);
         result.setPaper(paper);
-        result.setQueuePosition((int)(runningCount + 1));
+        Long pendingCount = checkTaskMapper.selectCount(new LambdaQueryWrapper<CheckTask>()
+                .eq(CheckTask::getCheckStatus, DictConstants.CheckStatus.PENDING)
+                .eq(CheckTask::getIsDeleted, 0));
+        result.setQueuePosition((int) ((pendingCount == null ? 0 : pendingCount) + 1));
         
         log.info("查重前置校验通过 - 论文 ID: {}, 排队位置：{}", paperId, result.getQueuePosition());
         return result;
+    }
+
+    /**
+     * 单用户入口限流：默认 30 秒内只允许发起 1 次查重。
+     *
+     * <p>使用 Redis SET NX + TTL 实现固定窗口；Redis 不可用时放行（限流是防刷手段，
+     * 不应成为业务可用性的单点）。批量查重通过 {@code applyUserRateLimit=false} 跳过。</p>
+     */
+    private void enforceUserRateLimit() {
+        Long userId;
+        try {
+            userId = UserBusinessInfoUtils.getCurrentUserId();
+        } catch (Exception e) {
+            // 论文提交后的自动查重运行在后台线程，没有 SecurityContext：跳过用户级限流
+            log.debug("无登录上下文，跳过查重入口限流");
+            return;
+        }
+        if (userId == null) {
+            return;
+        }
+        String key = "check:rate:user:" + userId;
+        try {
+            Boolean acquired = stringRedisTemplate.opsForValue().setIfAbsent(
+                    key, "1", Math.max(1, userRateWindowSeconds), TimeUnit.SECONDS);
+            if (!Boolean.TRUE.equals(acquired)) {
+                log.warn("查重入口限流命中 - userId: {}", userId);
+                throw new BusinessException(ResultCode.REQUEST_TOO_FREQUENT,
+                        "操作过于频繁，请稍后再试", null);
+            }
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.warn("用户级限流检查失败（Redis 异常），放行本次请求 - userId: {}, 原因: {}",
+                    userId, e.getMessage());
+        }
     }
     
     /**
@@ -149,56 +200,7 @@ public class CheckTaskValidationService {
         );
     }
     
-    /**
-     * 获取运行中的任务数
-     */
-    private long getRunningTaskCount() {
-        return checkTaskMapper.selectCount(
-            new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<CheckTask>()
-                .eq(CheckTask::getCheckStatus, DictConstants.CheckStatus.CHECKING)
-                .eq(CheckTask::getIsDeleted, 0)
-        );
-    }
-    
-    /**
-     * 预估等待时间（分钟）
-     * 单任务耗时取最近已完成任务的真实 duration_seconds 均值，无历史样本时才退回 3 分钟。
-     */
-    private int estimateWaitTime(long runningCount) {
-        int avgDurationMinutes = getAverageDurationMinutes();
-        int availableSlots = maxConcurrentTasks - (int)runningCount;
-        if (availableSlots <= 0) {
-            return avgDurationMinutes;
-        }
-        return (int)(runningCount / availableSlots) * avgDurationMinutes;
-    }
 
-    /**
-     * 最近已完成任务的平均耗时（分钟）。
-     * 取最近 100 条真实 duration_seconds 的均值；无样本返回 3 分钟兜底。
-     */
-    private int getAverageDurationMinutes() {
-        try {
-            List<CheckTask> recent = checkTaskMapper.selectList(
-                new LambdaQueryWrapper<CheckTask>()
-                    .isNotNull(CheckTask::getDurationSeconds)
-                    .gt(CheckTask::getDurationSeconds, 0)
-                    .eq(CheckTask::getCheckStatus, DictConstants.CheckStatus.COMPLETED)
-                    .eq(CheckTask::getIsDeleted, 0)
-                    .orderByDesc(CheckTask::getEndTime)
-                    .last("LIMIT 100")
-                    .select(CheckTask::getDurationSeconds)
-            );
-            if (recent.isEmpty()) {
-                return 3;
-            }
-            long sum = recent.stream().mapToLong(CheckTask::getDurationSeconds).sum();
-            return Math.max(1, (int) Math.ceil(sum / 100.0 / recent.size()));
-        } catch (Exception e) {
-            log.warn("获取历史平均耗时失败，等待预估退回 3 分钟", e);
-            return 3;
-        }
-    }
     
     /**
      * 获取论文状态名称

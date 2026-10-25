@@ -9,7 +9,7 @@ import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
 import com.abin.checkrepeatservice.pojo.entity.PaperSubmit;
 import com.abin.checkrepeatservice.student.dto.BatchCheckRequestDTO;
 import com.abin.checkrepeatservice.student.dto.BatchCheckResultDTO;
-import com.abin.checkrepeatservice.student.event.CheckTaskCreatedEvent;
+
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
 import com.abin.checkrepeatservice.student.mapper.CheckTaskMapper;
 import com.abin.checkrepeatservice.student.service.CheckTaskValidationService;
@@ -17,7 +17,7 @@ import com.abin.checkrepeatservice.student.service.CheckTaskService;
 import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.ApplicationEventPublisher;
+
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -42,9 +42,6 @@ public class BatchCheckTaskServiceImpl {
 
     @Resource
     private CheckTaskMapper checkTaskMapper;
-
-    @Resource
-    private ApplicationEventPublisher eventPublisher;
 
     @Resource
     private CheckTaskService checkTaskService;
@@ -145,8 +142,9 @@ public class BatchCheckTaskServiceImpl {
      */
     private BatchCheckResultDTO.TaskResult processSinglePaper(Long paperId, Long studentId) {
         // 1. 校验
-        CheckTaskValidationService.ValidationResult validationResult = 
-            validationService.validateCheckRequest(paperId, studentId);
+        // 批量任务由一次用户动作触发，不逐篇消耗“单用户 30 秒”限流额度
+        CheckTaskValidationService.ValidationResult validationResult =
+            validationService.validateCheckRequest(paperId, studentId, false);
 
         if (!validationResult.isSuccess()) {
             return BatchCheckResultDTO.TaskResult.builder()
@@ -176,9 +174,8 @@ public class BatchCheckTaskServiceImpl {
         // 2. 创建任务
         try {
             CheckTask checkTask = createCheckTask(paperId, paperInfo, studentId, quotaConsumed);
-            
-            // 3. 发布事件（异步执行）
-            eventPublisher.publishEvent(new CheckTaskCreatedEvent(this, checkTask.getId(), paperId));
+
+            // 3. 只落库 pending，由 CheckTaskDispatchScheduler 按容量受控派发
 
             // 4. 计算预估时间
             int estimatedTime = estimateDuration(paperInfo.getWordCount());

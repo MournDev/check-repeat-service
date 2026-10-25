@@ -32,6 +32,8 @@ public enum ResultCode {
     PERMISSION_NO_ACCESS(40304, HttpStatus.FORBIDDEN, "无权限执行此操作"),
     PERMISSION_NOT_STATUS(40305, HttpStatus.FORBIDDEN, "该状态下不可操作"),
 
+    // ====================== 3.5 限流（HTTP 429） ======================
+    REQUEST_TOO_FREQUENT(42901, HttpStatus.TOO_MANY_REQUESTS, "操作过于频繁，请稍后再试"),
 
     // ====================== 4. 业务逻辑错误（HTTP 409） ======================
     BUSINESS_TASK_ASSIGNED(40901, HttpStatus.CONFLICT, "该状态下不允许分配老师"),
