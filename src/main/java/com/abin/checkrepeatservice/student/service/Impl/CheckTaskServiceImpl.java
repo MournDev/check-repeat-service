@@ -368,8 +368,10 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
                 .orderByDesc(CheckTask::getCreateTime);
         List<CheckTask> checkTasks = list(queryWrapper);
         CheckTask checkTask = checkTasks.isEmpty() ? null : checkTasks.get(0); // 替代 getFirst()
-        if (checkTask == null || checkTask.getIsDeleted() == 1) {
-            return Result.error(ResultCode.RESOURCE_NOT_FOUND, "查重任务不存在或已删除");
+        if (checkTask == null) {
+            // 论文还没有查重任务属正常空态（如导师尚未确认接收、尚未发起查重），
+            // 详情页据此展示"暂未检测"；返回 200 + null，避免用 404 制造接口故障的错觉
+            return Result.success("该论文暂无查重任务", null);
         }
 
         // 2. 权限校验（学生查自己的，教师查指导的，管理员查所有）
