@@ -1,5 +1,6 @@
 package com.abin.checkrepeatservice.pojo.base;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import io.swagger.annotations.ApiModel;
 import io.swagger.annotations.ApiModelProperty;
 import lombok.Data;
@@ -17,6 +18,7 @@ public class FileUploadResp {
      * 作用：业务层关联文件的核心ID（如论文表存储此ID关联附件）
      */
     @ApiModelProperty(value = "文件ID（附件表主键）", example = "456")
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     private Long id;
 
     /**

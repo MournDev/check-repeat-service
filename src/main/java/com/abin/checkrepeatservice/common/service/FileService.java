@@ -2,6 +2,7 @@ package com.abin.checkrepeatservice.common.service;
 
 import com.abin.checkrepeatservice.mapper.FileInfoMapper;
 import com.abin.checkrepeatservice.pojo.entity.FileInfo;
+import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.tika.Tika;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -164,7 +165,8 @@ public class FileService {
      * 生成文件 ID
      */
     private Long generateFileId() {
-        return System.currentTimeMillis();
+        // 雪花 ID：毫秒时间戳在并发上传时同毫秒会撞主键，必须用全局唯一 ID
+        return IdWorker.getId();
     }
 
     /**

@@ -2,6 +2,7 @@ package com.abin.checkrepeatservice.pojo.entity;
 
 
 import com.baomidou.mybatisplus.annotation.*;
+import com.fasterxml.jackson.annotation.JsonFormat;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.experimental.Accessors;
@@ -17,6 +18,7 @@ public class FileInfo implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     @TableId(value = "id", type = IdType.ASSIGN_ID)
     private Long id;
 

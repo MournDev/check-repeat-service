@@ -119,6 +119,7 @@ public class PaperInfo extends BaseEntity implements Serializable {
     /**
      * 文件 ID
      */
+    @JsonFormat(shape = JsonFormat.Shape.STRING)
     @TableField("file_id")
     private Long fileId;
 
