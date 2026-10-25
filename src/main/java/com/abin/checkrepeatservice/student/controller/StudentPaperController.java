@@ -9,15 +9,18 @@ import com.abin.checkrepeatservice.common.annotation.OperationLog;
 import com.abin.checkrepeatservice.common.service.FileService;
 import com.abin.checkrepeatservice.pojo.entity.FileInfo;
 import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
+import com.abin.checkrepeatservice.pojo.entity.ReviewAssignment;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
 import com.abin.checkrepeatservice.student.service.PaperInfoService;
 import com.abin.checkrepeatservice.student.service.StudentReviewService;
+import com.abin.checkrepeatservice.teacher.mapper.ReviewAssignmentMapper;
 import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
 import com.abin.checkrepeatservice.monitor.service.BusinessMetricsService;
 import com.abin.checkrepeatservice.student.vo.PaperQueryRequest;
 import com.abin.checkrepeatservice.student.vo.PaperSubmitRequest;
 import com.abin.checkrepeatservice.student.vo.PaperReSubmitReq;
 import com.abin.checkrepeatservice.student.dto.*;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import jakarta.annotation.Resource;
 import jakarta.validation.Valid;
@@ -29,6 +32,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.Objects;
 import java.util.stream.Collectors;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -60,6 +64,9 @@ public class StudentPaperController {
     private FileService fileService;
 
     @Resource
+    private ReviewAssignmentMapper reviewAssignmentMapper;
+
+    @Resource
     private BusinessMetricsService businessMetricsService;
 
     /**
@@ -83,6 +90,16 @@ public class StudentPaperController {
         FileInfo fileInfo = fileService.getById(request.getFileId());
         if (fileInfo == null) {
             return Result.error(ResultCode.PARAM_ERROR, "文件不存在或已被删除");
+        }
+
+        // 安全修复（P0）：只允许使用自己上传的文件提交论文。
+        // 否则可用可枚举的 fileId 把他人的论文挂到自己名下，再借 deletePaper
+        // 顺手删掉对方的文件记录（删文件接口的归属校验也就被绕过了）。
+        if (fileInfo.getUploadUserId() == null
+                || !fileInfo.getUploadUserId().equals(studentId.toString())) {
+            log.warn("论文提交越权使用文件拦截 - studentId: {}, fileId: {}",
+                    studentId, request.getFileId());
+            return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权使用该文件提交论文");
         }
 
         // 验证MD5（如果提供了MD5）
@@ -145,9 +162,90 @@ public class StudentPaperController {
         if (paperInfo == null || paperInfo.getIsDeleted() == 1) {
             return Result.error(ResultCode.RESOURCE_NOT_FOUND, "论文不存在或已删除");
         }
+        // ：论文详情按 ID 直达，必须做归属校验，否则任意登录用户
+        // 传一个 paperId 就能读到他人论文的摘要、查重结果、导师等信息。
+        Long currentUserId = UserBusinessInfoUtils.getCurrentUserId();
+        PaperAccess access = resolvePaperAccess(paperInfo, currentUserId);
+        if (!access.allowed()) {
+            log.warn("论文详情越权访问拦截 - paperId: {}, userId: {}", paperId, currentUserId);
+            throw new BusinessException(ResultCode.PERMISSION_NO_ACCESS, "无权查看该论文", null);
+        }
         // 2. 重提闭环字段由服务端计算（canResubmit / nextAction），前端不再猜状态
         paperInfoService.enrichResubmitInfo(paperInfo);
+        // 3. 盲审评阅人只能拿到匿名视图（脱敏在 enrich 之后做，避免影响内部状态计算）
+        if (access.maskIdentity()) {
+            log.info("盲审论文详情已脱敏 - paperId: {}, reviewerId: {}", paperId, currentUserId);
+            maskBlindIdentity(paperInfo);
+        }
         return Result.success("论文详情查询成功", paperInfo);
+    }
+
+    /** 论文详情访问决策：是否放行、是否需要盲审脱敏 */
+    private record PaperAccess(boolean allowed, boolean maskIdentity) {
+    }
+
+    /**
+     * 论文详情访问策略：学生本人 / 指导教师 / 被分配的评阅教师 / 管理员。
+     *
+     * <p>评阅教师单独判定：评阅任务分配后 {@code paper.teacher_id} 仍是原导师，
+     * 只看导师字段会把合法的评阅人挡在门外。已超时转派（status=3）的任务不再授权，
+     * 避免改派后原评阅人仍能持续查看。</p>
+     *
+     * <p>盲审脱敏：仅通过“盲审评阅任务”获得访问权的教师才脱敏；若该教师同时还有
+     * 非盲审（导师评阅/交叉评阅）任务，说明其本就有实名查看权，不脱敏。</p>
+     */
+    private PaperAccess resolvePaperAccess(PaperInfo paper, Long currentUserId) {
+        if (currentUserId == null) {
+            return new PaperAccess(false, false);
+        }
+        if (UserBusinessInfoUtils.isAdmin()) {
+            return new PaperAccess(true, false);
+        }
+        if (Objects.equals(paper.getStudentId(), currentUserId)) {
+            return new PaperAccess(true, false);
+        }
+        if (!UserBusinessInfoUtils.isTeacher()) {
+            return new PaperAccess(false, false);
+        }
+        // 指导教师（实名可见）
+        if (Objects.equals(paper.getTeacherId(), currentUserId)) {
+            return new PaperAccess(true, false);
+        }
+        // 被分配的评阅教师（待评阅 / 评阅中 / 已提交均保留查看权，超时转派的不保留）
+        List<ReviewAssignment> activeAssignments = reviewAssignmentMapper.selectList(
+                new LambdaQueryWrapper<ReviewAssignment>()
+                        .eq(ReviewAssignment::getPaperId, paper.getId())
+                        .eq(ReviewAssignment::getReviewerId, currentUserId)
+                        .ne(ReviewAssignment::getStatus, ReviewAssignment.STATUS_TIMEOUT));
+        if (activeAssignments.isEmpty()) {
+            return new PaperAccess(false, false);
+        }
+        boolean onlyBlind = activeAssignments.stream()
+                .allMatch(a -> ReviewAssignment.TYPE_BLIND.equals(a.getReviewType()));
+        return new PaperAccess(true, onlyBlind);
+    }
+
+    /**
+     * 盲审匿名视图：清空可定位作者/导师的身份字段。
+     *
+     * <p>除显式身份字段外，还要清 {@code filePath} 与审计用户 ID——
+     * 它们由上传人 userId 拼出（{@code {userId}/yyyy/MM/dd/...}），
+     * 留着等于把学生 ID 直接交给盲审人。</p>
+     */
+    private void maskBlindIdentity(PaperInfo paper) {
+        paper.setStudentId(null);
+        paper.setStudentName(null);
+        paper.setStudentUsername(null);
+        paper.setStudentGrade(null);
+        paper.setStudentMajor(null);
+        paper.setStudentCollege(null);
+        paper.setAuthor("盲审论文");
+        paper.setTeacherId(null);
+        paper.setTeacherName(null);
+        paper.setTeacherRealName(null);
+        paper.setCreateBy(null);
+        paper.setUpdateBy(null);
+        paper.setFilePath(null);
     }
 
     /**
@@ -198,6 +296,23 @@ public class StudentPaperController {
         if (fileId == null) {
             return Result.error(ResultCode.PARAM_ERROR, "文件 ID 不能为空");
         }
+
+        FileInfo fileInfo = fileService.getById(fileId);
+        if (fileInfo == null) {
+            return Result.error(ResultCode.RESOURCE_NOT_FOUND, "文件不存在或已被删除");
+        }
+
+        // 安全修复（P0）：删除是写操作，必须校验归属。原实现只看 fileId，
+        // 任意登录用户可删除他人上传的论文/附件记录（fileId 可枚举）。
+        // 规则：上传人本人或管理员；教师即使能查看也不能删除他人文件。
+        Long currentUserId = UserBusinessInfoUtils.getCurrentUserId();
+        boolean owner = fileInfo.getUploadUserId() != null
+                && fileInfo.getUploadUserId().equals(currentUserId.toString());
+        if (!owner && !UserBusinessInfoUtils.isAdmin()) {
+            log.warn("文件删除越权访问拦截 - fileId: {}, userId: {}", fileId, currentUserId);
+            throw new BusinessException(ResultCode.PERMISSION_NO_ACCESS, "无权删除该文件", null);
+        }
+
         boolean deleteSuccess = fileService.deleteFile(fileId);
         if (!deleteSuccess) {
             return Result.error(ResultCode.BUSINESS_NO_SAFE, "文件删除失败，请重试");
