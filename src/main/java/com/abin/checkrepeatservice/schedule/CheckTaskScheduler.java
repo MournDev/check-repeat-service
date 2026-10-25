@@ -5,7 +5,6 @@ import com.abin.checkrepeatservice.admin.service.SystemConfigService;
 import com.abin.checkrepeatservice.common.enums.CheckTaskStatusEnum;
 import com.abin.checkrepeatservice.common.statemachine.CheckTaskStateMachine;
 import com.abin.checkrepeatservice.pojo.entity.CheckTask;
-import com.abin.checkrepeatservice.student.event.CheckTaskCreatedEvent;
 import com.abin.checkrepeatservice.student.mapper.CheckTaskMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
@@ -14,7 +13,6 @@ import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -48,20 +46,20 @@ public class CheckTaskScheduler {
     @Value("${schedule.check-task.timeout-scan-enabled:true}")
     private boolean timeoutScanEnabled;
 
-    /** checking 任务超时阈值（毫秒），默认 1 小时 */
-    @Value("${check.task.timeout:3600000}")
+    /** checking 任务超时阈值（毫秒），默认 20 分钟 */
+    @Value("${check.task.timeout:1200000}")
     private long checkingTimeoutMs;
 
-    /** pending 任务排队超时阈值（毫秒），默认 15 分钟 */
-    @Value("${check.task.pending-timeout:900000}")
+    /** pending 任务滞留观察阈值（毫秒），默认 2 分钟；仅用于积压告警，不再据此判失败 */
+    @Value("${check.task.pending-timeout:120000}")
     private long pendingTimeoutMs;
 
-    /** pending 超时后允许重新投递的最大次数，默认 1 次；超过后置 failure 并返还额度 */
-    @Value("${check.task.pending-max-retry:1}")
-    private int pendingMaxRetry;
-
-    @Autowired
-    private ApplicationEventPublisher eventPublisher;
+    /**
+     * pending 任务的绝对截止时间（毫秒），默认 24 小时。
+     * 只有排队超过该时长才置 failure 并返还额度；容量饱和导致的小时级排队属于正常现象。
+     */
+    @Value("${check.task.pending-deadline-ms:86400000}")
+    private long pendingDeadlineMs;
 
     /** 多实例防重：Redisson 未装配时退化为无锁（条件更新仍保证幂等） */
     @Autowired(required = false)
@@ -80,8 +78,9 @@ public class CheckTaskScheduler {
      * 每 5 分钟执行一次自愈扫描（阶段 3）：
      * <ol>
      *   <li><b>checking 超时</b>：start_time 早于 timeout 阈值 → CHECKING -> FAILURE + 返还额度；</li>
-     *   <li><b>pending 超时</b>：create_time 早于 pending 阈值且重试次数未达上限 →
-     *       条件递增 retry_count 并重新投递 CheckTaskCreatedEvent；已达上限 → PENDING -> FAILURE + 返还额度。</li>
+     *   <li><b>pending 滞留</b>：超过 pending-timeout 只记录积压数量（由
+     *       {@code CheckTaskDispatchScheduler} 按容量继续捞取），
+     *       只有超过 pending-deadline-ms（默认 24h）才 PENDING -> FAILURE + 返还额度。</li>
      * </ol>
      * 所有状态变更走 transitionStatus 条件抢占，返还走 refundForFailedTask 幂等闸门；
      * 多实例用 Redisson 锁串行化，抢不到锁的实例直接跳过本轮。
@@ -150,55 +149,50 @@ public class CheckTaskScheduler {
     }
 
     /**
-     * 回收排队超时任务：
-     * 未达重试上限的任务条件递增 retry_count 后重新投递事件（自愈）；
-     * 已达上限的任务 PENDING -> FAILURE 并返还额度（止损）。
+     * pending 任务滞留观察 + 绝对截止时间止损。
+     *
+     * <p>派发器每 5 秒都会按容量捞取 pending，正常的容量饱和表现为“合法排队”，
+     * 不能按 2 分钟就判失败（否则 5000 份的截止日场景会集体失败退额度）。
+     * 因此这里做两件事：</p>
+     * <ol>
+     *   <li>超过 pending-timeout（默认 2 分钟）：只统计并告警积压数量；</li>
+     *   <li>超过 pending-deadline-ms（默认 24 小时）：才 PENDING -> FAILURE 并返还额度。</li>
+     * </ol>
      */
     private void recoverPendingTimeouts(LocalDateTime now) {
-        long timeoutMillis = Math.max(60_000L, pendingTimeoutMs);
-        int maxRetry = Math.max(0, pendingMaxRetry);
-        LocalDateTime deadline = now.minus(Duration.ofMillis(timeoutMillis));
+        long staleMillis = Math.max(60_000L, pendingTimeoutMs);
+        long deadlineMillis = Math.max(staleMillis, pendingDeadlineMs);
+        LocalDateTime staleBefore = now.minus(Duration.ofMillis(staleMillis));
+        LocalDateTime absoluteDeadline = now.minus(Duration.ofMillis(deadlineMillis));
 
-        List<CheckTask> stalledTasks = checkTaskMapper.selectList(new LambdaQueryWrapper<CheckTask>()
+        // 1) 绝对截止时间：真正的“永远排不上”才止损
+        List<CheckTask> expiredTasks = checkTaskMapper.selectList(new LambdaQueryWrapper<CheckTask>()
                 .eq(CheckTask::getCheckStatus, CheckTaskStatusEnum.PENDING.getCode())
-                .lt(CheckTask::getCreateTime, deadline));
+                .lt(CheckTask::getCreateTime, absoluteDeadline));
 
-        int requeued = 0;
         int failed = 0;
-        for (CheckTask task : stalledTasks) {
-            int retry = task.getRetryCount() == null ? 0 : task.getRetryCount();
-
-            if (retry < maxRetry) {
-                // 条件递增作为「补偿抢占」：只有仍为 pending 且仍超时的那一方能成功
-                int rows = checkTaskMapper.update(null, new LambdaUpdateWrapper<CheckTask>()
-                        .eq(CheckTask::getId, task.getId())
-                        .eq(CheckTask::getCheckStatus, CheckTaskStatusEnum.PENDING.getCode())
-                        .lt(CheckTask::getCreateTime, deadline)
-                        .setSql("retry_count = IFNULL(retry_count, 0) + 1")
-                        .setSql("version = version + 1"));
-                if (rows > 0) {
-                    requeued++;
-                    // 监听器为 AFTER_COMMIT + fallbackExecution=true，无事务时立即异步执行
-                    eventPublisher.publishEvent(new CheckTaskCreatedEvent(
-                            this, task.getId(), task.getPaperId()));
-                    log.warn("pending 任务排队超时，已重新投递事件 - taskId={}, retry={}",
-                            task.getId(), retry + 1);
-                }
-                continue;
-            }
-
+        for (CheckTask task : expiredTasks) {
             boolean transitioned = stateMachine.transitionStatus(
                     task.getId(),
                     CheckTaskStatusEnum.PENDING,
                     CheckTaskStatusEnum.FAILURE,
-                    "任务排队超时（超过" + (timeoutMillis / 60000) + "分钟未执行）");
+                    "任务排队超过" + (deadlineMillis / 60000) + "分钟仍未执行");
             if (transitioned) {
                 failed++;
                 collegeQuotaService.refundForFailedTask(task.getId());
             }
         }
-        if (requeued > 0 || failed > 0) {
-            log.warn("pending 超时处理完成：重新投递={}，置失败={}", requeued, failed);
+        if (failed > 0) {
+            log.warn("pending 任务超过绝对截止时间，已置失败并返还额度：{} 个", failed);
+        }
+
+        // 2) 滞留观察：只做告警，任务继续留在 pending 由派发器捞取
+        Long staleCount = checkTaskMapper.selectCount(new LambdaQueryWrapper<CheckTask>()
+                .eq(CheckTask::getCheckStatus, CheckTaskStatusEnum.PENDING.getCode())
+                .lt(CheckTask::getCreateTime, staleBefore));
+        if (staleCount != null && staleCount > 0) {
+            log.warn("pending 任务滞留超过 {} 秒：{} 个（执行容量饱和时属正常排队）",
+                    staleMillis / 1000, staleCount);
         }
     }
 
