@@ -5,12 +5,13 @@ import com.abin.checkrepeatservice.admin.mapper.SystemConfigMapper;
 import com.abin.checkrepeatservice.pojo.entity.SystemConfig;
 import com.alibaba.fastjson2.JSON;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
-import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.RejectedExecutionException;
 
 /**
  * 异步任务配置
@@ -21,6 +22,18 @@ import java.util.concurrent.ThreadPoolExecutor;
 @Configuration
 @EnableAsync
 public class AsyncConfig {
+
+    /** 论文提交后置任务池：核心线程数 */
+    @Value("${async.paper-submit.core-size:2}")
+    private int paperSubmitCoreSize;
+
+    /** 论文提交后置任务池：最大线程数 */
+    @Value("${async.paper-submit.max-size:4}")
+    private int paperSubmitMaxSize;
+
+    /** 论文提交后置任务池：队列容量 */
+    @Value("${async.paper-submit.queue-size:100}")
+    private int paperSubmitQueueSize;
 
     @Bean("checkTaskExecutor")
     public ThreadPoolTaskExecutor checkTaskExecutor(SystemConfigMapper systemConfigMapper) {
@@ -43,8 +56,13 @@ public class AsyncConfig {
         executor.setThreadNamePrefix("check-task-");
         // 线程空闲时间（秒）
         executor.setKeepAliveSeconds(60);
-        // 拒绝策略：由调用线程处理
-        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        // 拒绝策略（P0 雪崩修复）：绝不允许 CallerRunsPolicy 把 Tika 解析 + 全库比对
+        // 回落到 Tomcat 请求线程。队列满即拒绝，由调用方捕获并给出“排队中”提示。
+        executor.setRejectedExecutionHandler((task, pool) -> {
+            log.error("查重任务队列已满，拒绝执行 - activeCount={}, queueSize={}, poolSize={}",
+                    pool.getActiveCount(), pool.getQueue().size(), pool.getPoolSize());
+            throw new RejectedExecutionException("查重队列已满");
+        });
         // 等待所有任务完成后再关闭线程池
         executor.setWaitForTasksToCompleteOnShutdown(true);
         // 等待时间
@@ -68,11 +86,47 @@ public class AsyncConfig {
         executor.setQueueCapacity(50);
         executor.setThreadNamePrefix("async-");
         executor.setKeepAliveSeconds(30);
-        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        // 通知/日志等非关键异步任务：队列满时丢弃并告警，绝不回落到请求线程，
+        // 也不让“发不出通知”反向拖垮主业务。
+        executor.setRejectedExecutionHandler((task, pool) ->
+                log.warn("通用异步队列已满，丢弃非关键任务 - activeCount={}, queueSize={}",
+                        pool.getActiveCount(), pool.getQueue().size()));
         executor.setWaitForTasksToCompleteOnShutdown(true);
         executor.setAwaitTerminationSeconds(30);
 
         executor.initialize();
+        return executor;
+    }
+
+    /**
+     * 论文提交后置任务线程池（独立化）。
+     *
+     * <p>只承载「自动分配导师 + 触发查重」这类轻量 DB/通知工作，与查重执行池隔离：
+     * 查重队列被打满时，论文提交链路不会跟着排队，也不会把 AFTER_COMMIT 阶段的
+     * 提交请求拖成异常。任务被拒绝由监听器显式捕获并回落到提交线程（该路径不含
+     * Tika 解析与全库比对，回落是可控的）。</p>
+     */
+    @Bean("paperSubmitExecutor")
+    public ThreadPoolTaskExecutor paperSubmitExecutor() {
+        int core = Math.max(1, paperSubmitCoreSize);
+        int max = Math.max(core, paperSubmitMaxSize);
+        int queue = Math.max(10, paperSubmitQueueSize);
+
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(core);
+        executor.setMaxPoolSize(max);
+        executor.setQueueCapacity(queue);
+        executor.setThreadNamePrefix("paper-submit-");
+        executor.setKeepAliveSeconds(60);
+        // AbortPolicy：拒绝由 PaperSubmissionAllocationListener 捕获后决定回落，
+        // 不在此处静默丢弃（论文已落库，导师分配不能无声丢失）
+        executor.setRejectedExecutionHandler(
+                new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(30);
+
+        executor.initialize();
+        log.info("论文提交后置线程池初始化完成: core={}, max={}, queue={}", core, max, queue);
         return executor;
     }
 

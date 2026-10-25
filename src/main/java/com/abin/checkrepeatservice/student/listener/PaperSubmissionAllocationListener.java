@@ -4,20 +4,25 @@ import com.abin.checkrepeatservice.student.event.PaperSubmittedEvent;
 import com.abin.checkrepeatservice.student.service.Impl.PaperInfoServiceImpl;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.scheduling.annotation.Async;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
+
+import java.util.concurrent.RejectedExecutionException;
 
 /**
  * 论文提交后「自动分配导师 + 触发查重」异步监听器（架构修复 P0）。
  *
  * <p>修复点：</p>
  * <ul>
- *   <li>独立 bean 调用 Service 公共方法，调用经过 Spring 代理，@Async 真正生效，
- *       不再同步占用提交请求的 Tomcat 线程与 HikariCP 连接；</li>
  *   <li>AFTER_COMMIT：仅在提交事务成功落库后执行；事务回滚则不分配、不查重；</li>
- *   <li>统一走查重线程池 checkTaskExecutor，受并发上限与监控约束。</li>
+ *   <li>依赖独立线程池 {@code paperSubmitExecutor}（轻量 DB/通知任务），
+ *       与查重执行池 {@code checkTaskExecutor} 隔离——查重队列打满时，
+ *       论文提交链路不会跟着排队或报错；</li>
+ *   <li>投递被拒绝时显式捕获并回落到提交线程执行：该路径只有导师分配与
+ *       “创建查重任务事件”，不包含 Tika 解析/全库比对，回落是可控的，
+ *       且保证论文已落库后“导师分配不会无声丢失”。</li>
  * </ul>
  */
 @Component
@@ -27,11 +32,28 @@ public class PaperSubmissionAllocationListener {
     @Resource
     private PaperInfoServiceImpl paperInfoService;
 
-    @Async("checkTaskExecutor")
+    @Resource(name = "paperSubmitExecutor")
+    private ThreadPoolTaskExecutor paperSubmitExecutor;
+
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onPaperSubmitted(PaperSubmittedEvent event) {
-        log.info("论文提交事务已提交，开始异步分配导师并触发查重 - 论文ID: {}, 学生ID: {}",
-                event.getPaperId(), event.getStudentId());
-        paperInfoService.allocateAdvisorAndCheck(event.getPaperId(), event.getStudentId());
+        try {
+            paperSubmitExecutor.execute(() -> runAllocation(event));
+        } catch (RejectedExecutionException e) {
+            log.warn("论文提交后置队列已满，回落到提交线程执行轻量分配 - paperId: {}, studentId: {}",
+                    event.getPaperId(), event.getStudentId(), e);
+            runAllocation(event);
+        }
+    }
+
+    private void runAllocation(PaperSubmittedEvent event) {
+        try {
+            log.info("论文提交事务已提交，开始异步分配导师并触发查重 - 论文ID: {}, 学生ID: {}",
+                    event.getPaperId(), event.getStudentId());
+            paperInfoService.allocateAdvisorAndCheck(event.getPaperId(), event.getStudentId());
+        } catch (Exception e) {
+            // 后置任务异常不得反向影响已提交的论文事务
+            log.error("论文提交后置任务执行失败 - 论文ID: {}", event.getPaperId(), e);
+        }
     }
 }

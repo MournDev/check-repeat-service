@@ -1,9 +1,11 @@
 package com.abin.checkrepeatservice.student.service.Impl;
 
 
+import com.abin.checkrepeatservice.admin.mapper.PaperSubmitMapper;
 import com.abin.checkrepeatservice.admin.service.CollegeQuotaService;
 import com.abin.checkrepeatservice.common.Exception.BusinessException;
 import com.abin.checkrepeatservice.common.Result;
+import com.abin.checkrepeatservice.common.component.PaperStageGate;
 import com.abin.checkrepeatservice.common.constant.DictConstants;
 import com.abin.checkrepeatservice.common.engine.CheckEngineManager;
 import com.abin.checkrepeatservice.common.enums.CheckTaskStatusEnum;
@@ -27,12 +29,14 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.core.task.TaskRejectedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.stream.Collectors;
 
 /**
@@ -47,7 +51,7 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
 
     // M3.1 版本—报告绑定：任务落库时快照论文版本与最新提交记录
     @Resource
-    private com.abin.checkrepeatservice.admin.mapper.PaperSubmitMapper paperSubmitMapper;
+    private PaperSubmitMapper paperSubmitMapper;
 
     @Resource
     private CheckReportMapper checkReportMapper;
@@ -57,7 +61,7 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
 
     // M2.2 阶段门收口：论文状态流转统一校验（默认影子模式，只告警不阻断）
     @Resource
-    private com.abin.checkrepeatservice.common.component.PaperStageGate paperStageGate;
+    private PaperStageGate paperStageGate;
 
     @Resource
     private CheckEngineManager checkEngineManager;
@@ -129,9 +133,33 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
             log.warn("创建查重任务业务校验失败 - 论文 ID: {}, 原因：{}", paperId, e.getMessage());
             return Result.error(e.getResultCode(), e.getMessage());
         } catch (Exception e) {
+            // 线程池满时 AFTER_COMMIT 监听器会被拒绝，异常可能被事务管理器包装；
+            // 此时任务已落库为 pending，交给超时扫描重投，绝不能让请求线程兜底执行查重。
+            if (isAsyncRejected(e)) {
+                log.error("查重任务投递被拒绝（线程池已满），任务保持 pending 等待重投 - paperId: {}, 任务创建人: {}",
+                        paperId, currentUserId, e);
+                return Result.error(ResultCode.SYSTEM_ERROR,
+                        "当前查重队列繁忙，任务已排队，请稍后在查重记录中查看结果");
+            }
             log.error("创建查重任务失败 - 论文 ID: {}", paperId, e);
             return Result.error(ResultCode.SYSTEM_ERROR, "查重任务创建失败：系统异常，请稍后重试");
         }
+    }
+
+    /**
+     * 判断异常链里是否包含线程池拒绝（TaskRejectedException / RejectedExecutionException）。
+     * AFTER_COMMIT 监听器在事务提交阶段被拒绝时，Spring 可能把它包装成 TransactionSystemException。
+     */
+    private boolean isAsyncRejected(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (current instanceof TaskRejectedException
+                    || current instanceof RejectedExecutionException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     /**
