@@ -562,7 +562,7 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
                 .filter(Objects::nonNull)
                 .distinct()
                 .collect(Collectors.toList());
-        Map<Long, PaperInfo> paperMap = paperIds.isEmpty() ? Map.of()
+        Map<Long, PaperInfo> paperMap = paperIds.isEmpty() ? new HashMap<>()
                 : paperInfoMapper.selectBatchIds(paperIds).stream()
                         .collect(Collectors.toMap(PaperInfo::getId, p -> p));
 
@@ -572,14 +572,15 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
                 .filter(Objects::nonNull)
                 .distinct()
                 .collect(Collectors.toList());
-        Map<Long, CheckReport> reportMap = reportIds.isEmpty() ? Map.of()
+        // 空 Map 必须用 HashMap：Map.of() 是不可变集合，get(null) 会直接抛 NPE
+        Map<Long, CheckReport> reportMap = reportIds.isEmpty() ? new HashMap<>()
                 : checkReportMapper.selectBatchIds(reportIds).stream()
                         .collect(Collectors.toMap(CheckReport::getId, r -> r));
 
         return tasks.stream()
                 .map(task -> convertToTaskResultDTO(task,
-                        paperMap.get(task.getPaperId()),
-                        reportMap.get(task.getReportId())))
+                        task.getPaperId() == null ? null : paperMap.get(task.getPaperId()),
+                        task.getReportId() == null ? null : reportMap.get(task.getReportId())))
                 .collect(Collectors.toList());
     }
 
