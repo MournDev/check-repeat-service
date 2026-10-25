@@ -13,7 +13,8 @@ import java.math.BigDecimal;
  * 查重报告导师签核请求（论文全生命周期 P5，教师端 POST /api/teacher/papers/{paperId}/check-signoff）。
  *
  * 校验规则：
- *  - paperId 必填（控制器会用路径变量覆盖，避免与请求体不一致）；
+ *  - paperId 由路径变量注入（控制器赋值），DTO 不做必填校验：@Valid 先于控制器方法体执行，
+ *    若在此加 @NotNull，未在请求体重复传 paperId 的调用方会被误拦；
  *  - qualified 必填且只能是 1（合格放行）/ 0（不合格退回），取值域在服务层校验；
  *  - guidanceScore 统一必填（0-100）：它同时是成绩加权合成（ScoreComposeService）的
  *    "指导分"数据源，不合格签核也必须给出评分，否则终期合成会缺数据源（40914）；
@@ -23,9 +24,8 @@ import java.math.BigDecimal;
 public class PaperCheckSignoffReq {
 
     /**
-     * 论文ID（关联paper_info.id）
+     * 论文ID（关联paper_info.id），由控制器从路径变量注入，请求体无需传
      */
-    @NotNull(message = "论文ID不能为空")
     @JsonFormat(shape = JsonFormat.Shape.STRING)
     private Long paperId;
 
