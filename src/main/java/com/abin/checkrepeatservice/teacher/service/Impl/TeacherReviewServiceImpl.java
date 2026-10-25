@@ -4,8 +4,10 @@ import com.abin.checkrepeatservice.admin.service.ReviewWorkflowService;
 import com.abin.checkrepeatservice.admin.vo.ReviewWorkflowVO;
 import com.abin.checkrepeatservice.common.Exception.BusinessException;
 import com.abin.checkrepeatservice.common.Result;
+import com.abin.checkrepeatservice.common.component.PaperStageGate;
 import com.abin.checkrepeatservice.common.constant.DictConstants;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
+import com.abin.checkrepeatservice.common.service.BlindReviewCopyService;
 import com.abin.checkrepeatservice.mapper.SysUserMapper;
 import com.abin.checkrepeatservice.monitor.service.BusinessMetricsService;
 import com.abin.checkrepeatservice.pojo.entity.*;
@@ -18,6 +20,7 @@ import com.abin.checkrepeatservice.teacher.dto.ReviewOperateReq;
 import com.abin.checkrepeatservice.teacher.dto.ReviewQueryReq;
 import com.abin.checkrepeatservice.teacher.dto.ReviewResultDTO;
 import com.abin.checkrepeatservice.teacher.mapper.PaperCheckSignoffMapper;
+import com.abin.checkrepeatservice.teacher.mapper.ReviewAssignmentMapper;
 import com.abin.checkrepeatservice.teacher.mapper.ReviewRecordMapper;
 import com.abin.checkrepeatservice.teacher.service.TeacherReviewService;
 import com.abin.checkrepeatservice.teacher.vo.PendingStatsVO;
@@ -35,6 +38,8 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
@@ -52,6 +57,7 @@ import java.math.RoundingMode;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
@@ -70,7 +76,7 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
 
     // M2.2 阶段门收口：论文状态流转统一校验（默认影子模式，只告警不阻断）
     @Resource
-    private com.abin.checkrepeatservice.common.component.PaperStageGate paperStageGate;
+    private PaperStageGate paperStageGate;
 
     @Resource
     private CheckTaskMapper checkTaskMapper;
@@ -99,15 +105,21 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
     @Resource
     private InstantMessageService instantMessageService;
 
-    /**
-     * P2 接线：多级初审工作流配置（单行配置表）。导师初审通过后按此决定
-     * 是直接 completed（既有单轮行为）还是进入多级初审链条。
-     */
     @Resource
     private ReviewWorkflowService reviewWorkflowService;
 
     @Resource
     private PaperCheckSignoffMapper paperCheckSignoffMapper;
+
+    @Resource
+    private ReviewAssignmentMapper reviewAssignmentMapper;
+
+    @Resource
+    private BlindReviewCopyService blindReviewCopyService;
+
+    /** 审核附件存储根目录（与 ReviewAttachUtils 同一配置项，用于下载时的路径越界校验） */
+    @Value("${review.attach.base-path:/data/review-attach/}")
+    private String reviewAttachBasePath;
 
     // 批量审核最大数量（从配置文件获取）
     @Value("${review.batch.max-count}")
@@ -394,14 +406,19 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
     public Result<ReviewResultDTO> getReviewDetail(@RequestParam("paperId") Long paperId) {
         Long currentTeacherId = UserBusinessInfoUtils.getCurrentUserId();
 
-        // 1. 校验论文合法性与权限
+        // 1. 校验论文合法性
         PaperInfo paperInfo = paperInfoMapper.selectById(paperId);
         if (paperInfo == null || paperInfo.getIsDeleted() == 1) {
             return Result.error(ResultCode.RESOURCE_NOT_FOUND, "论文不存在或已删除");
         }
-//        if (!paperInfo.getTeacherId().equals(currentTeacherId) && !UserBusinessInfoUtils.isAdmin()) {
-//            return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权限查看他人指导论文的审核详情");
-//        }
+        // 安全修复（P0）：原归属校验被注释掉，任何教师传 paperId 即可读取他人论文的
+        // 评阅详情（学生姓名/学号、查重指标、审核意见）。现按
+        // “指导教师 / 被分配的评阅教师（未超时转派） / 管理员”重新收口。
+        ReviewAccess access = resolveReviewAccess(paperInfo, currentTeacherId);
+        if (!access.allowed()) {
+            log.warn("评阅详情越权访问拦截 - paperId: {}, teacherId: {}", paperId, currentTeacherId);
+            throw new BusinessException(ResultCode.PERMISSION_NO_ACCESS, "无权查看该论文的评阅详情", null);
+        }
 
         // 2. 转换为DTO
         List<ReviewResultDTO> dtoList = convertToReviewResultDTOList(Collections.singletonList(paperInfo));
@@ -409,30 +426,79 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
             return Result.error(ResultCode.RESOURCE_NOT_FOUND, "未找到该论文的审核记录");
         }
 
-        return Result.success("审核详情查询成功", dtoList.get(0));
+        ReviewResultDTO detail = dtoList.get(0);
+        // 3. 盲审评阅人只返回匿名视图（与 /api/papers/detail 同一口径）
+        if (access.maskIdentity()) {
+            log.info("盲审评阅详情已脱敏 - paperId: {}, reviewerId: {}", paperId, currentTeacherId);
+            maskBlindReviewIdentity(detail);
+        }
+        return Result.success("审核详情查询成功", detail);
+    }
+
+    /** 评阅详情访问决策：是否放行、是否需要盲审脱敏 */
+    private record ReviewAccess(boolean allowed, boolean maskIdentity) {
+    }
+
+    /**
+     * 评阅详情访问策略：指导教师 / 被分配的评阅教师 / 管理员。
+     *
+     * <p>评阅教师来自 {@code review_assignment}：只看 {@code paper.teacher_id} 会把
+     * 交叉评阅、盲审教师挡在门外。已超时转派（status=3）的任务不再授权。</p>
+     *
+     * <p>盲审脱敏：仅当该教师对该论文的全部有效任务都是盲审时才脱敏；
+     * 若同时还有交叉评阅等实名任务，说明其本就实名可见，不脱敏。</p>
+     */
+    private ReviewAccess resolveReviewAccess(PaperInfo paper, Long currentTeacherId) {
+        if (currentTeacherId == null) {
+            return new ReviewAccess(false, false);
+        }
+        if (UserBusinessInfoUtils.isAdmin()) {
+            return new ReviewAccess(true, false);
+        }
+        if (Objects.equals(paper.getTeacherId(), currentTeacherId)) {
+            return new ReviewAccess(true, false);
+        }
+        List<ReviewAssignment> activeAssignments = reviewAssignmentMapper.selectList(
+                new LambdaQueryWrapper<ReviewAssignment>()
+                        .eq(ReviewAssignment::getPaperId, paper.getId())
+                        .eq(ReviewAssignment::getReviewerId, currentTeacherId)
+                        .ne(ReviewAssignment::getStatus, ReviewAssignment.STATUS_TIMEOUT));
+        if (activeAssignments.isEmpty()) {
+            return new ReviewAccess(false, false);
+        }
+        boolean onlyBlind = activeAssignments.stream()
+                .allMatch(a -> ReviewAssignment.TYPE_BLIND.equals(a.getReviewType()));
+        return new ReviewAccess(true, onlyBlind);
+    }
+
+    /**
+     * 盲审匿名视图：清空评阅 DTO 里可定位作者的身份字段。
+     *
+     * <p>学号/邮箱/学院都能反向定位到具体学生，必须与姓名一起清空；
+     * 论文标题、查重指标等评阅所需信息保留。</p>
+     */
+    private void maskBlindReviewIdentity(ReviewResultDTO detail) {
+        ReviewResultDTO.PaperBaseInfoDTO base = detail.getPaperBaseInfo();
+        if (base == null) {
+            return;
+        }
+        base.setStudentName(null);
+        base.setStudentNo(null);
+        base.setEmail(null);
+        base.setCollege(null);
     }
 
     @Override
     public void downloadReviewAttach(@RequestParam("attachPath") String attachPath, HttpServletResponse response) {
-        // 1. 校验附件路径合法性
-        if (attachPath == null || attachPath.trim().isEmpty()) {
-            throw new BusinessException(ResultCode.PARAM_EMPTY, "附件路径不能为空");
-        }
-        // 校验路径是否为审核附件目录（防路径遍历攻击）
-        if (!attachPath.startsWith("/data/review-attach/")) {
-            throw new BusinessException(ResultCode.PARAM_FORMAT_ERROR, "附件路径不合法");
-        }
+        // 1. 校验路径：必须落在 review.attach.base-path 内，且阻断 ../ 与符号链接逃逸
+        Path filePath = resolveReviewAttachPath(attachPath);
 
-        // 2. 读取附件文件
-        java.nio.file.Path filePath = java.nio.file.Paths.get(attachPath);
-        if (!Files.exists(filePath) || Files.isDirectory(filePath)) {
-            throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "审核附件不存在或已删除");
-        }
-
-        // 3. 设置响应头（触发下载）
+        // 2. 设置响应头（触发下载）
         try {
-            // 获取附件原文件名（从审核记录中查询，此处简化为从路径提取）
-            String fileName = "审核附件." + attachPath.substring(attachPath.lastIndexOf(".") + 1);
+            String resolvedName = filePath.getFileName().toString();
+            String extension = resolvedName.contains(".")
+                    ? resolvedName.substring(resolvedName.lastIndexOf('.') + 1) : "dat";
+            String fileName = "审核附件." + extension;
             // 处理中文文件名编码
             String encodedFileName = URLEncoder.encode(fileName, StandardCharsets.UTF_8.name());
 
@@ -442,7 +508,7 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
                     "attachment; filename=\"" + encodedFileName + "\"; filename*=UTF-8''" + encodedFileName);
             response.setHeader("Content-Length", String.valueOf(Files.size(filePath)));
 
-            // 4. 输出文件流
+            // 3. 输出文件流
             try (InputStream in = Files.newInputStream(filePath);
                  OutputStream out = response.getOutputStream()) {
                 byte[] buffer = new byte[1024];
@@ -456,7 +522,78 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
 
         } catch (IOException e) {
             log.error("审核附件下载失败（路径：{}）：", attachPath, e);
-            throw new BusinessException(ResultCode.SYSTEM_ERROR, "附件下载异常，请重试");
+            throw new BusinessException(ResultCode.SYSTEM_ERROR, "附件下载异常，请重试", null);
+        }
+    }
+
+    /**
+     * 解析并校验审核附件路径。
+     *
+     * <p>安全修复（P0）：原实现只做 {@code startsWith("/data/review-attach/")} 字符串判断，
+     * 传入 {@code /data/review-attach/../../etc/passwd} 即可读任意文件。现在：</p>
+     * <ol>
+     *   <li>规范化后必须仍在配置的附件根目录内（阻断 ../）；</li>
+     *   <li>必须是已存在的普通文件；</li>
+     *   <li>解析符号链接后再校验一次（阻断软链逃逸）。</li>
+     * </ol>
+     */
+    private Path resolveReviewAttachPath(String attachPath) {
+        if (attachPath == null || attachPath.trim().isEmpty()) {
+            throw new BusinessException(ResultCode.PARAM_EMPTY, "附件路径不能为空", null);
+        }
+        Path base = Paths.get(reviewAttachBasePath).toAbsolutePath().normalize();
+        Path target = Paths.get(attachPath.trim()).toAbsolutePath().normalize();
+        if (!target.startsWith(base)) {
+            log.warn("审核附件路径越界拦截 - attachPath: {}", attachPath);
+            throw new BusinessException(ResultCode.PARAM_FORMAT_ERROR, "附件路径不合法", null);
+        }
+        if (!Files.exists(target) || Files.isDirectory(target)) {
+            throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "审核附件不存在或已删除", null);
+        }
+        try {
+            Path realFile = target.toRealPath();
+            if (!realFile.startsWith(base.toRealPath())) {
+                log.warn("审核附件符号链接越界拦截 - attachPath: {}", attachPath);
+                throw new BusinessException(ResultCode.PARAM_FORMAT_ERROR, "附件路径不合法", null);
+            }
+            return realFile;
+        } catch (IOException e) {
+            log.warn("审核附件路径解析失败 - attachPath: {}, 原因: {}", attachPath, e.getMessage());
+            throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "审核附件不存在或已删除", null);
+        }
+    }
+
+    @Override
+    public void writeBlindDocument(Long paperId, HttpServletResponse response) {
+        Long currentTeacherId = UserBusinessInfoUtils.getCurrentUserId();
+
+        PaperInfo paperInfo = paperInfoMapper.selectById(paperId);
+        if (paperInfo == null || Integer.valueOf(1).equals(paperInfo.getIsDeleted())) {
+            throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "论文不存在或已删除", null);
+        }
+        // 与评阅详情同一访问口径：指导教师 / 被分配的评阅教师 / 管理员
+        if (!resolveReviewAccess(paperInfo, currentTeacherId).allowed()) {
+            log.warn("盲审副本越权访问拦截 - paperId: {}, teacherId: {}", paperId, currentTeacherId);
+            throw new BusinessException(ResultCode.PERMISSION_NO_ACCESS, "无权查看该论文", null);
+        }
+
+        // 无论调用者是导师还是评阅人，本端点只输出匿名副本，避免原文件泄漏身份
+        Path blindFile = blindReviewCopyService.getOrCreate(paperInfo);
+        try {
+            response.setContentType(MediaType.APPLICATION_PDF_VALUE);
+            response.setHeader(HttpHeaders.CONTENT_DISPOSITION,
+                    "inline; filename=\"blind-paper-" + paperId + ".pdf\"");
+            response.setContentLengthLong(Files.size(blindFile));
+
+            try (InputStream in = Files.newInputStream(blindFile);
+                 OutputStream out = response.getOutputStream()) {
+                in.transferTo(out);
+                out.flush();
+            }
+            log.info("盲审副本获取成功 - paperId: {}, teacherId: {}", paperId, currentTeacherId);
+        } catch (IOException e) {
+            log.error("盲审副本输出失败 - paperId: {}", paperId, e);
+            throw new BusinessException(ResultCode.SYSTEM_ERROR, "盲审副本下载失败，请稍后重试", null);
         }
     }
 
@@ -470,15 +607,19 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
         if (paperInfo == null || paperInfo.getIsDeleted() == 1) {
             return Result.error(ResultCode.RESOURCE_NOT_FOUND, "论文不存在或已删除");
         }
-        // 仅审核不通过的论文可重新发起审核
-//        if (paperInfo.getPaperStatus() != 4) {
-//            return Result.error(ResultCode.PERMISSION_NOT_STATUS,
-//                    String.format("仅审核不通过（状态4）的论文可重新发起审核，当前状态：%s", getPaperStatusDesc(paperInfo.getPaperStatus())));
-//        }
-//        // 校验权限（仅指导教师或管理员可操作）
-//        if (!paperInfo.getTeacherId().equals(currentTeacherId) && !UserBusinessInfoUtils.isAdmin()) {
-//            return Result.error(ResultCode.PERMISSION_NO_ACCESS, "无权限重新发起他人指导论文的审核");
-//        }
+        // 重新发起审核是写操作，只允许指导教师或管理员（评阅教师不可以）。
+        if (!Objects.equals(paperInfo.getTeacherId(), currentTeacherId)
+                && !UserBusinessInfoUtils.isAdmin()) {
+            log.warn("重新发起审核越权拦截 - paperId: {}, teacherId: {}", paperId, currentTeacherId);
+            throw new BusinessException(ResultCode.PERMISSION_NO_ACCESS,
+                    "无权重新发起他人指导论文的审核", null);
+        }
+
+        if (!DictConstants.PaperStatus.REJECTED.equals(paperInfo.getPaperStatus())) {
+            throw new BusinessException(ResultCode.PERMISSION_NOT_STATUS,
+                    "当前论文状态（" + paperInfo.getPaperStatus()
+                            + "）不允许重新发起审核，仅初审不通过（rejected）可操作", null);
+        }
 
         // 2. 更新论文状态为“待审核”
         PaperInfo updatePaper = new PaperInfo();
@@ -962,8 +1103,11 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
             if (paperInfo == null || Integer.valueOf(1).equals(paperInfo.getIsDeleted())) {
                 return Result.error(ResultCode.PARAM_ERROR, "论文不存在");
             }
-            if (!paperInfo.getTeacherId().equals(teacherId)) {
-                return Result.error(ResultCode.PARAM_ERROR, "无权限访问此论文");
+            // 安全修复（P0）：原先只允许指导教师，评阅教师（交叉评阅/盲审）看不到历史。
+            // 现复用统一访问决策；该 DTO 不含作者身份字段，无需额外脱敏。
+            if (!resolveReviewAccess(paperInfo, teacherId).allowed()) {
+                log.warn("审核历史越权访问拦截 - paperId: {}, teacherId: {}", paperId, teacherId);
+                throw new BusinessException(ResultCode.PERMISSION_NO_ACCESS, "无权访问此论文的审核历史", null);
             }
 
             LambdaQueryWrapper<ReviewRecord> queryWrapper = new LambdaQueryWrapper<>();
@@ -1007,6 +1151,9 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
             historyDTO.setHistory(historyRecords);
 
             return Result.success("获取审核历史成功", historyDTO);
+        } catch (BusinessException e) {
+            // 权限/状态类业务异常原样抛出，交给全局异常处理器返回对应 HTTP 状态码
+            throw e;
         } catch (Exception e) {
             log.error("获取论文审核历史失败: paperId={}", paperId, e);
             return Result.error(ResultCode.SYSTEM_ERROR, "获取审核历史失败: 系统异常，请稍后重试");

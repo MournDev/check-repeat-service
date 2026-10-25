@@ -88,4 +88,12 @@ public interface TeacherReviewService extends IService<ReviewRecord> {
      * @return 审核历史
      */
     Result<PaperReviewHistoryDTO> getPaperReviewHistory(Long paperId);
+
+    /**
+     * 11. 输出盲审专用副本（已匿名化的 PDF，供评阅人查看，不暴露作者信息）
+     *
+     * @param paperId 论文ID
+     * @param response HTTP 响应（直接写入 PDF 流）
+     */
+    void writeBlindDocument(Long paperId, HttpServletResponse response);
 }

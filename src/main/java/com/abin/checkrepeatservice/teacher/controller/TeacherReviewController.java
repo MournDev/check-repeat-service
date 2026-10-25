@@ -159,4 +159,13 @@ public class TeacherReviewController {
     public Result<PaperReviewHistoryDTO> getPaperReviewHistory(@PathVariable("paperId") Long paperId) {
         return teacherReviewService.getPaperReviewHistory(paperId);
     }
+
+    /**
+     * 11. 盲审专用副本（文档级去标识化后的 PDF，供评阅人直接 iframe 预览）
+     */
+    @GetMapping("/blind-document")
+    public void getBlindDocument(@RequestParam("paperId") Long paperId,
+                                 HttpServletResponse response) {
+        teacherReviewService.writeBlindDocument(paperId, response);
+    }
 }
