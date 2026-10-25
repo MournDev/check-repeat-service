@@ -5,6 +5,8 @@ import com.abin.checkrepeatservice.admin.dto.MonthlyTrendVO;
 import com.abin.checkrepeatservice.admin.dto.SimilarityDistributionVO;
 import com.abin.checkrepeatservice.admin.service.AdminStatReportService;
 import com.abin.checkrepeatservice.common.Result;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
@@ -25,6 +27,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/admin/stat-report")
 @PreAuthorize("hasAuthority('ADMIN')")
+@Tag(name = "全校统计报表", description = "查重结果分布/学院对比/月度趋势/报表导出")
 public class AdminStatReportController {
 
     @Resource
@@ -33,6 +36,7 @@ public class AdminStatReportController {
     /**
      * 查重结果分布（repeat_rate 十分桶计数，0-10/10-20/.../90-100）
      */
+    @Operation(summary = "查询查重结果分布", description = "按 repeat_rate 十分桶统计查重结果分布")
     @GetMapping("/similarity-distribution")
     public Result<List<SimilarityDistributionVO>> getSimilarityDistribution() {
         return adminStatReportService.getSimilarityDistribution();
@@ -41,6 +45,7 @@ public class AdminStatReportController {
     /**
      * 按学院统计（平均相似度 + 论文数，college_id 为 NULL 归"未分配"）
      */
+    @Operation(summary = "按学院统计", description = "统计各学院平均相似度与论文数")
     @GetMapping("/college-compare")
     public Result<List<CollegeCompareVO>> getCollegeCompare() {
         return adminStatReportService.getCollegeCompare();
@@ -49,6 +54,7 @@ public class AdminStatReportController {
     /**
      * 月度趋势（最近 12 个月查重次数与平均重复率）
      */
+    @Operation(summary = "查询月度趋势", description = "统计最近 12 个月查重次数与平均重复率")
     @GetMapping("/monthly-trend")
     public Result<List<MonthlyTrendVO>> getMonthlyTrend() {
         return adminStatReportService.getMonthlyTrend();
@@ -57,6 +63,7 @@ public class AdminStatReportController {
     /**
      * 导出报表（EasyExcel 一个 xlsx，含"查重结果分布/学院对比/月度趋势"三个 sheet）
      */
+    @Operation(summary = "导出统计报表", description = "导出含查重结果分布/学院对比/月度趋势三个 sheet 的 xlsx")
     @GetMapping("/export")
     public void exportStatReport(HttpServletResponse response) {
         adminStatReportService.exportStatReport(response);

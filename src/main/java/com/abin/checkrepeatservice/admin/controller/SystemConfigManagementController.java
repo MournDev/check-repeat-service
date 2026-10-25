@@ -8,6 +8,9 @@ import com.abin.checkrepeatservice.pojo.entity.SystemConfig;
 import com.abin.checkrepeatservice.user.service.Impl.EmailService;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONWriter;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
@@ -34,6 +37,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/admin/system/config")
 @PreAuthorize("hasAuthority('ADMIN')")
+@Tag(name = "系统配置管理", description = "系统配置项的查询、更新、导出与恢复默认")
 public class SystemConfigManagementController {
 
     @Resource
@@ -46,6 +50,7 @@ public class SystemConfigManagementController {
      * 1. 获取所有系统配置
      * 用途：初始化页面时加载所有配置项
      */
+    @Operation(summary = "获取所有系统配置", description = "加载基础、查重、安全、邮件与性能配置")
     @GetMapping
     public Result<Map<String, Object>> getAllConfig() {
         log.info("接收获取所有系统配置请求");
@@ -80,10 +85,11 @@ public class SystemConfigManagementController {
      * 2. 更新基础配置
      * 用途：保存基础配置项（系统名称、语言、时区等）
      */
+    @Operation(summary = "更新基础配置", description = "保存系统名称、语言、时区等基础配置项")
     @PutMapping("/basic")
     @OperationLog(type = "config_basic_update", description = "更新基础配置")
     @PreAuthorize("hasAuthority('SUPER_ADMIN')")
-    public Result<String> updateBasicConfig(@RequestBody Map<String, Object> config) {
+    public Result<String> updateBasicConfig(@Parameter(description = "基础配置项", required = true) @RequestBody Map<String, Object> config) {
         log.info("接收更新基础配置请求: {}", config);
         saveConfig("system_basic", config, "系统基础配置");
         log.info("基础配置更新成功");
@@ -94,10 +100,11 @@ public class SystemConfigManagementController {
      * 3. 更新查重配置
      * 用途：保存查重相关配置（阈值、算法、缓存等）
      */
+    @Operation(summary = "更新查重配置", description = "保存阈值、算法、缓存等查重配置项")
     @PutMapping("/plagiarism")
     @OperationLog(type = "config_plagiarism_update", description = "更新查重配置")
     @PreAuthorize("hasAuthority('SUPER_ADMIN')")
-    public Result<String> updatePlagiarismConfig(@RequestBody Map<String, Object> config) {
+    public Result<String> updatePlagiarismConfig(@Parameter(description = "查重配置项", required = true) @RequestBody Map<String, Object> config) {
         log.info("接收更新查重配置请求: {}", config);
         saveConfig("plagiarism_config", config, "查重配置");
         log.info("查重配置更新成功");
@@ -108,10 +115,11 @@ public class SystemConfigManagementController {
      * 4. 更新安全配置
      * 用途：保存安全相关配置（密码策略、登录限制等）
      */
+    @Operation(summary = "更新安全配置", description = "保存密码策略、登录限制等安全配置项")
     @PutMapping("/security")
     @OperationLog(type = "config_security_update", description = "更新安全配置")
     @PreAuthorize("hasAuthority('SUPER_ADMIN')")
-    public Result<String> updateSecurityConfig(@RequestBody Map<String, Object> config) {
+    public Result<String> updateSecurityConfig(@Parameter(description = "安全配置项", required = true) @RequestBody Map<String, Object> config) {
         log.info("接收更新安全配置请求: {}", config);
         saveConfig("security_config", config, "安全配置");
         log.info("安全配置更新成功");
@@ -122,10 +130,11 @@ public class SystemConfigManagementController {
      * 5. 更新邮件配置
      * 用途：保存邮件服务器配置
      */
+    @Operation(summary = "更新邮件配置", description = "保存邮件服务器配置")
     @PutMapping("/email")
     @OperationLog(type = "config_email_update", description = "更新邮件配置")
     @PreAuthorize("hasAuthority('SUPER_ADMIN')")
-    public Result<String> updateEmailConfig(@RequestBody Map<String, Object> config) {
+    public Result<String> updateEmailConfig(@Parameter(description = "邮件配置项", required = true) @RequestBody Map<String, Object> config) {
         log.info("接收更新邮件配置请求: {}", config);
         saveConfig("email_config", config, "邮件配置");
         log.info("邮件配置更新成功");
@@ -136,10 +145,11 @@ public class SystemConfigManagementController {
      * 6. 更新性能配置
      * 用途：保存性能相关配置（并发数、缓存策略等）
      */
+    @Operation(summary = "更新性能配置", description = "保存并发数、缓存策略等性能配置项")
     @PutMapping("/performance")
     @OperationLog(type = "config_performance_update", description = "更新性能配置")
     @PreAuthorize("hasAuthority('SUPER_ADMIN')")
-    public Result<String> updatePerformanceConfig(@RequestBody Map<String, Object> config) {
+    public Result<String> updatePerformanceConfig(@Parameter(description = "性能配置项", required = true) @RequestBody Map<String, Object> config) {
         log.info("接收更新性能配置请求: {}", config);
         saveConfig("performance", config, "性能配置");
         log.info("性能配置更新成功");
@@ -150,10 +160,11 @@ public class SystemConfigManagementController {
      * 7. 保存全部配置接口
      * 用途：批量保存所有配置项
      */
+    @Operation(summary = "保存全部配置", description = "批量保存所有配置项")
     @PostMapping("/save-all")
     @OperationLog(type = "config_save_all", description = "保存全部配置", recordResult = true)
     @PreAuthorize("hasAuthority('SUPER_ADMIN')")
-    public Result<String> saveAllConfig(@RequestBody Map<String, Object> allConfig) {
+    public Result<String> saveAllConfig(@Parameter(description = "按分组组织的全部配置项", required = true) @RequestBody Map<String, Object> allConfig) {
         log.info("接收保存全部配置请求");
         // 保存各个配置项
         if (allConfig.containsKey("basicConfig")) {
@@ -184,10 +195,11 @@ public class SystemConfigManagementController {
      * 8. 测试邮件配置接口
      * 用途：验证邮件配置是否正确（仅超级管理员：借全局 SMTP 发信）
      */
+    @Operation(summary = "测试邮件配置", description = "验证邮件配置是否正确（仅超级管理员）")
     @PostMapping("/test-email")
     @PreAuthorize("hasAuthority('SUPER_ADMIN')")
     @OperationLog(type = "config_email_test", description = "管理员发送测试邮件")
-    public Result<String> testEmailConfig(@RequestBody Map<String, String> request) {
+    public Result<String> testEmailConfig(@Parameter(description = "测试邮件收件人：recipientEmail 或 testEmail", required = true) @RequestBody Map<String, String> request) {
         // 兼容两套前端字段名：系统配置页用 recipientEmail，规则配置页用 testEmail
         String recipientEmail = request.get("recipientEmail");
         if (recipientEmail == null || recipientEmail.isEmpty()) {
@@ -215,6 +227,7 @@ public class SystemConfigManagementController {
      * 用途：将当前配置导出为JSON文件（仅超级管理员：导出物含密钥类敏感项）
      * 路径：/api/admin/system/config/export
      */
+    @Operation(summary = "导出配置", description = "将当前配置导出为JSON文件（仅超级管理员）")
     @GetMapping("/export")
     @PreAuthorize("hasAuthority('SUPER_ADMIN')")
     public void exportConfig(HttpServletResponse response) {
@@ -255,6 +268,7 @@ public class SystemConfigManagementController {
      * 10. 恢复默认配置接口
      * 用途：将所有配置恢复到系统默认值（仅超级管理员：会清空全部存量配置）
      */
+    @Operation(summary = "恢复默认配置", description = "将所有配置恢复到系统默认值（仅超级管理员）")
     @PostMapping("/reset-default")
     @PreAuthorize("hasAuthority('SUPER_ADMIN')")
     @OperationLog(type = "config_reset_default", description = "管理员恢复默认配置")
@@ -274,6 +288,7 @@ public class SystemConfigManagementController {
      * 11. 刷新配置接口
      * 用途：强制刷新系统配置缓存（仅超级管理员：影响全局运行时）
      */
+    @Operation(summary = "刷新配置", description = "强制刷新系统配置缓存（仅超级管理员）")
     @PostMapping("/refresh")
     @PreAuthorize("hasAuthority('SUPER_ADMIN')")
     public Result<Map<String, Object>> refreshConfig() {

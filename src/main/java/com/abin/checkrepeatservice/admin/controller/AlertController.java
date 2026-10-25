@@ -10,6 +10,9 @@ import com.abin.checkrepeatservice.pojo.entity.AlertRecord;
 import com.abin.checkrepeatservice.pojo.entity.AlertRule;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
@@ -33,6 +36,7 @@ import java.util.Map;
 @RequestMapping("/api/admin/alerts")
 @PreAuthorize("hasAuthority('ADMIN')")
 @Slf4j
+@Tag(name = "预警管理", description = "基于真实监控指标的预警配置、活跃预警查询与处理")
 public class AlertController {
 
     private static final String STATUS_ACTIVE = "ACTIVE";
@@ -51,6 +55,7 @@ public class AlertController {
     /**
      * 获取智能预警配置（数据库无规则时返回内置默认阈值）
      */
+    @Operation(summary = "获取智能预警配置", description = "数据库无规则时返回内置默认阈值")
     @GetMapping("/config")
     public Result<Map<String, Object>> getAlertConfig() {
         Map<String, Object> config = new HashMap<>();
@@ -72,9 +77,10 @@ public class AlertController {
     /**
      * 更新智能预警配置（整体覆盖：未出现在 rules 中的旧规则会被禁用）
      */
+    @Operation(summary = "更新智能预警配置", description = "整体覆盖：未出现在 rules 中的旧规则会被禁用")
     @PutMapping("/config")
     @Transactional(rollbackFor = Exception.class)
-    public Result<String> updateAlertConfig(@RequestBody Map<String, Object> config) {
+    public Result<String> updateAlertConfig(@Parameter(description = "预警配置：enabled 开关与 rules 规则列表", required = true) @RequestBody Map<String, Object> config) {
         if (config == null) {
             return Result.error(ResultCode.PARAM_ERROR, "预警配置不能为空");
         }
@@ -107,6 +113,7 @@ public class AlertController {
     /**
      * 获取当前活跃预警：先按实时指标评估规则，再返回 ACTIVE 记录
      */
+    @Operation(summary = "获取当前活跃预警", description = "先按实时指标评估规则，再返回 ACTIVE 记录")
     @GetMapping("/active")
     public Result<List<ActiveAlertVO>> getActiveAlerts() {
         // 页面读取时主动评估一次（定时任务每 5 分钟已评估，这里作为兜底）
@@ -132,8 +139,9 @@ public class AlertController {
     /**
      * 标记预警为已处理（落库为 RESOLVED）
      */
+    @Operation(summary = "处理预警", description = "将预警标记为已处理并落库为 RESOLVED")
     @PostMapping("/handle")
-    public Result<String> handleAlert(@RequestBody HandleAlertReq req) {
+    public Result<String> handleAlert(@Parameter(description = "预警处理请求体：预警ID、处理动作与备注", required = true) @RequestBody HandleAlertReq req) {
         Long alertId = parseId(req.getAlertId());
         if (alertId == null) {
             return Result.error(ResultCode.PARAM_ERROR, "预警ID不合法");

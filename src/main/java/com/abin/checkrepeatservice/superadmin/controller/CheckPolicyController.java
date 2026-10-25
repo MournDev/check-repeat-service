@@ -9,6 +9,9 @@ import com.abin.checkrepeatservice.superadmin.dto.CheckPolicySaveReq;
 import com.abin.checkrepeatservice.superadmin.dto.CheckPolicyVO;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import jakarta.annotation.Resource;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -30,6 +33,7 @@ import java.util.stream.Collectors;
 @RestController
 @RequestMapping("/api/super/check-policy")
 @PreAuthorize("hasAuthority('SUPER_ADMIN')")
+@Tag(name = "检测策略集", description = "按学位类型维护检测策略")
 public class CheckPolicyController {
 
     @Resource
@@ -43,6 +47,7 @@ public class CheckPolicyController {
     /**
      * 全部策略列表（按 degreeType 排序）
      */
+    @Operation(summary = "全部策略列表", description = "按 degreeType 排序返回全部检测策略")
     @GetMapping("/list")
     public Result<List<CheckPolicyVO>> list() {
         List<CheckPolicy> policies = checkPolicyMapper.selectList(
@@ -56,9 +61,10 @@ public class CheckPolicyController {
     /**
      * 新增或按 degreeType 更新策略
      */
+    @Operation(summary = "新增或更新策略", description = "按 degreeType 新增或更新检测策略")
     @PostMapping("/save")
     @OperationLog(type = "check_policy_save", description = "保存检测策略")
-    public Result<String> save(@RequestBody CheckPolicySaveReq req) {
+    public Result<String> save(@Parameter(description = "检测策略保存请求体", required = true) @RequestBody CheckPolicySaveReq req) {
         // ---- 参数校验（失败走 PARAM_* 错误码，不进写库分支）----
         if (req == null || req.getDegreeType() == null || req.getDegreeType().isBlank()) {
             return Result.error(ResultCode.PARAM_EMPTY, "degreeType 不能为空");
@@ -112,9 +118,10 @@ public class CheckPolicyController {
     /**
      * 按 ID 删除策略（BaseEntity @TableLogic 软删除）
      */
+    @Operation(summary = "删除策略", description = "按 ID 逻辑删除检测策略")
     @DeleteMapping("/{id}")
     @OperationLog(type = "check_policy_delete", description = "删除检测策略")
-    public Result<String> delete(@PathVariable Long id) {
+    public Result<String> delete(@Parameter(description = "策略ID", required = true) @PathVariable Long id) {
         CheckPolicy existing = checkPolicyMapper.selectById(id);
         if (existing == null) {
             return Result.error(ResultCode.RESOURCE_NOT_FOUND, "策略不存在");

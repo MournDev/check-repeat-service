@@ -5,6 +5,9 @@ import com.abin.checkrepeatservice.pojo.entity.CheckReport;
 import com.abin.checkrepeatservice.student.dto.ReportPreviewDTO;
 import com.abin.checkrepeatservice.student.service.CheckReportService;
 import com.abin.checkrepeatservice.student.vo.ReportDownloadReq;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
@@ -17,6 +20,7 @@ import java.util.List;
  */
 @RestController
 @RequestMapping("/api/student/reports")
+@Tag(name = "学生查重报告模块", description = "查重报告预览、下载与历史报告管理接口")
 public class StudentReportController {
 
     @Resource
@@ -27,7 +31,9 @@ public class StudentReportController {
      * @param reportId 报告ID
      */
     @GetMapping("/preview")
-    public Result<ReportPreviewDTO> previewReport(@RequestParam Long reportId) {
+    @Operation(summary = "预览报告详情")
+    public Result<ReportPreviewDTO> previewReport(
+            @Parameter(description = "报告ID", required = true) @RequestParam Long reportId) {
         return checkReportService.previewReport(reportId);
     }
 
@@ -37,8 +43,9 @@ public class StudentReportController {
      * @param response HTTP响应（输出文件流）
      */
     @PostMapping("/download")
+    @Operation(summary = "下载报告文件")
     public void downloadReport(
-            @Valid @RequestBody ReportDownloadReq downloadReq,
+            @Parameter(description = "下载请求参数（reportId、format）", required = true) @Valid @RequestBody ReportDownloadReq downloadReq,
             HttpServletResponse response) {
         checkReportService.downloadReport(downloadReq, response);
     }
@@ -48,8 +55,9 @@ public class StudentReportController {
      * @param paperId 论文ID（可选，筛选指定论文的报告）
      */
     @GetMapping("/list")
+    @Operation(summary = "查询我的历史报告列表", description = "可按论文筛选报告")
     public Result<List<CheckReport>> getMyReportList(
-            @RequestParam(required = false) Long paperId) {
+            @Parameter(description = "论文ID（可选，筛选指定论文的报告）") @RequestParam(required = false) Long paperId) {
         return checkReportService.getMyReportList(paperId);
     }
 
@@ -58,7 +66,9 @@ public class StudentReportController {
      * @param reportId 报告ID
      */
     @DeleteMapping("/nocheck")
-    public Result<String> deleteReport(@RequestParam Long reportId) {
+    @Operation(summary = "删除未审核的报告")
+    public Result<String> deleteReport(
+            @Parameter(description = "报告ID", required = true) @RequestParam Long reportId) {
         return checkReportService.deleteReport(reportId);
     }
 }

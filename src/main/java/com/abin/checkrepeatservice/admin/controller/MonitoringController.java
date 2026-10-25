@@ -9,6 +9,7 @@ import com.abin.checkrepeatservice.monitor.service.ResponseTimeStore;
 import com.abin.checkrepeatservice.monitor.service.SystemMonitorService;
 import com.abin.checkrepeatservice.monitor.service.DatabaseMonitorService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -130,7 +131,9 @@ public class MonitoringController {
     @GetMapping("/performance")
     @Operation(summary = "系统性能监控", description = "获取CPU、内存、磁盘、数据库等历史性能趋势（分钟采样落库）")
     public Result<Map<String, Object>> getPerformanceData(
+            @Parameter(description = "指标类型：cpu/memory/disk/database/all，默认 all")
             @RequestParam(defaultValue = "all") String metric,
+            @Parameter(description = "统计周期：1h/24h/7d，默认 1h")
             @RequestParam(defaultValue = "1h") String period) {
 
         log.info("接收获取系统性能监控数据请求: metric={}, period={}", metric, period);
@@ -264,6 +267,7 @@ public class MonitoringController {
     @GetMapping("/response-time-trend")
     @Operation(summary = "响应时间趋势", description = "获取最近N分钟按分钟聚合的平均/最小/最大/P95/P99响应时间与请求数")
     public Result<Map<String, Object>> getResponseTimeTrend(
+            @Parameter(description = "统计最近 N 分钟的响应时间，默认 15")
             @RequestParam(value = "minutes", defaultValue = "15") Integer minutes) {
 
         log.info("接收获取响应时间趋势请求: minutes={}", minutes);
@@ -292,6 +296,7 @@ public class MonitoringController {
     @GetMapping("/response-times")
     @Operation(summary = "API响应时间统计", description = "获取API平均响应时间、最小/最大响应时间、95百分位响应时间等详细指标")
     public Result<Map<String, Object>> getApiResponseTimes(
+            @Parameter(description = "统计周期，默认 1h（实际受采集窗口限制）")
             @RequestParam(defaultValue = "1h") String period) {
 
         log.info("接收获取API响应时间统计请求: period={}（实际受采集窗口限制）", period);

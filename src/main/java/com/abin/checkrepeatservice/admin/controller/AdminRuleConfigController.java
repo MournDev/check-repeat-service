@@ -19,6 +19,9 @@ import com.abin.checkrepeatservice.pojo.entity.SystemParam;
 import com.abin.checkrepeatservice.user.service.Impl.EmailService;
 import com.alibaba.fastjson2.JSON;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
@@ -37,6 +40,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/admin/config")
 @PreAuthorize("hasAuthority('ADMIN')") // 权限控制：仅管理员可访问
+@Tag(name = "规则配置", description = "查重规则/比对库/系统参数与系统配置管理")
 public class AdminRuleConfigController {
 
     @Resource
@@ -64,11 +68,16 @@ public class AdminRuleConfigController {
     /**
      * 1. 管理员查询查重规则列表
      */
+    @Operation(summary = "查询查重规则列表", description = "分页查询查重规则，支持名称与默认规则筛选")
     @GetMapping("/check-rule/list")
     public Result<Page<CheckRule>> getCheckRuleList(
+            @Parameter(description = "规则名称（可选）")
             @RequestParam(value = "ruleName", required = false) String ruleName,
+            @Parameter(description = "是否默认规则（可选）")
             @RequestParam(value = "isDefault", required = false) Integer isDefault,
+            @Parameter(description = "当前页码", required = true)
             @RequestParam("currentPage") Integer currentPage,
+            @Parameter(description = "每页条数", required = true)
             @RequestParam("pageSize") Integer pageSize) {
         return adminRuleConfigService.getCheckRuleList(ruleName, isDefault, currentPage, pageSize);
     }
@@ -76,8 +85,10 @@ public class AdminRuleConfigController {
     /**
      * 2. 管理员新增/编辑查重规则
      */
+    @Operation(summary = "新增/编辑查重规则", description = "根据传入规则信息新增或更新查重规则")
     @PostMapping("/check-rule/save-or-update")
     public Result<Map<String, Object>> saveOrUpdateCheckRule(
+            @Parameter(description = "查重规则操作请求体", required = true)
             @Valid @RequestBody CheckRuleOperateReq operateReq) {
         return adminRuleConfigService.saveOrUpdateCheckRule(operateReq);
     }
@@ -85,8 +96,10 @@ public class AdminRuleConfigController {
     /**
      * 3. 管理员删除查重规则
      */
+    @Operation(summary = "删除查重规则", description = "删除指定查重规则")
     @PostMapping("/check-rule/delete")
     public Result<String> deleteCheckRule(
+            @Parameter(description = "查重规则ID", required = true)
             @RequestParam("ruleId") Long ruleId) {
         return adminRuleConfigService.deleteCheckRule(ruleId);
     }
@@ -94,8 +107,10 @@ public class AdminRuleConfigController {
     /**
      * 4. 管理员查询规则关联的比对库
      */
+    @Operation(summary = "查询规则关联的比对库", description = "查询指定查重规则关联的比对库")
     @GetMapping("/check-rule/related-libs")
     public Result<RuleLibRelationDTO> getRuleRelatedLibs(
+            @Parameter(description = "查重规则ID", required = true)
             @RequestParam("ruleId") Long ruleId) {
         return adminRuleConfigService.getRuleRelatedLibs(ruleId);
     }
@@ -104,12 +119,18 @@ public class AdminRuleConfigController {
     /**
      * 5. 管理员查询比对库列表
      */
+    @Operation(summary = "查询比对库列表", description = "分页查询比对库，支持名称、类型与启用状态筛选")
     @GetMapping("/compare-lib/list")
     public Result<Page<CompareLib>> getCompareLibList(
+            @Parameter(description = "比对库名称（可选）")
             @RequestParam(value = "libName", required = false) String libName,
+            @Parameter(description = "比对库类型（可选）")
             @RequestParam(value = "libType", required = false) String libType,
+            @Parameter(description = "是否启用（可选）")
             @RequestParam(value = "isEnabled", required = false) Integer isEnabled,
+            @Parameter(description = "当前页码", required = true)
             @RequestParam("currentPage") Integer currentPage,
+            @Parameter(description = "每页条数", required = true)
             @RequestParam("pageSize") Integer pageSize) {
         return adminRuleConfigService.getCompareLibList(libName, libType, isEnabled, currentPage, pageSize);
     }
@@ -117,8 +138,10 @@ public class AdminRuleConfigController {
     /**
      * 6. 管理员新增/编辑比对库
      */
+    @Operation(summary = "新增/编辑比对库", description = "根据传入比对库信息新增或更新比对库")
     @PostMapping("/compare-lib/save-or-update")
     public Result<Map<String, Object>> saveOrUpdateCompareLib(
+            @Parameter(description = "比对库操作请求体", required = true)
             @Valid @RequestBody CompareLibOperateReq operateReq) {
         return adminRuleConfigService.saveOrUpdateCompareLib(operateReq);
     }
@@ -126,9 +149,12 @@ public class AdminRuleConfigController {
     /**
      * 7. 管理员启用/禁用比对库
      */
+    @Operation(summary = "启用/禁用比对库", description = "切换指定比对库的启用状态")
     @PostMapping("/compare-lib/toggle-enabled")
     public Result<String> toggleLibEnabled(
+            @Parameter(description = "比对库ID", required = true)
             @RequestParam("libId") Long libId,
+            @Parameter(description = "是否启用", required = true)
             @RequestParam("isEnabled") Integer isEnabled) {
         return adminRuleConfigService.toggleLibEnabled(libId, isEnabled);
     }
@@ -137,6 +163,7 @@ public class AdminRuleConfigController {
     /**
      * 8. 管理员查询当前系统参数
      */
+    @Operation(summary = "查询当前系统参数", description = "获取当前生效的系统参数")
     @GetMapping("/system-param/current")
     public Result<SystemParam> getCurrentSystemParam() {
         return adminRuleConfigService.getCurrentSystemParam();
@@ -146,6 +173,7 @@ public class AdminRuleConfigController {
      * 获取所有系统配置
      * 确保所有数据都来自真实数据库
      */
+    @Operation(summary = "获取所有系统配置", description = "汇总基础/查重/安全/邮件/性能配置、查重规则、比对库与系统参数")
     @GetMapping("/system")
     public Result<Map<String, Object>> getAllConfig() {
         log.info("接收获取所有系统配置请求（真实数据）");
@@ -310,8 +338,11 @@ public class AdminRuleConfigController {
         defaultConfig.put("cleanupInterval", 24);
         return defaultConfig;
     }
+    @Operation(summary = "更新基础配置", description = "保存系统基础配置")
     @PutMapping("/basic")
-    public Result<String> updateBasicConfig(@RequestBody Map<String, Object> config) {
+    public Result<String> updateBasicConfig(
+            @Parameter(description = "基础配置内容", required = true)
+            @RequestBody Map<String, Object> config) {
         log.info("接收更新基础配置请求: {}", config);
         saveConfig("system_basic", config, "系统基础配置");
         log.info("基础配置更新成功");
@@ -321,8 +352,11 @@ public class AdminRuleConfigController {
     /**
      * 更新查重配置
      */
+    @Operation(summary = "更新查重配置", description = "保存查重相关配置")
     @PutMapping("/plagiarism")
-    public Result<String> updatePlagiarismConfig(@RequestBody Map<String, Object> config) {
+    public Result<String> updatePlagiarismConfig(
+            @Parameter(description = "查重配置内容", required = true)
+            @RequestBody Map<String, Object> config) {
         log.info("接收更新查重配置请求: {}", config);
         saveConfig("plagiarism_config", config, "查重配置");
         log.info("查重配置更新成功");
@@ -332,8 +366,11 @@ public class AdminRuleConfigController {
     /**
      * 更新安全配置
      */
+    @Operation(summary = "更新安全配置", description = "保存安全相关配置")
     @PutMapping("/security")
-    public Result<String> updateSecurityConfig(@RequestBody Map<String, Object> config) {
+    public Result<String> updateSecurityConfig(
+            @Parameter(description = "安全配置内容", required = true)
+            @RequestBody Map<String, Object> config) {
         log.info("接收更新安全配置请求: {}", config);
         saveConfig("security_config", config, "安全配置");
         log.info("安全配置更新成功");
@@ -343,8 +380,11 @@ public class AdminRuleConfigController {
     /**
      * 更新邮件配置
      */
+    @Operation(summary = "更新邮件配置", description = "保存邮件服务配置")
     @PutMapping("/email")
-    public Result<String> updateEmailConfig(@RequestBody Map<String, Object> config) {
+    public Result<String> updateEmailConfig(
+            @Parameter(description = "邮件配置内容", required = true)
+            @RequestBody Map<String, Object> config) {
         log.info("接收更新邮件配置请求: {}", config);
         saveConfig("email_config", config, "邮件配置");
         log.info("邮件配置更新成功");
@@ -354,8 +394,11 @@ public class AdminRuleConfigController {
     /**
      * 测试邮件配置
      */
+    @Operation(summary = "测试邮件配置", description = "向指定邮箱真实发送测试邮件以验证 SMTP 配置")
     @PostMapping("/test-email")
-    public Result<String> testEmailConfig(@RequestBody(required = false) Map<String, String> testRequest) {
+    public Result<String> testEmailConfig(
+            @Parameter(description = "测试请求体：testEmail 或 recipientEmail 收件邮箱")
+            @RequestBody(required = false) Map<String, String> testRequest) {
         log.info("接收测试邮件配置请求");
         
         // 检查请求体是否存在
@@ -391,10 +434,14 @@ public class AdminRuleConfigController {
     /**
      * 管理员查询学院月度查重额度列表（quotaMonth 可选；pageSize=-1 返回全量不分页）
      */
+    @Operation(summary = "查询学院月度查重额度列表", description = "分页查询学院月度查重额度，pageSize=-1 返回全量")
     @GetMapping("/check-quota/list")
     public Result<Page<CheckCollegeQuotaVO>> getCheckQuotaList(
+            @Parameter(description = "额度月份（可选）")
             @RequestParam(value = "quotaMonth", required = false) String quotaMonth,
+            @Parameter(description = "当前页码，默认 1")
             @RequestParam(value = "currentPage", required = false, defaultValue = "1") Integer currentPage,
+            @Parameter(description = "每页条数，默认 10；-1 表示全量")
             @RequestParam(value = "pageSize", required = false, defaultValue = "10") Integer pageSize) {
         return collegeQuotaService.listQuotas(quotaMonth, currentPage, pageSize);
     }
@@ -402,17 +449,23 @@ public class AdminRuleConfigController {
     /**
      * 管理员保存学院月度查重额度（按 college_id + quota_month upsert，quotaMonth 默认当前月）
      */
+    @Operation(summary = "保存学院月度查重额度", description = "按 college_id + quota_month 保存额度，quotaMonth 默认当前月")
     @PostMapping("/check-quota/save")
     @OperationLog(type = "admin_check_quota_save", description = "管理员保存学院月度查重额度")
-    public Result<Void> saveCheckQuota(@Valid @RequestBody CheckQuotaSaveReq req) {
+    public Result<Void> saveCheckQuota(
+            @Parameter(description = "学院月度查重额度保存请求体", required = true)
+            @Valid @RequestBody CheckQuotaSaveReq req) {
         return collegeQuotaService.saveQuota(req);
     }
 
     /**
      * 保存所有配置
      */
+    @Operation(summary = "保存所有配置", description = "一次性保存基础/查重/安全/邮件/性能配置")
     @PostMapping("/save-all")
-    public Result<String> saveAllConfig(@RequestBody(required = false) Map<String, Object> allConfig) {
+    public Result<String> saveAllConfig(
+            @Parameter(description = "全部配置内容，按配置项分组")
+            @RequestBody(required = false) Map<String, Object> allConfig) {
         log.info("接收保存所有配置请求");
         
         // 检查请求体是否存在
@@ -462,6 +515,7 @@ public class AdminRuleConfigController {
     /**
      * 恢复默认配置
      */
+    @Operation(summary = "恢复默认配置", description = "删除现有配置并重新插入默认配置")
     @PostMapping("/reset-default")
     public Result<String> resetDefaultConfig() {
         log.info("接收恢复默认配置请求");

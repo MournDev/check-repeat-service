@@ -13,6 +13,9 @@ import com.abin.checkrepeatservice.teacher.vo.StudentInfoVO;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
@@ -42,6 +45,7 @@ import java.util.List;
 @RequestMapping("/api/teacher/message")
 @PreAuthorize("hasAuthority('TEACHER')")
 @Api(tags = "教师消息接口", description = "教师端师生聊天与共享文件接口")
+@Tag(name = "教师消息接口", description = "教师端师生聊天与共享文件接口")
 public class TeacherMessageController {
 
     @Resource
@@ -50,6 +54,7 @@ public class TeacherMessageController {
     /** 1. 会话列表（按学生去重） */
     @GetMapping("/sessions")
     @ApiOperation("获取消息会话列表")
+    @Operation(summary = "获取消息会话列表", description = "按学生去重返回当前教师的会话列表")
     public Result<List<MessageSessionVO>> getMessageSessions() {
         Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
         log.info("获取教师消息会话列表 - 教师ID: {}", teacherId);
@@ -59,9 +64,14 @@ public class TeacherMessageController {
     /** 2. 某个会话的消息列表 */
     @GetMapping("/list")
     @ApiOperation("获取消息列表")
-    public Result<Page<MessageVO>> getMessageList(@RequestParam Long sessionId,
-                                                  @RequestParam(defaultValue = "1") Integer pageNum,
-                                                  @RequestParam(defaultValue = "20") Integer pageSize) {
+    @Operation(summary = "获取消息列表", description = "分页查询指定会话的消息")
+    public Result<Page<MessageVO>> getMessageList(
+            @Parameter(description = "会话ID", required = true)
+            @RequestParam Long sessionId,
+            @Parameter(description = "页码，默认 1")
+            @RequestParam(defaultValue = "1") Integer pageNum,
+            @Parameter(description = "每页条数，默认 20")
+            @RequestParam(defaultValue = "20") Integer pageSize) {
         Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
         return Result.success("获取消息列表成功",
                 teacherMessageService.getMessageList(teacherId, sessionId, pageNum, pageSize));
@@ -70,14 +80,20 @@ public class TeacherMessageController {
     /** 3. 发送聊天消息 */
     @PostMapping("/send")
     @ApiOperation("发送消息")
-    public Result<MessageVO> sendMessage(@Valid @RequestBody MessageSendDTO sendDTO) {
+    @Operation(summary = "发送消息", description = "发送一条聊天消息")
+    public Result<MessageVO> sendMessage(
+            @Parameter(description = "消息发送请求体", required = true)
+            @Valid @RequestBody MessageSendDTO sendDTO) {
         return Result.success("发送成功", teacherMessageService.sendMessage(sendDTO));
     }
 
     /** 4. 标记会话已读 */
     @PostMapping("/mark-read")
     @ApiOperation("标记消息已读")
-    public Result<String> markMessagesRead(@RequestParam Long sessionId) {
+    @Operation(summary = "标记消息已读", description = "将指定会话的消息标记为已读")
+    public Result<String> markMessagesRead(
+            @Parameter(description = "会话ID", required = true)
+            @RequestParam Long sessionId) {
         teacherMessageService.markMessagesRead(UserBusinessInfoUtils.getCurrentUserId(), sessionId);
         return Result.success("标记已读成功");
     }
@@ -85,15 +101,22 @@ public class TeacherMessageController {
     /** 5. 上传文件；带 sessionId 时会一并落一条附件消息 */
     @PostMapping("/upload")
     @ApiOperation("上传文件")
-    public Result<FileUploadVO> uploadFile(@RequestParam("file") MultipartFile file,
-                                           @RequestParam(value = "sessionId", required = false) Long sessionId) {
+    @Operation(summary = "上传文件", description = "上传文件；带 sessionId 时同时保存一条附件消息")
+    public Result<FileUploadVO> uploadFile(
+            @Parameter(description = "上传的文件", required = true)
+            @RequestParam("file") MultipartFile file,
+            @Parameter(description = "会话ID（可选）")
+            @RequestParam(value = "sessionId", required = false) Long sessionId) {
         return Result.success("上传成功", teacherMessageService.uploadFile(file, sessionId));
     }
 
     /** 6. 清空会话 */
     @PostMapping("/clear")
     @ApiOperation("清空聊天记录")
-    public Result<String> clearMessages(@RequestParam Long sessionId) {
+    @Operation(summary = "清空聊天记录", description = "清空指定会话的聊天记录")
+    public Result<String> clearMessages(
+            @Parameter(description = "会话ID", required = true)
+            @RequestParam Long sessionId) {
         teacherMessageService.clearMessages(UserBusinessInfoUtils.getCurrentUserId(), sessionId);
         return Result.success("聊天记录已清空");
     }
@@ -101,14 +124,21 @@ public class TeacherMessageController {
     /** 7. 学生联系信息（仅限本人指导的学生） */
     @GetMapping("/student-info")
     @ApiOperation("获取学生信息")
-    public Result<StudentInfoVO> getStudentInfo(@RequestParam Long studentId) {
+    @Operation(summary = "获取学生信息", description = "仅限本人指导的学生")
+    public Result<StudentInfoVO> getStudentInfo(
+            @Parameter(description = "学生ID", required = true)
+            @RequestParam Long studentId) {
         return Result.success("获取学生信息成功", teacherMessageService.getStudentInfo(studentId));
     }
 
     /** 8. 导出聊天记录；前端以 query param 传 sessionId/format */
     @PostMapping("/export")
     @ApiOperation("导出聊天记录")
-    public void exportChatRecords(ChatExportDTO exportDTO, HttpServletResponse response) {
+    @Operation(summary = "导出聊天记录", description = "按会话与格式导出聊天记录")
+    public void exportChatRecords(
+            @Parameter(description = "导出参数：会话ID与导出格式")
+            ChatExportDTO exportDTO,
+            HttpServletResponse response) {
         teacherMessageService.exportChatRecords(
                 UserBusinessInfoUtils.getCurrentUserId(), exportDTO, response);
     }
@@ -116,7 +146,10 @@ public class TeacherMessageController {
     /** 9. 会话中的共享文件 */
     @GetMapping("/files")
     @ApiOperation("获取共享文件列表")
-    public Result<List<SharedFileVO>> getSharedFiles(@RequestParam Long sessionId) {
+    @Operation(summary = "获取共享文件列表", description = "查询指定会话中的共享文件")
+    public Result<List<SharedFileVO>> getSharedFiles(
+            @Parameter(description = "会话ID", required = true)
+            @RequestParam Long sessionId) {
         return Result.success("获取共享文件列表成功",
                 teacherMessageService.getSharedFiles(UserBusinessInfoUtils.getCurrentUserId(), sessionId));
     }
@@ -124,14 +157,21 @@ public class TeacherMessageController {
     /** 10. 下载共享文件 */
     @GetMapping("/files/{fileId}")
     @ApiOperation("下载共享文件")
-    public void downloadSharedFile(@PathVariable Long fileId, HttpServletResponse response) {
+    @Operation(summary = "下载共享文件", description = "以文件流形式下载共享文件")
+    public void downloadSharedFile(
+            @Parameter(description = "文件ID", required = true)
+            @PathVariable Long fileId,
+            HttpServletResponse response) {
         teacherMessageService.downloadSharedFile(fileId, UserBusinessInfoUtils.getCurrentUserId(), response);
     }
 
     /** 11. 删除共享文件 */
     @DeleteMapping("/files/{fileId}")
     @ApiOperation("删除共享文件")
-    public Result<String> deleteSharedFile(@PathVariable Long fileId) {
+    @Operation(summary = "删除共享文件", description = "删除指定共享文件")
+    public Result<String> deleteSharedFile(
+            @Parameter(description = "文件ID", required = true)
+            @PathVariable Long fileId) {
         teacherMessageService.deleteSharedFile(fileId, UserBusinessInfoUtils.getCurrentUserId());
         return Result.success("文件删除成功");
     }

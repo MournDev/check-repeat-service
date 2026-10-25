@@ -7,6 +7,9 @@ import com.abin.checkrepeatservice.common.annotation.OperationLog;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.pojo.entity.SysBackupLog;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -28,6 +31,7 @@ import java.util.Map;
 @RequestMapping("/api/admin/backup")
 @PreAuthorize("hasAuthority('ADMIN')")
 @Slf4j
+@Tag(name = "数据库备份管理", description = "备份触发/备份历史/状态与备份设置")
 public class AdminBackupController {
 
     @Resource
@@ -36,6 +40,7 @@ public class AdminBackupController {
     /**
      * 立即执行一次备份（同步，返回真实结果；仅超级管理员）
      */
+    @Operation(summary = "手动触发备份", description = "立即执行一次数据库备份（同步，仅超级管理员）")
     @PostMapping("/trigger")
     @PreAuthorize("hasAuthority('SUPER_ADMIN')")
     @OperationLog(type = "admin_backup_trigger", description = "管理员手动触发数据库备份")
@@ -60,9 +65,12 @@ public class AdminBackupController {
     /**
      * 分页查询备份历史
      */
+    @Operation(summary = "分页查询备份历史", description = "分页查询数据库备份记录")
     @GetMapping("/history")
     public Result<Page<SysBackupLog>> getBackupHistory(
+            @Parameter(description = "当前页码，默认 1")
             @RequestParam(defaultValue = "1") Integer page,
+            @Parameter(description = "每页条数，默认 10")
             @RequestParam(defaultValue = "10") Integer size) {
         log.info("接收查询备份历史请求: page={}, size={}", page, size);
         return Result.success("备份历史获取成功", sysBackupService.getHistory(page, size));
@@ -71,6 +79,7 @@ public class AdminBackupController {
     /**
      * 查询最近一次备份
      */
+    @Operation(summary = "查询最近一次备份", description = "获取最近一次数据库备份记录")
     @GetMapping("/last")
     public Result<SysBackupLog> getLastBackup() {
         return Result.success("最近备份获取成功", sysBackupService.getLastBackup());
@@ -79,6 +88,7 @@ public class AdminBackupController {
     /**
      * 查询备份状态（最近一次记录 + 备份目录 + 是否有任务在执行）
      */
+    @Operation(summary = "查询备份状态", description = "返回最近一次记录、备份目录与是否有任务在执行")
     @GetMapping("/status")
     public Result<Map<String, Object>> getBackupStatus() {
         return Result.success("备份状态获取成功", sysBackupService.getStatus());
@@ -87,6 +97,7 @@ public class AdminBackupController {
     /**
      * 读取备份设置
      */
+    @Operation(summary = "读取备份设置", description = "获取数据库备份的启用状态与保留天数")
     @GetMapping("/settings")
     public Result<Map<String, Object>> getBackupSettings() {
         return Result.success("备份设置获取成功", sysBackupService.getSettings());
@@ -95,10 +106,13 @@ public class AdminBackupController {
     /**
      * 更新备份设置（仅超级管理员）
      */
+    @Operation(summary = "更新备份设置", description = "更新备份启用状态与保留天数（仅超级管理员）")
     @PutMapping("/settings")
     @PreAuthorize("hasAuthority('SUPER_ADMIN')")
     @OperationLog(type = "admin_backup_settings_update", description = "管理员更新备份设置")
-    public Result<Void> updateBackupSettings(@RequestBody Map<String, Object> body) {
+    public Result<Void> updateBackupSettings(
+            @Parameter(description = "备份设置请求体：enabled 是否启用、retentionDays 保留天数", required = true)
+            @RequestBody Map<String, Object> body) {
         Boolean enabled = body.get("enabled") == null ? null : Boolean.valueOf(body.get("enabled").toString());
         Integer retentionDays = null;
         Object retentionDaysRaw = body.get("retentionDays");

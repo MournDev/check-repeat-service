@@ -5,6 +5,9 @@ import com.abin.checkrepeatservice.common.annotation.OperationLog;
 import com.abin.checkrepeatservice.user.service.AdvisorAssignService;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.validation.constraints.NotNull;
 import org.springframework.web.bind.annotation.*;
@@ -16,6 +19,7 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/advisor/assign")
 @Api(tags = "指导老师分配管理")
+@Tag(name = "指导老师分配管理", description = "论文指导老师自动/手动分配相关接口")
 public class AdvisorAssignController {
 
     @Resource
@@ -24,11 +28,12 @@ public class AdvisorAssignController {
     /**
      * 接口1：自动分配指导老师（学生提交论文后调用，或管理员触发）
      */
+    @Operation(summary = "自动分配指导老师", description = "仅“待分配”状态的论文可调用")
     @PostMapping("/auto")
     @ApiOperation(value = "自动分配指导老师", notes = "仅“待分配”状态的论文可调用")
     @OperationLog(type = "admin_auto_assign", description = "管理员自动分配指导老师")
     public Result<Boolean> autoAssign(
-            @RequestParam @NotNull Long paperSubmitId
+            @Parameter(description = "论文提交ID", required = true) @RequestParam @NotNull Long paperSubmitId
     ) {
         return advisorAssignService.autoAssignAdvisor(paperSubmitId);
     }
@@ -36,12 +41,13 @@ public class AdvisorAssignController {
     /**
      * 接口2：手动分配指导老师（仅管理员可调用）
      */
+    @Operation(summary = "手动分配指导老师", description = "需管理员权限，指定论文ID和目标教师ID")
     @PostMapping("/manual")
     @ApiOperation(value = "手动分配指导老师", notes = "需管理员权限，指定论文ID和目标教师ID")
    @OperationLog(type = "admin_manual_assign", description = "管理员手动分配指导老师")
-   public Result< ?> manualAssign(@RequestParam @NotNull Long paperId,
-                                  @RequestParam @NotNull Long teacherId,
-                                  @RequestParam String reason
+   public Result< ?> manualAssign(@Parameter(description = "论文ID", required = true) @RequestParam @NotNull Long paperId,
+                                  @Parameter(description = "目标教师ID", required = true) @RequestParam @NotNull Long teacherId,
+                                  @Parameter(description = "分配原因", required = true) @RequestParam String reason
     ) {
        return advisorAssignService.manualAssignAdvisor(paperId,teacherId,reason);
    }

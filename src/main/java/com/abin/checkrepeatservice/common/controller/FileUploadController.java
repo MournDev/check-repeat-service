@@ -18,6 +18,9 @@ import com.abin.checkrepeatservice.student.mapper.CheckReportMapper;
 import com.abin.checkrepeatservice.student.mapper.CheckTaskMapper;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -48,6 +51,7 @@ import java.util.Map;
 @Slf4j
 @RestController
 @RequestMapping("/api/file")
+@Tag(name = "文件管理接口", description = "文件上传、下载、预览及信息查询相关接口")
 public class FileUploadController {
 
     @Autowired
@@ -83,10 +87,11 @@ public class FileUploadController {
      * 通用文件上传接口
      * 只负责文件上传，返回文件ID，业务参数通过其他接口传递
      */
+    @Operation(summary = "上传文件", description = "通用文件上传接口，只负责上传并返回文件信息，支持秒传")
     @PostMapping("/upload")
     public Result<FileUploadResponse> uploadFile(
-            @RequestParam("file") MultipartFile file,
-            @Deprecated @RequestParam(required = false) Long userId
+            @Parameter(description = "上传文件", required = true) @RequestParam("file") MultipartFile file,
+            @Parameter(description = "用户ID（已废弃，归属人取自当前登录用户）") @Deprecated @RequestParam(required = false) Long userId
             ) {
 
         try {
@@ -145,8 +150,9 @@ public class FileUploadController {
     /**
      * 根据MD5查询文件（用于前端秒传检查）
      */
+    @Operation(summary = "根据MD5查询文件", description = "用于前端秒传检查，仅命中当前用户自己的文件")
     @GetMapping("/check")
-    public Result<FileUploadResponse> checkFileByMd5(@RequestParam String md5) {
+    public Result<FileUploadResponse> checkFileByMd5(@Parameter(description = "文件MD5", required = true) @RequestParam String md5) {
         // 秒传探测只允许命中当前用户自己的文件：否则等于把他人 fileId 交给调用方
         Long currentUserId = UserBusinessInfoUtils.getCurrentUserId();
         FileInfo fileInfo = fileService.getByMd5AndUser(md5, currentUserId);
@@ -161,8 +167,9 @@ public class FileUploadController {
     /**
      * 获取文件信息
      */
+    @Operation(summary = "获取文件信息", description = "根据文件ID获取文件元数据")
     @GetMapping("/info")
-    public Result<FileInfo> getFileInfo(@RequestParam Long fileId) {
+    public Result<FileInfo> getFileInfo(@Parameter(description = "文件ID", required = true) @RequestParam Long fileId) {
         FileInfo fileInfo = fileService.getById(fileId);
         if (fileInfo == null) {
             throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "文件不存在或已被清理", null);
@@ -179,10 +186,11 @@ public class FileUploadController {
     /**
      * 文件下载接口
      */
+    @Operation(summary = "文件下载", description = "以流式方式下载指定文件")
     @GetMapping("/download/{fileId}/{fileName}")
     public ResponseEntity<Resource> downloadFile(
-            @PathVariable Long fileId,
-            @PathVariable(required = false) String fileName,
+            @Parameter(description = "文件ID", required = true) @PathVariable Long fileId,
+            @Parameter(description = "文件名") @PathVariable(required = false) String fileName,
             HttpServletRequest request) {
 
         // 1. 获取文件信息
@@ -207,11 +215,12 @@ public class FileUploadController {
      * 访问凭据是绑定 fileId、10 分钟有效的 HMAC 令牌 pt；鉴权入口 smartPreview
      * 仍要求登录并通过归属校验，因此这里不构成新的匿名 IDOR 面。
      */
+    @Operation(summary = "签名取文件", description = "预览签名取文件接口，仅 kkFileView 服务端回调使用")
     @GetMapping("/preview-fetch/{fileId}/{fileName}")
     public ResponseEntity<Resource> previewFetch(
-            @PathVariable Long fileId,
-            @PathVariable(required = false) String fileName,
-            @RequestParam("pt") String previewToken) {
+            @Parameter(description = "文件ID", required = true) @PathVariable Long fileId,
+            @Parameter(description = "文件名") @PathVariable(required = false) String fileName,
+            @Parameter(description = "预览签名令牌", required = true) @RequestParam("pt") String previewToken) {
 
         if (!previewSignedUrlService.verify(fileId, previewToken)) {
             log.warn("预览签名校验失败 - fileId: {}", fileId);
@@ -231,11 +240,12 @@ public class FileUploadController {
      * 与 preview-fetch 同构：凭据是绑定 reportId、10 分钟有效的 HMAC 令牌 pt；
      * 鉴权入口 smartPreviewReport 仍要求登录，故不构成新的匿名 IDOR 面。
      */
+    @Operation(summary = "报告预览签名取文件", description = "报告预览签名取文件接口，仅 kkFileView 服务端回调使用")
     @GetMapping("/preview-fetch-report/{reportId}/{fileName}")
     public ResponseEntity<Resource> previewReportFetch(
-            @PathVariable Long reportId,
-            @PathVariable(required = false) String fileName,
-            @RequestParam("pt") String previewToken) {
+            @Parameter(description = "报告ID", required = true) @PathVariable Long reportId,
+            @Parameter(description = "文件名") @PathVariable(required = false) String fileName,
+            @Parameter(description = "预览签名令牌", required = true) @RequestParam("pt") String previewToken) {
 
         if (!previewSignedUrlService.verify("report:" + reportId, previewToken)) {
             log.warn("报告预览签名校验失败 - reportId: {}", reportId);
@@ -255,8 +265,9 @@ public class FileUploadController {
      * kkFileView 返回的是整张 HTML 预览页，包成 blob 后文档基址变成 {@code blob:...}，
      * 页内 js/css/图片的相对路径全部 404（表现为整页破图）。</p>
      */
+    @Operation(summary = "获取预览地址", description = "登录态入口，返回 {mode, url} 形式的预览地址")
     @GetMapping("/preview-url/{fileId}")
-    public Result<Map<String, String>> getPreviewUrl(@PathVariable Long fileId) {
+    public Result<Map<String, String>> getPreviewUrl(@Parameter(description = "文件ID", required = true) @PathVariable Long fileId) {
         FileInfo fileInfo = fileService.getById(fileId);
         if (fileInfo == null) {
             throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "文件不存在或已被清理", null);
@@ -348,8 +359,9 @@ public class FileUploadController {
      * KKFileView在线预览接口（通过URL）
      * 保持原有接口不变
      */
+    @Operation(summary = "KKFileView在线预览", description = "通过 URL 代理 KKFileView 在线预览")
     @GetMapping("/onlinePreview")
-    public ResponseEntity<byte[]> onlinePreview(@RequestParam String url) {
+    public ResponseEntity<byte[]> onlinePreview(@Parameter(description = "文件URL", required = true) @RequestParam String url) {
         log.info("接收KKFileView代理预览请求 - url: {}", url);
         return filePreviewService.onlinePreviewByUrl(url);
     }
@@ -358,8 +370,9 @@ public class FileUploadController {
      * 智能预览接口（推荐使用）
      * 自动根据文件类型选择最佳预览方式
      */
+    @Operation(summary = "智能预览", description = "根据文件类型自动选择最佳预览方式")
     @GetMapping("/smartPreview")
-    public ResponseEntity<?> smartPreview(@RequestParam Long fileId) {
+    public ResponseEntity<?> smartPreview(@Parameter(description = "文件ID", required = true) @RequestParam Long fileId) {
         log.info("接收智能预览请求 - fileId: {}", fileId);
         // 安全修复（P0）：预览同样做文件归属校验
         FileInfo fileInfo = fileService.getById(fileId);
@@ -392,8 +405,9 @@ public class FileUploadController {
      * 智能预览报告接口
      * 自动根据文件类型选择最佳预览方式
      */
+    @Operation(summary = "智能预览报告", description = "根据文件类型自动选择最佳预览方式")
     @GetMapping("/smartPreviewReport")
-    public ResponseEntity<?> smartPreviewReport(@RequestParam String paperId) {
+    public ResponseEntity<?> smartPreviewReport(@Parameter(description = "论文ID", required = true) @RequestParam String paperId) {
         log.info("接收智能预览请求 - paperId: {}", paperId);
         // 安全修复（P0）：报告预览做论文归属校验（学生本人 / 指导教师 / 管理员）
         Long paperIdLong;
@@ -413,9 +427,10 @@ public class FileUploadController {
     /**
      * 报告文件下载接口
      */
+    @Operation(summary = "下载报告", description = "下载指定查重报告文件")
     @GetMapping("/downloadReport/{reportId}")
     public ResponseEntity<Resource> downloadReport(
-            @PathVariable Long reportId,
+            @Parameter(description = "报告ID", required = true) @PathVariable Long reportId,
             HttpServletResponse response) {
 
         try {

@@ -13,6 +13,9 @@ import com.abin.checkrepeatservice.user.mapper.SysLoginLogMapper;
 import com.abin.checkrepeatservice.user.service.SysUserService;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
@@ -32,6 +35,7 @@ import java.util.stream.Collectors;
 @RequestMapping("/api/admin/school")
 @PreAuthorize("hasAuthority('ADMIN')")
 @Slf4j
+@Tag(name = "学校数据概览", description = "学校概览/学院分布/趋势与实时统计")
 public class AdminSchoolController {
 
     @Resource
@@ -58,6 +62,7 @@ public class AdminSchoolController {
     /**
      * 获取学校概览数据
      */
+    @Operation(summary = "获取学校概览数据", description = "统计用户、论文、查重与在线用户等概览数据")
     @GetMapping("/overview")
     public Result<Map<String, Object>> getSchoolOverview() {
         Map<String, Object> overview = new HashMap<>();
@@ -119,6 +124,7 @@ public class AdminSchoolController {
     /**
      * 获取学院论文分布 - 修改返回类型
      */
+    @Operation(summary = "获取学院论文分布", description = "按学院统计论文数量分布")
     @GetMapping("/college-distribution")
     public Result<Map<String, Object>> getCollegeDistribution() {
         Map<String, Object> stats = new HashMap<>();
@@ -164,6 +170,7 @@ public class AdminSchoolController {
     /**
      * 获取月度论文趋势
      */
+    @Operation(summary = "获取月度论文趋势", description = "统计过去 6 个月的论文提交数与查重完成数")
     @GetMapping("/monthly-trend")
     public Result<List<Map<String, Object>>> getMonthlyTrend() {
         List<Map<String, Object>> trend = new ArrayList<>();
@@ -202,6 +209,7 @@ public class AdminSchoolController {
     /**
      * 获取查重结果分布
      */
+    @Operation(summary = "获取查重结果分布", description = "按相似度区间统计查重结果分布")
     @GetMapping("/similarity-distribution")
     public Result<Map<String, Object>> getSimilarityDistribution() {
         Map<String, Object> distribution = new HashMap<>();
@@ -233,6 +241,7 @@ public class AdminSchoolController {
     /**
      * 获取实时统计
      */
+    @Operation(summary = "获取实时统计", description = "统计今日论文、本周审核、在线用户、系统负载与活跃任务")
     @GetMapping("/realtime-stats")
     public Result<Map<String, Object>> getRealtimeStats() {
         Map<String, Object> stats = new HashMap<>();
@@ -284,9 +293,12 @@ public class AdminSchoolController {
     /**
      * 导出学校数据报告
      */
+    @Operation(summary = "导出学校数据报告", description = "按日期范围导出统计数据报告")
     @GetMapping("/export-report")
     public void exportSchoolReport(HttpServletResponse response,
+                                 @Parameter(description = "开始日期（可选）")
                                  @RequestParam(required = false) String startDate,
+                                 @Parameter(description = "结束日期（可选）")
                                  @RequestParam(required = false) String endDate) throws IOException {
         
         // 构建统计查询条件

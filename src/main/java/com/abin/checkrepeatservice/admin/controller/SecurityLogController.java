@@ -10,6 +10,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -22,6 +25,7 @@ import java.util.stream.Collectors;
 @RequestMapping("/api/admin/logs/security")
 @PreAuthorize("hasAuthority('ADMIN')")
 @Slf4j
+@Tag(name = "安全日志", description = "登录安全日志查询")
 public class SecurityLogController {
 
     @Resource
@@ -30,12 +34,18 @@ public class SecurityLogController {
     /**
      * 获取安全日志列表
      */
+    @Operation(summary = "获取安全日志列表", description = "分页查询登录日志，可按事件类型与时间范围筛选")
     @GetMapping
     public Result<Page<LogSecurityVO>> getSecurityLogs(
+            @Parameter(description = "当前页码，默认 1")
             @RequestParam(defaultValue = "1") Integer page,
+            @Parameter(description = "每页条数，默认 10")
             @RequestParam(defaultValue = "10") Integer size,
+            @Parameter(description = "事件类型（可选，如 login_failed）")
             @RequestParam(required = false) String eventType,
+            @Parameter(description = "开始日期（可选）")
             @RequestParam(required = false) String startDate,
+            @Parameter(description = "结束日期（可选）")
             @RequestParam(required = false) String endDate) {
         
         log.info("接收获取安全日志列表请求: page={}, size={}, eventType={}, startDate={}, endDate={}", 

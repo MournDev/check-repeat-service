@@ -12,6 +12,9 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import java.util.Map;
 
 /**
@@ -27,6 +30,7 @@ import java.util.Map;
  */
 @RestController
 @Slf4j
+@Tag(name = "系统维护模式", description = "系统维护状态查询与维护模式更新")
 public class SystemMaintenanceController {
 
     @Resource
@@ -36,6 +40,7 @@ public class SystemMaintenanceController {
      * 系统状态查询（公开）
      * 出参：maintenanceStatus / maintenanceNotice / maintenanceStartTime / maintenanceEndTime
      */
+    @Operation(summary = "系统状态查询", description = "公开接口，返回维护状态与维护公告等信息")
     @GetMapping("/api/system/status")
     public Result<Map<String, Object>> getSystemStatus() {
         return maintenanceService.getSystemStatus();
@@ -46,9 +51,10 @@ public class SystemMaintenanceController {
      * 行为：落库 system_param → 刷新内存缓存 → WS 广播 MAINTENANCE_STATUS_CHANGED
      * 出参：data 回传最新状态，前端用它刷新 store
      */
+    @Operation(summary = "更新维护模式", description = "落库并刷新缓存后广播维护状态变更（仅超管）")
     @PutMapping("/api/admin/system/maintenance")
     @PreAuthorize("hasAuthority('SUPER_ADMIN')")
-    public Result<Map<String, Object>> updateMaintenance(@Valid @RequestBody MaintenanceUpdateReq req) {
+    public Result<Map<String, Object>> updateMaintenance(@Parameter(description = "维护模式更新请求体：状态与公告", required = true) @Valid @RequestBody MaintenanceUpdateReq req) {
         log.info("接收维护模式更新请求: status={}, notice={}",
                 req.getMaintenanceStatus(), req.getMaintenanceNotice());
         return maintenanceService.updateMaintenance(req);

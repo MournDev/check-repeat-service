@@ -8,6 +8,9 @@ import com.abin.checkrepeatservice.pojo.entity.SysNotice;
 import com.abin.checkrepeatservice.user.service.SysNoticeService;
 import com.abin.checkrepeatservice.user.vo.NoticeStatsVO;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -40,6 +43,7 @@ import java.util.Map;
 @RequestMapping("/api/notices")
 @PreAuthorize("hasAuthority('ADMIN')")
 @Slf4j
+@Tag(name = "通知管理", description = "当前管理员的通知查询、标记已读与删除")
 public class NoticeController {
 
     /** 批量操作单次上限，防止一个请求带进来几万个 id */
@@ -54,12 +58,18 @@ public class NoticeController {
      * 分页查询通知列表
      * 出参：data.records / data.total（MyBatis-Plus Page 的序列化结构）
      */
+    @Operation(summary = "分页查询通知列表", description = "查询当前登录管理员自己的通知")
     @GetMapping("/list")
     public Result<Page<SysNotice>> getNoticeList(
+            @Parameter(description = "当前页码，默认 1")
             @RequestParam(defaultValue = "1") Integer pageNum,
+            @Parameter(description = "每页条数，默认 10")
             @RequestParam(defaultValue = "10") Integer pageSize,
+            @Parameter(description = "通知类型（可选）")
             @RequestParam(required = false) Integer noticeType,
+            @Parameter(description = "是否已读：0-未读，1-已读（可选）")
             @RequestParam(required = false) Integer isRead,
+            @Parameter(description = "优先级（可选）")
             @RequestParam(required = false) Integer priority) {
 
         log.info("接收通知列表请求: pageNum={}, pageSize={}, noticeType={}, isRead={}, priority={}",
@@ -73,6 +83,7 @@ public class NoticeController {
      * 通知统计（顶部四张卡片：总数/未读/紧急/已读）
      * 出参是扁平对象，前端用 Object.assign 直接盖到自己的 reactive 上
      */
+    @Operation(summary = "通知统计", description = "返回总数/未读/紧急/已读统计")
     @GetMapping("/stats")
     public Result<NoticeStatsVO> getNoticeStats() {
         Long userId = UserBusinessInfoUtils.getCurrentUserId();
@@ -82,6 +93,7 @@ public class NoticeController {
     /**
      * 未读通知数量
      */
+    @Operation(summary = "未读通知数量")
     @GetMapping("/unread-count")
     public Result<Integer> getUnreadCount() {
         Long userId = UserBusinessInfoUtils.getCurrentUserId();
@@ -92,6 +104,7 @@ public class NoticeController {
      * 按优先级统计未读通知数
      * 出参固定含 0/1/2 三个键：{"0":n,"1":n,"2":n}
      */
+    @Operation(summary = "按优先级统计未读通知数")
     @GetMapping("/unread-count-by-priority")
     public Result<Map<Integer, Integer>> getUnreadCountByPriority() {
         Long userId = UserBusinessInfoUtils.getCurrentUserId();
@@ -101,8 +114,9 @@ public class NoticeController {
     /**
      * 最新通知（默认 5 条，最多 50 条）
      */
+    @Operation(summary = "最新通知", description = "默认 5 条，最多 50 条")
     @GetMapping("/latest")
-    public Result<List<SysNotice>> getLatestNotices(@RequestParam(defaultValue = "5") Integer limit) {
+    public Result<List<SysNotice>> getLatestNotices(@Parameter(description = "返回条数，默认 5") @RequestParam(defaultValue = "5") Integer limit) {
         Long userId = UserBusinessInfoUtils.getCurrentUserId();
         return Result.success(sysNoticeService.getLatestNotices(userId, limit));
     }
@@ -113,9 +127,10 @@ public class NoticeController {
      * 标记单条通知为已读
      * 通知不存在 / 不属于当前用户 → 404 业务码，前端会弹「操作失败」
      */
+    @Operation(summary = "标记单条通知为已读")
     @PutMapping("/read/{id}")
     @OperationLog(type = "notice_read", description = "标记通知已读")
-    public Result<String> markAsRead(@PathVariable("id") Long noticeId) {
+    public Result<String> markAsRead(@Parameter(description = "通知ID", required = true) @PathVariable("id") Long noticeId) {
         log.info("接收标记通知已读请求: noticeId={}", noticeId);
         Long userId = UserBusinessInfoUtils.getCurrentUserId();
         if (!sysNoticeService.markNoticeAsRead(noticeId, userId)) {
@@ -128,9 +143,10 @@ public class NoticeController {
      * 批量标记已读
      * 前端发的是【裸 JSON 数组】如 [1,2]，不是对象包装
      */
+    @Operation(summary = "批量标记已读")
     @PutMapping("/batch-read")
     @OperationLog(type = "notice_batch_read", description = "批量标记通知已读")
-    public Result<Integer> batchMarkAsRead(@RequestBody(required = false) List<Long> noticeIds) {
+    public Result<Integer> batchMarkAsRead(@Parameter(description = "通知ID列表（可选）") @RequestBody(required = false) List<Long> noticeIds) {
         log.info("接收批量标记已读请求: count={}", noticeIds == null ? 0 : noticeIds.size());
         Result<Integer> invalid = validateBatchIds(noticeIds);
         if (invalid != null) {
@@ -144,6 +160,7 @@ public class NoticeController {
     /**
      * 全部标记为已读（仅当前用户自己的未读通知）
      */
+    @Operation(summary = "全部标记为已读", description = "仅当前用户自己的未读通知")
     @PutMapping("/read-all")
     @OperationLog(type = "notice_read_all", description = "全部标记通知已读")
     public Result<Integer> markAllAsRead() {
@@ -157,9 +174,10 @@ public class NoticeController {
     /**
      * 删除单条通知
      */
+    @Operation(summary = "删除单条通知")
     @DeleteMapping("/delete/{id}")
     @OperationLog(type = "notice_delete", description = "删除通知")
-    public Result<String> deleteNotice(@PathVariable("id") Long noticeId) {
+    public Result<String> deleteNotice(@Parameter(description = "通知ID", required = true) @PathVariable("id") Long noticeId) {
         log.info("接收删除通知请求: noticeId={}", noticeId);
         Long userId = UserBusinessInfoUtils.getCurrentUserId();
         int rows = sysNoticeService.deleteNotice(noticeId, userId);
@@ -173,9 +191,10 @@ public class NoticeController {
      * 批量删除
      * 前端发的是【裸 JSON 数组】
      */
+    @Operation(summary = "批量删除")
     @DeleteMapping("/batch-delete")
     @OperationLog(type = "notice_batch_delete", description = "批量删除通知")
-    public Result<Integer> batchDeleteNotices(@RequestBody(required = false) List<Long> noticeIds) {
+    public Result<Integer> batchDeleteNotices(@Parameter(description = "通知ID列表（可选）") @RequestBody(required = false) List<Long> noticeIds) {
         log.info("接收批量删除通知请求: count={}", noticeIds == null ? 0 : noticeIds.size());
         Result<Integer> invalid = validateBatchIds(noticeIds);
         if (invalid != null) {
@@ -190,6 +209,7 @@ public class NoticeController {
      * 清空全部通知（仅当前用户自己的）
      * 前端按钮上写的是「此操作不可恢复」，实际是逻辑删除（is_deleted = 1），行还在
      */
+    @Operation(summary = "清空全部通知", description = "仅当前用户自己的通知（逻辑删除）")
     @DeleteMapping("/clear-all")
     @OperationLog(type = "notice_clear_all", description = "清空通知")
     public Result<Integer> clearAllNotices() {

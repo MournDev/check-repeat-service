@@ -7,6 +7,8 @@ import com.abin.checkrepeatservice.student.service.StudentMessageService;
 import com.abin.checkrepeatservice.student.vo.AdvisorInfoVO;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -21,6 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/student/advisor")
 @Api(tags = "学生导师接口", description = "学生获取导师相关信息接口")
+@Tag(name = "学生导师模块", description = "学生获取导师信息接口")
 public class StudentAdvisorController {
 
     @Resource
@@ -31,6 +34,7 @@ public class StudentAdvisorController {
      * GET /api/student/advisor/info
      */
     @GetMapping("/info")
+    @Operation(summary = "获取导师信息")
     @ApiOperation("获取导师信息")
     public Result<AdvisorInfoVO> getAdvisorInfo() {
         Long studentId = UserBusinessInfoUtils.getCurrentUserId();

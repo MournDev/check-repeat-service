@@ -4,6 +4,9 @@ import com.abin.checkrepeatservice.admin.service.ThesisArchiveService;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.annotation.OperationLog;
 import jakarta.annotation.Resource;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -19,6 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/teacher/thesis")
 @PreAuthorize("hasAuthority('TEACHER')")
+@Tag(name = "教师论文定稿", description = "指导教师确认论文最终版本")
 public class TeacherThesisController {
 
     @Resource
@@ -28,8 +32,11 @@ public class TeacherThesisController {
      * 定稿确认：仅该论文的指导教师可操作
      */
     @PostMapping("/{paperId}/finalize")
+    @Operation(summary = "论文定稿确认", description = "仅该论文的指导教师可操作")
     @OperationLog(type = "teacher_thesis_finalize", description = "教师定稿确认")
-    public Result<String> finalize(@PathVariable Long paperId) {
+    public Result<String> finalize(
+            @Parameter(description = "论文ID", required = true)
+            @PathVariable Long paperId) {
         return thesisArchiveService.finalizePaper(paperId);
     }
 }

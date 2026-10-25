@@ -21,6 +21,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import java.util.Map;
 import java.util.Set;
 
@@ -39,6 +42,7 @@ import java.util.Set;
 @RequestMapping("/api/knowledge/admin/articles")
 @PreAuthorize("hasAuthority('ADMIN')")
 @Slf4j
+@Tag(name = "知识库管理", description = "管理端知识库文章的增删改查与状态管理")
 public class KnowledgeAdminController {
 
     /**
@@ -54,11 +58,16 @@ public class KnowledgeAdminController {
      *
      * 出参：data.records / data.total（MyBatis-Plus Page 的序列化结构）
      */
+    @Operation(summary = "分页查询文章列表", description = "含草稿/归档文章及正文，供编辑弹窗回填")
     @GetMapping
     public Result<Page<KnowledgeArticle>> listArticles(
+            @Parameter(description = "当前页码，默认 1")
             @RequestParam(defaultValue = "1") Integer page,
+            @Parameter(description = "每页条数，默认 10")
             @RequestParam(defaultValue = "10") Integer size,
+            @Parameter(description = "搜索关键字（可选）")
             @RequestParam(required = false) String keyword,
+            @Parameter(description = "文章状态（可选）")
             @RequestParam(required = false) String status) {
         log.info("接收知识库文章管理列表请求: page={}, size={}, keyword={}, status={}", page, size, keyword, status);
         return Result.success(knowledgeArticleService.getAdminArticlePage(keyword, status, page, size));
@@ -67,9 +76,10 @@ public class KnowledgeAdminController {
     /**
      * 新增文章（作者取当前登录管理员）
      */
+    @Operation(summary = "新增文章", description = "作者取当前登录管理员")
     @PostMapping
     @OperationLog(type = "knowledge_article_create", description = "新增知识库文章")
-    public Result<Long> createArticle(@Valid @RequestBody KnowledgeArticleReq req) {
+    public Result<Long> createArticle(@Parameter(description = "知识库文章新增请求体", required = true) @Valid @RequestBody KnowledgeArticleReq req) {
         log.info("接收新增知识库文章请求: title={}", req.getTitle());
         Long id = knowledgeArticleService.createArticle(req);
         return Result.success("创建成功", id);
@@ -78,10 +88,11 @@ public class KnowledgeAdminController {
     /**
      * 更新文章
      */
+    @Operation(summary = "更新文章")
     @PutMapping("/{id}")
     @OperationLog(type = "knowledge_article_update", description = "更新知识库文章")
-    public Result<String> updateArticle(@PathVariable("id") Long id,
-                                        @Valid @RequestBody KnowledgeArticleReq req) {
+    public Result<String> updateArticle(@Parameter(description = "文章ID", required = true) @PathVariable("id") Long id,
+                                        @Parameter(description = "知识库文章更新请求体", required = true) @Valid @RequestBody KnowledgeArticleReq req) {
         log.info("接收更新知识库文章请求: id={}, title={}", id, req.getTitle());
         if (!knowledgeArticleService.updateArticle(id, req)) {
             return Result.error(ResultCode.RESOURCE_NOT_FOUND, "文章不存在或已删除");
@@ -94,10 +105,11 @@ public class KnowledgeAdminController {
      *
      * 前端把 status 放在请求体里（{ "status": "PUBLISHED" }），不是查询参数。
      */
+    @Operation(summary = "更新文章状态", description = "发布 / 下架归档，status 放在请求体中")
     @PutMapping("/{id}/status")
     @OperationLog(type = "knowledge_article_status_update", description = "更新知识库文章状态")
-    public Result<String> updateArticleStatus(@PathVariable("id") Long id,
-                                              @RequestBody Map<String, String> body) {
+    public Result<String> updateArticleStatus(@Parameter(description = "文章ID", required = true) @PathVariable("id") Long id,
+                                              @Parameter(description = "请求体：status 为 DRAFT/PUBLISHED/ARCHIVED", required = true) @RequestBody Map<String, String> body) {
         String status = body == null ? null : body.get("status");
         log.info("接收更新知识库文章状态请求: id={}, status={}", id, status);
         if (status == null || !VALID_STATUS.contains(status)) {
@@ -112,9 +124,10 @@ public class KnowledgeAdminController {
     /**
      * 删除文章（逻辑删除）
      */
+    @Operation(summary = "删除文章", description = "逻辑删除")
     @DeleteMapping("/{id}")
     @OperationLog(type = "knowledge_article_delete", description = "删除知识库文章")
-    public Result<String> deleteArticle(@PathVariable("id") Long id) {
+    public Result<String> deleteArticle(@Parameter(description = "文章ID", required = true) @PathVariable("id") Long id) {
         log.info("接收删除知识库文章请求: id={}", id);
         if (!knowledgeArticleService.deleteArticle(id)) {
             return Result.error(ResultCode.RESOURCE_NOT_FOUND, "文章不存在或已删除");

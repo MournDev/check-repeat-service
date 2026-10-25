@@ -9,6 +9,9 @@ import com.abin.checkrepeatservice.common.annotation.OperationLog;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -28,6 +31,7 @@ import org.springframework.web.bind.annotation.*;
 @RequiredArgsConstructor
 @PreAuthorize("hasAuthority('ADMIN')")
 @Api(tags = "相似度阈值设置")
+@Tag(name = "相似度阈值设置", description = "相似度阈值设置的获取与更新")
 public class SimilarityThresholdController {
 
     private final SimilarityThresholdService similarityThresholdService;
@@ -35,6 +39,7 @@ public class SimilarityThresholdController {
     /**
      * 获取相似度阈值设置
      */
+    @Operation(summary = "获取相似度阈值设置")
     @GetMapping
     @ApiOperation("获取相似度阈值设置")
     public Result<SimilarityThresholdVO> getThresholds() {
@@ -44,10 +49,11 @@ public class SimilarityThresholdController {
     /**
      * 更新相似度阈值设置（整体覆盖）
      */
+    @Operation(summary = "更新相似度阈值设置", description = "整体覆盖")
     @PutMapping
     @ApiOperation("更新相似度阈值设置")
     @OperationLog(type = "similarity_threshold_update", description = "更新相似度阈值设置")
-    public Result<Void> updateThresholds(@RequestBody SimilarityThresholdUpdateReq req) {
+    public Result<Void> updateThresholds(@Parameter(description = "相似度阈值设置", required = true) @RequestBody SimilarityThresholdUpdateReq req) {
         similarityThresholdService.updateThresholds(req);
         return Result.success("相似度阈值设置更新成功");
     }

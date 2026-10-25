@@ -5,6 +5,9 @@ import com.abin.checkrepeatservice.admin.service.SystemConfigService;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.annotation.OperationLog;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,6 +25,7 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/admin/config")
 @PreAuthorize("hasAuthority('ADMIN')")
 @Slf4j
+@Tag(name = "系统配置", description = "性能配置的读取、更新、重置与试应用")
 public class SystemConfigController {
 
     @Autowired
@@ -30,10 +34,11 @@ public class SystemConfigController {
     /**
      * 更新性能配置（仅超级管理员）
      */
+    @Operation(summary = "更新性能配置", description = "仅超级管理员可调用")
     @PutMapping("/performance")
     @PreAuthorize("hasAuthority('SUPER_ADMIN')")
     @OperationLog(type = "admin_config_performance_update", description = "管理员更新性能配置", recordResult = true)
-    public Result<Void> updatePerformanceConfig(@Valid @RequestBody PerformanceConfigDTO performanceConfig) {
+    public Result<Void> updatePerformanceConfig(@Parameter(description = "性能配置：并发上限、队列大小与缓存策略", required = true) @Valid @RequestBody PerformanceConfigDTO performanceConfig) {
         log.info("接收更新性能配置请求: maxConcurrent={}, queueSize={}, cacheStrategy={}",
                 performanceConfig.getMaxConcurrent(),
                 performanceConfig.getQueueSize(),
@@ -45,6 +50,7 @@ public class SystemConfigController {
     /**
      * 获取性能配置
      */
+    @Operation(summary = "获取性能配置")
     @GetMapping("/performance")
     public Result<PerformanceConfigDTO> getPerformanceConfig() {
         log.info("接收获取性能配置请求");
@@ -55,6 +61,7 @@ public class SystemConfigController {
     /**
      * 重置性能配置为默认值（仅超级管理员）
      */
+    @Operation(summary = "重置性能配置为默认值", description = "仅超级管理员可调用")
     @PostMapping("/performance/reset")
     @PreAuthorize("hasAuthority('SUPER_ADMIN')")
     @OperationLog(type = "admin_config_performance_reset", description = "管理员重置性能配置为默认值")
@@ -68,10 +75,11 @@ public class SystemConfigController {
     /**
      * 测试性能配置应用（仅超级管理员；试应用同样会实际生效到运行时线程池/缓存）
      */
+    @Operation(summary = "测试性能配置应用", description = "仅超级管理员；试应用会实际生效到运行时线程池/缓存")
     @PostMapping("/performance/test")
     @PreAuthorize("hasAuthority('SUPER_ADMIN')")
     @OperationLog(type = "admin_config_performance_test", description = "管理员测试应用性能配置")
-    public Result<Void> testPerformanceConfig(@Valid @RequestBody PerformanceConfigDTO performanceConfig) {
+    public Result<Void> testPerformanceConfig(@Parameter(description = "待试应用的性能配置", required = true) @Valid @RequestBody PerformanceConfigDTO performanceConfig) {
         log.info("接收测试性能配置请求: {}", performanceConfig);
         
         // 仅测试配置应用，不保存到数据库

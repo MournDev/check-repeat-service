@@ -16,6 +16,9 @@ import com.abin.checkrepeatservice.user.service.Impl.UserQueryService;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
@@ -33,6 +36,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/student/messages")
 @Api(tags = "学生消息接口", description = "学生端消息相关接口")
+@Tag(name = "学生消息模块", description = "学生与导师即时通讯相关接口")
 public class StudentMessageController {
 
     @Resource
@@ -46,6 +50,7 @@ public class StudentMessageController {
      * GET /api/student/messages/sessions
      */
     @GetMapping("/sessions")
+    @Operation(summary = "获取消息会话列表")
     @ApiOperation("获取消息会话列表")
     public Result<List<MessageSessionVO>> getMessageSessions() {
         Long studentId = UserBusinessInfoUtils.getCurrentUserId();
@@ -60,11 +65,12 @@ public class StudentMessageController {
      * GET /api/student/messages/list?sessionId=1&pageNum=1&pageSize=20
      */
     @GetMapping("/list")
+    @Operation(summary = "获取消息列表", description = "分页查询指定会话的消息")
     @ApiOperation("获取消息列表")
     public Result<Page<MessageVO>> getMessageList(
-            @RequestParam Long sessionId,
-            @RequestParam(defaultValue = "1") Integer pageNum,
-            @RequestParam(defaultValue = "20") Integer pageSize) {
+            @Parameter(description = "会话ID", required = true) @RequestParam Long sessionId,
+            @Parameter(description = "页码") @RequestParam(defaultValue = "1") Integer pageNum,
+            @Parameter(description = "每页条数") @RequestParam(defaultValue = "20") Integer pageSize) {
         Long studentId = UserBusinessInfoUtils.getCurrentUserId();
         log.info("获取消息列表 -学ID: {}, 会话ID: {}, 页码: {}, 页大小: {}", 
                 studentId, sessionId, pageNum, pageSize);
@@ -78,8 +84,10 @@ public class StudentMessageController {
      * POST /api/student/messages/send
      */
     @PostMapping("/send")
+    @Operation(summary = "发送消息")
     @ApiOperation("发送消息")
-    public Result<MessageVO> sendMessage(@Valid @RequestBody MessageSendDTO sendDTO) {
+    public Result<MessageVO> sendMessage(
+            @Parameter(description = "消息发送请求参数", required = true) @Valid @RequestBody MessageSendDTO sendDTO) {
         Long studentId = UserBusinessInfoUtils.getCurrentUserId();
         log.info("发送消息 -学ID: {}, 会话ID: {},接收者ID: {}", 
                 studentId, sendDTO.getSessionId(), sendDTO.getReceiverId());
@@ -93,8 +101,10 @@ public class StudentMessageController {
      * POST /api/student/messages/upload
      */
     @PostMapping("/upload")
+    @Operation(summary = "上传文件")
     @ApiOperation("上传文件")
-    public Result<FileUploadVO> uploadFile(@RequestParam("file") MultipartFile file) {
+    public Result<FileUploadVO> uploadFile(
+            @Parameter(description = "上传文件", required = true) @RequestParam("file") MultipartFile file) {
         Long studentId = UserBusinessInfoUtils.getCurrentUserId();
         log.info("上传文件 - 学生ID: {}, 文件名: {}, 文件大小: {}", 
                 studentId, file.getOriginalFilename(), file.getSize());
@@ -108,8 +118,11 @@ public class StudentMessageController {
      * GET /api/student/messages/attachment/{attachmentId}
      */
     @GetMapping("/attachment/{attachmentId}")
+    @Operation(summary = "下载附件")
     @ApiOperation("下载附件")
-    public void downloadAttachment(@PathVariable Long attachmentId, HttpServletResponse response) {
+    public void downloadAttachment(
+            @Parameter(description = "附件ID", required = true) @PathVariable Long attachmentId,
+            HttpServletResponse response) {
         try {
             Long studentId = UserBusinessInfoUtils.getCurrentUserId();
             log.info("下载附件 - 学生 ID: {}, 附件 ID: {}", studentId, attachmentId);
@@ -133,8 +146,10 @@ public class StudentMessageController {
      * DELETE /api/student/messages/session/{sessionId}/clear
      */
     @DeleteMapping("/session/{sessionId}/clear")
+    @Operation(summary = "清空消息")
     @ApiOperation("清空消息")
-    public Result<String> clearMessages(@PathVariable String sessionId) {
+    public Result<String> clearMessages(
+            @Parameter(description = "会话ID", required = true) @PathVariable String sessionId) {
         Long studentId = UserBusinessInfoUtils.getCurrentUserId();
         
         // 验证sessionId参数
@@ -155,8 +170,11 @@ public class StudentMessageController {
      * POST /api/student/messages/export
      */
     @PostMapping("/export")
+    @Operation(summary = "导出聊天记录")
     @ApiOperation("导出聊天记录")
-    public void exportChatRecords(@Valid @RequestBody ChatExportDTO exportDTO, HttpServletResponse response) {
+    public void exportChatRecords(
+            @Parameter(description = "聊天记录导出请求参数", required = true) @Valid @RequestBody ChatExportDTO exportDTO,
+            HttpServletResponse response) {
         try {
             Long studentId = UserBusinessInfoUtils.getCurrentUserId();
             
@@ -189,8 +207,10 @@ public class StudentMessageController {
      * GET /api/student/messages/shared-files?sessionId=1
      */
     @GetMapping("/shared-files")
+    @Operation(summary = "获取共享文件列表")
     @ApiOperation("获取共享文件列表")
-    public Result<List<SharedFileVO>> getSharedFiles(@RequestParam Long sessionId) {
+    public Result<List<SharedFileVO>> getSharedFiles(
+            @Parameter(description = "会话ID", required = true) @RequestParam Long sessionId) {
         Long studentId = UserBusinessInfoUtils.getCurrentUserId();
         log.info("获取共享文件列表 - 学生ID: {}, 会话ID: {}", studentId, sessionId);
         
@@ -203,8 +223,11 @@ public class StudentMessageController {
      * GET /api/student/messages/shared-file/{fileId}
      */
     @GetMapping("/shared-file/{fileId}")
+    @Operation(summary = "下载共享文件")
     @ApiOperation("下载共享文件")
-    public void downloadSharedFile(@PathVariable Long fileId, HttpServletResponse response) {
+    public void downloadSharedFile(
+            @Parameter(description = "文件ID", required = true) @PathVariable Long fileId,
+            HttpServletResponse response) {
         try {
             Long studentId = UserBusinessInfoUtils.getCurrentUserId();
             log.info("下载共享文件 - 学生 ID: {}, 文件 ID: {}", studentId, fileId);
@@ -240,8 +263,10 @@ public class StudentMessageController {
      * PUT /api/student/messages/session/{sessionId}/read
      */
     @PutMapping("/session/{sessionId}/read")
+    @Operation(summary = "标记消息已读")
     @ApiOperation("标记消息已读")
-    public Result<String> markMessagesRead(@PathVariable String sessionId) {
+    public Result<String> markMessagesRead(
+            @Parameter(description = "会话ID", required = true) @PathVariable String sessionId) {
         Long studentId = UserBusinessInfoUtils.getCurrentUserId();
         
         // 验证sessionId参数
@@ -262,8 +287,10 @@ public class StudentMessageController {
      * DELETE /api/student/messages/{messageId}/recall
      */
     @DeleteMapping("/{messageId}/recall")
+    @Operation(summary = "撤回消息")
     @ApiOperation("撤回消息")
-    public Result<String> recallMessage(@PathVariable String messageId) {
+    public Result<String> recallMessage(
+            @Parameter(description = "消息ID", required = true) @PathVariable String messageId) {
         Long studentId = UserBusinessInfoUtils.getCurrentUserId();
         
         // 验证messageId参数

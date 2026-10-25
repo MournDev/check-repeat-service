@@ -10,6 +10,9 @@ import com.abin.checkrepeatservice.student.vo.LoginLogQueryReq;
 import com.abin.checkrepeatservice.user.dto.UpdateUserInfoReq;
 import com.abin.checkrepeatservice.user.vo.LoginVO;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
@@ -19,6 +22,7 @@ import org.springframework.web.multipart.MultipartFile;
 @RestController
 @Slf4j
 @RequestMapping("/api/user/")
+@Tag(name = "用户信息模块", description = "当前用户信息查询、资料与账号安全维护接口")
 public class StudentInfoController {
 
     @Resource
@@ -33,6 +37,7 @@ public class StudentInfoController {
      * @return 当前登录用户信息
      */
     @GetMapping("/info")
+    @Operation(summary = "查询当前登录用户信息")
     public Result<LoginVO> getCurrentUserInfo() {
         log.info("接收当前用户信息查询请求");
         return infoService.getCurrentUserInfo();
@@ -44,7 +49,9 @@ public class StudentInfoController {
      * @return 更新后的用户信息
      */
     @PostMapping("/update-info")
-    public Result<LoginVO> updateUserInfo(@Valid @RequestBody UpdateUserInfoReq updateReq) {
+    @Operation(summary = "更新用户信息")
+    public Result<LoginVO> updateUserInfo(
+            @Parameter(description = "用户信息更新请求", required = true) @Valid @RequestBody UpdateUserInfoReq updateReq) {
         log.info("接收用户信息更新请求：用户ID={}", updateReq.getUserId());
         return infoService.updateUserInfo(updateReq);
     }
@@ -54,7 +61,9 @@ public class StudentInfoController {
      * @return 头像访问URL
      */
     @PostMapping("/upload-avatar")
-    public Result<String> uploadAvatar(@RequestParam("file") MultipartFile file) {
+    @Operation(summary = "上传用户头像", description = "返回头像访问URL")
+    public Result<String> uploadAvatar(
+            @Parameter(description = "头像文件", required = true) @RequestParam("file") MultipartFile file) {
         log.info("接收用户头像上传请求：");
         // 服务层已经把成功和失败都封在 Result 里了，这里直接返回。
         // 曾经这里写的是 Result.success("头像上传成功", avatar.getData())，
@@ -69,7 +78,9 @@ public class StudentInfoController {
      * @return 登录历史列表
      */
     @PostMapping("/login-history")
-    public Result<Page<LoginHistoryVO>> getLoginHistory(@RequestBody LoginLogQueryReq queryReq) {
+    @Operation(summary = "查询用户登录历史")
+    public Result<Page<LoginHistoryVO>> getLoginHistory(
+            @Parameter(description = "登录历史查询条件", required = true) @RequestBody LoginLogQueryReq queryReq) {
         log.info("接收查询登录历史请求：{}", queryReq);
         return infoService.getLoginHistory(queryReq);
     }
@@ -80,7 +91,9 @@ public class StudentInfoController {
      * @return 修改结果
      */
     @PutMapping("/update-password")
-    public Result<String> updatePassword(@Valid @RequestBody UpdatePasswordReq updatePasswordReq) {
+    @Operation(summary = "修改用户密码")
+    public Result<String> updatePassword(
+            @Parameter(description = "密码修改请求", required = true) @Valid @RequestBody UpdatePasswordReq updatePasswordReq) {
         log.info("接收用户密码修改请求");
         return infoService.updatePassword(updatePasswordReq);
     }
@@ -91,7 +104,9 @@ public class StudentInfoController {
      * @return 发送结果
      */
     @PostMapping("/send-verify-email")
-    public Result<String> sendVerifyEmail(@RequestParam String email) {
+    @Operation(summary = "发送邮箱验证邮件")
+    public Result<String> sendVerifyEmail(
+            @Parameter(description = "目标邮箱地址", required = true) @RequestParam String email) {
         log.info("接收发送邮箱验证邮件请求：邮箱={}", email);
         return infoService.sendVerifyEmail(email);
     }
@@ -101,7 +116,9 @@ public class StudentInfoController {
      * @param token 验证令牌
      */
     @GetMapping("/verify-email")
-    public Result<String> verifyEmail(@RequestParam String token) {
+    @Operation(summary = "验证邮箱")
+    public Result<String> verifyEmail(
+            @Parameter(description = "验证令牌", required = true) @RequestParam String token) {
         infoService.verifyEmail(token);
         return Result.success("邮箱验证成功");
     }
@@ -112,7 +129,9 @@ public class StudentInfoController {
      * @return 发送结果
      */
     @PostMapping("/send-email-code")
-    public Result<String> sendEmailCode(@RequestParam String email) {
+    @Operation(summary = "发送邮箱验证码")
+    public Result<String> sendEmailCode(
+            @Parameter(description = "目标邮箱地址", required = true) @RequestParam String email) {
         log.info("接收发送邮箱验证码请求：邮箱={}", email);
         return infoService.sendEmailCode(email);
     }
@@ -123,7 +142,9 @@ public class StudentInfoController {
      * @return 更新结果
      */
     @PostMapping("/update-email")
-    public Result<String> updateEmail(@Valid @RequestBody UpdateEmailReq updateReq) {
+    @Operation(summary = "更新用户邮箱")
+    public Result<String> updateEmail(
+            @Parameter(description = "邮箱更新请求", required = true) @Valid @RequestBody UpdateEmailReq updateReq) {
         log.info("接收用户邮箱更新请求");
         return infoService.updateEmail(updateReq);
     }

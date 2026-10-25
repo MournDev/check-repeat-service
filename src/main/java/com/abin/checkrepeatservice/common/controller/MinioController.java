@@ -6,6 +6,9 @@ import com.alibaba.fastjson2.JSON;
 import io.minio.*;
 import io.minio.errors.ErrorResponseException;
 import io.minio.messages.Item;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.IOUtils;
@@ -39,6 +42,7 @@ import java.util.*;
 @RestController
 @RequestMapping("/api/minio")
 @PreAuthorize("hasAuthority('ADMIN')")
+@Tag(name = "MinIO管理接口", description = "MinIO 连接测试、对象列表、上传、下载与删除等运维接口")
 public class MinioController {
 
     /** 管理端手工上传允许的扩展名白名单 */
@@ -54,6 +58,7 @@ public class MinioController {
     /**
      * 测试MinIO连接
      */
+    @Operation(summary = "测试MinIO连接", description = "检查配置的存储桶是否存在且可访问")
     @GetMapping("/test-connection")
     public Result<String> testConnection() throws Exception {
         boolean exists = minioClient.bucketExists(
@@ -72,6 +77,7 @@ public class MinioController {
     /**
      * 列出存储桶中的所有对象
      */
+    @Operation(summary = "列出存储桶对象", description = "列出存储桶中的所有对象")
     @GetMapping("/list")
     public Result<List<Object>> list() throws Exception {
         Iterable<io.minio.Result<Item>> myObjects = minioClient.listObjects(ListObjectsArgs.builder()
@@ -95,8 +101,9 @@ public class MinioController {
     /**
      * 上传文件（objectKey 由服务端生成，避免覆盖与路径穿越）
      */
+    @Operation(summary = "上传文件", description = "objectKey 由服务端生成，避免覆盖与路径穿越")
     @PostMapping("/upload")
-    public Result<Map<String, Object>> upload(@RequestParam(name = "file", required = false) MultipartFile[] files) {
+    public Result<Map<String, Object>> upload(@Parameter(description = "上传文件列表") @RequestParam(name = "file", required = false) MultipartFile[] files) {
         if (files == null || files.length == 0) {
             return Result.error(ResultCode.PARAM_ERROR, "上传文件不能为空");
         }
@@ -142,8 +149,9 @@ public class MinioController {
     /**
      * 下载文件
      */
+    @Operation(summary = "下载文件", description = "下载指定对象并写入响应流")
     @GetMapping("/download/{fileName}")
-    public void download(HttpServletResponse response, @PathVariable("fileName") String fileName) {
+    public void download(HttpServletResponse response, @Parameter(description = "对象名称", required = true) @PathVariable("fileName") String fileName) {
         if (!isSafeObjectName(fileName)) {
             reject(response, HttpServletResponse.SC_BAD_REQUEST, "非法的对象名称");
             return;
@@ -185,8 +193,9 @@ public class MinioController {
     /**
      * 删除文件
      */
+    @Operation(summary = "删除文件", description = "删除指定对象")
     @DeleteMapping("/delete/{fileName}")
-    public Result<String> delete(@PathVariable("fileName") String fileName) throws Exception {
+    public Result<String> delete(@Parameter(description = "对象名称", required = true) @PathVariable("fileName") String fileName) throws Exception {
         if (!isSafeObjectName(fileName)) {
             return Result.error(ResultCode.PARAM_ERROR, "非法的对象名称");
         }

@@ -132,6 +132,7 @@ public class TeacherStudentManagementController {
     @OperationLog(type = "assign_advisor", description = "分配导师")
     public Result<String> assignAdvisor(
             @Parameter(description = "学生ID") @PathVariable Long studentId,
+            @Parameter(description = "分配导师请求体", required = true)
             @RequestBody AssignAdvisorDTO assignAdvisorDTO) {
         
         // 数据范围收口：教师只可操作「本人名下」的学生，防止借分配入口改他人指导关系
@@ -163,7 +164,9 @@ public class TeacherStudentManagementController {
     @PostMapping("/messages/send")
     @Operation(summary = "发送消息", description = "向学生发送消息")
     @OperationLog(type = "send_message", description = "发送消息给学生")
-    public Result<String> sendMessage(@RequestBody SendMessageDTO sendMessageDTO) {
+    public Result<String> sendMessage(
+            @Parameter(description = "消息发送请求体", required = true)
+            @RequestBody SendMessageDTO sendMessageDTO) {
         
         log.info("发送消息: receiverId={}, title={}", sendMessageDTO.getReceiverId(), sendMessageDTO.getTitle());
         boolean result = studentManagementService.sendMessage(sendMessageDTO);
@@ -182,7 +185,9 @@ public class TeacherStudentManagementController {
     @PreAuthorize("hasAuthority('ADMIN')")
     @Operation(summary = "批量分配导师", description = "为多个学生批量分配同一指导老师（仅管理员）")
     @OperationLog(type = "batch_assign_advisor", description = "批量分配导师")
-    public Result<Object> batchAssignAdvisor(@RequestBody BatchAssignAdvisorDTO batchAssignDTO) {
+    public Result<Object> batchAssignAdvisor(
+            @Parameter(description = "批量分配导师请求体", required = true)
+            @RequestBody BatchAssignAdvisorDTO batchAssignDTO) {
         
         log.info("批量分配导师: studentIds={}, advisorId={}", 
                 batchAssignDTO.getStudentIds(), batchAssignDTO.getAdvisorId());
@@ -197,7 +202,9 @@ public class TeacherStudentManagementController {
     @PostMapping("/messages/batch-send")
     @Operation(summary = "批量发送消息", description = "向多个学生批量发送相同消息")
     @OperationLog(type = "batch_send_message", description = "批量发送消息")
-    public Result<Object> batchSendMessage(@RequestBody BatchSendMessageDTO batchSendDTO) {
+    public Result<Object> batchSendMessage(
+            @Parameter(description = "批量发送消息请求体", required = true)
+            @RequestBody BatchSendMessageDTO batchSendDTO) {
         
         log.info("批量发送消息: receiverIds={}, title={}", 
                 batchSendDTO.getReceiverIds(), batchSendDTO.getTitle());
@@ -213,7 +220,9 @@ public class TeacherStudentManagementController {
     @PreAuthorize("hasAuthority('ADMIN')")
     @Operation(summary = "批量删除学生", description = "批量删除多个学生（仅管理员）")
     @OperationLog(type = "batch_delete_student", description = "批量删除学生")
-    public Result<Object> batchDeleteStudents(@RequestBody BatchDeleteDTO batchDeleteDTO) {
+    public Result<Object> batchDeleteStudents(
+            @Parameter(description = "批量删除请求体", required = true)
+            @RequestBody BatchDeleteDTO batchDeleteDTO) {
         
         log.info("批量删除学生: studentIds={}", batchDeleteDTO.getStudentIds());
         BatchOperationResultDTO result = studentManagementService.batchDeleteStudents(batchDeleteDTO);
@@ -261,7 +270,9 @@ public class TeacherStudentManagementController {
     @PreAuthorize("hasAuthority('ADMIN')")
     @Operation(summary = "添加学生", description = "添加新的学生用户（仅管理员）")
     @OperationLog(type = "add_student", description = "添加学生")
-    public Result<Object> addStudentRest(@RequestBody AddStudentDTO addStudentDTO) {
+    public Result<Object> addStudentRest(
+            @Parameter(description = "添加学生请求体", required = true)
+            @RequestBody AddStudentDTO addStudentDTO) {
         return addStudent(addStudentDTO);
     }
 
@@ -273,7 +284,9 @@ public class TeacherStudentManagementController {
     @PreAuthorize("hasAuthority('ADMIN')")
     @Operation(summary = "添加学生", description = "添加新的学生用户（仅管理员）")
     @OperationLog(type = "add_student", description = "添加学生")
-    public Result<Object> addStudent(@RequestBody AddStudentDTO addStudentDTO) {
+    public Result<Object> addStudent(
+            @Parameter(description = "添加学生请求体", required = true)
+            @RequestBody AddStudentDTO addStudentDTO) {
         
         log.info("添加学生: username={}, studentName={}", 
                 addStudentDTO.getUsername(), addStudentDTO.getStudentName());
@@ -313,7 +326,9 @@ public class TeacherStudentManagementController {
     @PreAuthorize("hasAuthority('ADMIN')")
     @Operation(summary = "导入学生数据", description = "从Excel文件导入学生数据（仅管理员）")
     @OperationLog(type = "import_students", description = "导入学生数据")
-    public Result<Object> importStudents(@RequestParam("file") MultipartFile file) {
+    public Result<Object> importStudents(
+            @Parameter(description = "学生导入 Excel 文件", required = true)
+            @RequestParam("file") MultipartFile file) {
         
         log.info("导入学生数据: fileName={}", file.getOriginalFilename());
         ImportResultDTO result = studentManagementService.importStudents(file);

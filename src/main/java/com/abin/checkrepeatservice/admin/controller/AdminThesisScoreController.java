@@ -5,6 +5,9 @@ import com.abin.checkrepeatservice.common.annotation.OperationLog;
 import com.abin.checkrepeatservice.common.service.ScoreComposeService;
 import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -24,6 +27,7 @@ import java.math.BigDecimal;
 @RestController
 @RequestMapping("/api/admin/thesis")
 @PreAuthorize("hasAuthority('ADMIN')")
+@Tag(name = "论文总评成绩", description = "按最新权重与数据源重算论文总评成绩")
 public class AdminThesisScoreController {
 
     @Resource
@@ -36,9 +40,12 @@ public class AdminThesisScoreController {
      * 重算论文总评成绩：按当前权重配置与最新数据源（合格签核/已提交评阅/终期答辩pass）合成，
      * 并回写 paper_info.final_score，返回新成绩。
      */
+    @Operation(summary = "重算论文总评成绩", description = "按当前权重配置与最新数据源合成总评成绩，并回写 paper_info.final_score")
     @PostMapping("/{paperId}/recompute-score")
     @OperationLog(type = "admin_thesis_score_recompute", description = "管理员重算论文总评成绩")
-    public Result<BigDecimal> recomputeScore(@PathVariable("paperId") Long paperId) {
+    public Result<BigDecimal> recomputeScore(
+            @Parameter(description = "论文ID", required = true)
+            @PathVariable("paperId") Long paperId) {
         // 合成自带硬校验：论文不存在 404、缺指导分 40914、权重非法 40915，失败即整体不回写
         BigDecimal finalScore = scoreComposeService.compose(paperId);
 

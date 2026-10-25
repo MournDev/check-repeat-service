@@ -8,6 +8,9 @@ import com.abin.checkrepeatservice.teacher.dto.PaperCheckSignoffVO;
 import com.abin.checkrepeatservice.teacher.service.CheckReportSignoffService;
 import jakarta.annotation.Resource;
 import jakarta.validation.Valid;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
@@ -21,6 +24,7 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/teacher")
 @PreAuthorize("hasAuthority('TEACHER')")
+@Tag(name = "教师查重签核", description = "查重报告签核与指导看板")
 public class TeacherCheckController {
 
     @Resource
@@ -30,9 +34,13 @@ public class TeacherCheckController {
      * 签核论文最新一次查重报告（qualified=1 合格放行 / 0 不合格退回；指导评分统一必填）
      */
     @PostMapping("/papers/{paperId}/check-signoff")
+    @Operation(summary = "签核查重报告", description = "合格放行或不合格退回，指导评分必填")
     @OperationLog(type = "teacher_check_signoff", description = "教师签核查重报告")
-    public Result<String> signoff(@PathVariable("paperId") Long paperId,
-                                  @Valid @RequestBody PaperCheckSignoffReq req) {
+    public Result<String> signoff(
+            @Parameter(description = "论文ID", required = true)
+            @PathVariable("paperId") Long paperId,
+            @Parameter(description = "查重签核请求体", required = true)
+            @Valid @RequestBody PaperCheckSignoffReq req) {
         // 路径参数优先：覆盖请求体里的 paperId，避免前端 URL 与 body 传不一致对象时签错论文
         req.setPaperId(paperId);
         return checkReportSignoffService.sign(req);
@@ -42,7 +50,10 @@ public class TeacherCheckController {
      * 查询论文最新一次签核记录（未签核时 data 为 null）
      */
     @GetMapping("/papers/{paperId}/check-signoff")
-    public Result<PaperCheckSignoffVO> getSignoff(@PathVariable("paperId") Long paperId) {
+    @Operation(summary = "查询签核记录", description = "查询论文最新一次签核记录，未签核时返回 null")
+    public Result<PaperCheckSignoffVO> getSignoff(
+            @Parameter(description = "论文ID", required = true)
+            @PathVariable("paperId") Long paperId) {
         return checkReportSignoffService.getSignoff(paperId);
     }
 
@@ -50,6 +61,7 @@ public class TeacherCheckController {
      * 指导看板：我指导论文的状态分布 + 最近 50 条明细（相似比/总评成绩一览）
      */
     @GetMapping("/dashboard/guidance-progress")
+    @Operation(summary = "获取指导看板数据", description = "我指导论文的状态分布与最近明细")
     public Result<GuidanceProgressVO> guidanceProgress() {
         return checkReportSignoffService.guidanceProgress();
     }

@@ -8,6 +8,9 @@ import com.abin.checkrepeatservice.user.dto.MessageTemplateReq;
 import com.abin.checkrepeatservice.user.service.MessageTemplateService;
 import com.abin.checkrepeatservice.user.vo.TemplateRenderVO;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
@@ -41,6 +44,7 @@ import java.util.Map;
 @RequestMapping("/api/message-templates")
 @PreAuthorize("hasAuthority('ADMIN')")
 @Slf4j
+@Tag(name = "消息模板管理", description = "消息模板的分页查询、增删改与渲染预览")
 public class MessageTemplateController {
 
     @Resource
@@ -51,11 +55,16 @@ public class MessageTemplateController {
      *
      * 出参：data.records / data.total（MyBatis-Plus Page 的序列化结构）
      */
+    @Operation(summary = "分页查询模板列表", description = "查询全部模板（含已禁用）")
     @GetMapping("/list")
     public Result<Page<MessageTemplate>> getTemplateList(
+            @Parameter(description = "当前页码，默认 1")
             @RequestParam(defaultValue = "1") Integer page,
+            @Parameter(description = "每页条数，默认 10")
             @RequestParam(defaultValue = "10") Integer size,
+            @Parameter(description = "模板类型（可选）")
             @RequestParam(required = false) String templateType,
+            @Parameter(description = "模板名称（可选）")
             @RequestParam(required = false) String templateName) {
         log.info("接收消息模板列表请求: page={}, size={}, templateType={}, templateName={}",
                 page, size, templateType, templateName);
@@ -65,8 +74,9 @@ public class MessageTemplateController {
     /**
      * 按编码查询模板（含已禁用，管理端编辑用）
      */
+    @Operation(summary = "按编码查询模板", description = "查询全部模板（含已禁用），供管理端编辑使用")
     @GetMapping("/code/{templateCode}")
-    public Result<MessageTemplate> getTemplateByCode(@PathVariable("templateCode") String templateCode) {
+    public Result<MessageTemplate> getTemplateByCode(@Parameter(description = "模板编码", required = true) @PathVariable("templateCode") String templateCode) {
         MessageTemplate template = messageTemplateService.getTemplateByCode(templateCode);
         if (template == null) {
             return Result.error(ResultCode.RESOURCE_NOT_FOUND, "消息模板不存在");
@@ -77,18 +87,20 @@ public class MessageTemplateController {
     /**
      * 按类型查询模板列表（含已禁用）
      */
+    @Operation(summary = "按类型查询模板列表", description = "查询全部模板（含已禁用）")
     @GetMapping("/type/{templateType}")
-    public Result<List<MessageTemplate>> getTemplatesByType(@PathVariable("templateType") String templateType) {
+    public Result<List<MessageTemplate>> getTemplatesByType(@Parameter(description = "模板类型", required = true) @PathVariable("templateType") String templateType) {
         return Result.success(messageTemplateService.getTemplatesByType(templateType));
     }
 
     /**
      * 新增模板
      */
+    @Operation(summary = "新增模板")
     @PostMapping("/create")
     @OperationLog(type = "message_template_create", description = "新增消息模板")
     @PreAuthorize("hasAuthority('SUPER_ADMIN')")
-    public Result<Long> createTemplate(@Valid @RequestBody MessageTemplateReq req) {
+    public Result<Long> createTemplate(@Parameter(description = "消息模板新增请求体", required = true) @Valid @RequestBody MessageTemplateReq req) {
         log.info("接收新增消息模板请求: code={}, name={}", req.getTemplateCode(), req.getTemplateName());
         // template_code 是唯一键，先给出可读的提示；并发下仍由库的唯一约束兜底
         if (messageTemplateService.getTemplateByCode(req.getTemplateCode()) != null) {
@@ -100,10 +112,11 @@ public class MessageTemplateController {
     /**
      * 更新模板（id 在请求体里）
      */
+    @Operation(summary = "更新模板", description = "模板ID在请求体中")
     @PutMapping("/update")
     @OperationLog(type = "message_template_update", description = "更新消息模板")
     @PreAuthorize("hasAuthority('SUPER_ADMIN')")
-    public Result<String> updateTemplate(@Valid @RequestBody MessageTemplateReq req) {
+    public Result<String> updateTemplate(@Parameter(description = "消息模板更新请求体", required = true) @Valid @RequestBody MessageTemplateReq req) {
         log.info("接收更新消息模板请求: id={}, code={}", req.getId(), req.getTemplateCode());
         if (req.getId() == null) {
             return Result.error(ResultCode.PARAM_ERROR, "模板ID不能为空");
@@ -117,10 +130,11 @@ public class MessageTemplateController {
     /**
      * 删除模板（物理删除，不可恢复）
      */
+    @Operation(summary = "删除模板", description = "物理删除，不可恢复")
     @DeleteMapping("/delete/{id}")
     @OperationLog(type = "message_template_delete", description = "删除消息模板")
     @PreAuthorize("hasAuthority('SUPER_ADMIN')")
-    public Result<String> deleteTemplate(@PathVariable("id") Long id) {
+    public Result<String> deleteTemplate(@Parameter(description = "模板ID", required = true) @PathVariable("id") Long id) {
         log.info("接收删除消息模板请求: id={}", id);
         if (!messageTemplateService.deleteTemplate(id)) {
             return Result.error(ResultCode.RESOURCE_NOT_FOUND, "消息模板不存在");
@@ -133,10 +147,12 @@ public class MessageTemplateController {
      *
      * isActive 走查询参数（前端 toggleTemplateStatus 用的是 params 而非 body）
      */
+    @Operation(summary = "启用/禁用模板", description = "isActive 通过查询参数传入，1-启用，0-禁用")
     @PutMapping("/status/{id}")
     @OperationLog(type = "message_template_status_update", description = "更新消息模板启用状态")
     @PreAuthorize("hasAuthority('SUPER_ADMIN')")
-    public Result<String> updateTemplateStatus(@PathVariable("id") Long id,
+    public Result<String> updateTemplateStatus(@Parameter(description = "模板ID", required = true) @PathVariable("id") Long id,
+                                               @Parameter(description = "启用状态：1-启用，0-禁用")
                                                @RequestParam(required = false) Integer isActive) {
         log.info("接收更新消息模板状态请求: id={}, isActive={}", id, isActive);
         if (isActive == null || (isActive != 0 && isActive != 1)) {
@@ -150,12 +166,12 @@ public class MessageTemplateController {
 
     /**
      * 渲染模板预览（不发送）
-     *
-     * 请求体是【裸的变量对象】如 {"userName":"张三"}，不是包装结构；
      * 前端按钮在没填变量时也会 POST 一个空对象，所以 required = false。
      */
+    @Operation(summary = "渲染模板预览", description = "仅渲染不发送；请求体为变量对象，可为空")
     @PostMapping("/render/{templateCode}")
-    public Result<TemplateRenderVO> renderTemplate(@PathVariable("templateCode") String templateCode,
+    public Result<TemplateRenderVO> renderTemplate(@Parameter(description = "模板编码", required = true) @PathVariable("templateCode") String templateCode,
+                                                   @Parameter(description = "模板变量对象（可选）")
                                                    @RequestBody(required = false) Map<String, Object> variables) {
         log.info("接收消息模板渲染请求: code={}, 变量数={}",
                 templateCode, variables == null ? 0 : variables.size());

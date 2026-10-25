@@ -10,6 +10,9 @@ import com.abin.checkrepeatservice.user.service.AdvisorAssignService;
 import com.abin.checkrepeatservice.user.service.MessageService;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.annotations.Api;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -19,6 +22,7 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/assignment")
 @PreAuthorize("hasAuthority('TEACHER')")
 @Api(tags = "教师论文分配操作")
+@Tag(name = "教师论文分配", description = "待确认论文查询与接收/拒绝")
 @Slf4j
 public class TeacherAssignmentController {
 
@@ -32,8 +36,11 @@ public class TeacherAssignmentController {
      * 获取待确认论文列表
      */
     @GetMapping("/pending-papers")
+    @Operation(summary = "获取待确认论文列表", description = "分页查询待教师确认接收的论文")
     public Result<Page<PaperInfo>> getPendingPapers(
+            @Parameter(description = "页码，默认 1")
             @RequestParam(defaultValue = "1") Integer pageNum,
+            @Parameter(description = "每页条数，默认 20")
             @RequestParam(defaultValue = "20") Integer pageSize) {
         // P0-4：操作人一律取 JWT 当前登录人，不接受请求参数里的 teacherId
         Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
@@ -45,8 +52,11 @@ public class TeacherAssignmentController {
      * 确认接收论文
      */
     @PostMapping("/confirm")
+    @Operation(summary = "确认接收论文")
     @OperationLog(type = "teacher_confirm_assignment", description = "教师确认论文分配")
-    public Result<Boolean> confirmPaper(@RequestParam Long paperId) {
+    public Result<Boolean> confirmPaper(
+            @Parameter(description = "论文ID", required = true)
+            @RequestParam Long paperId) {
         // P0-4：从登录上下文取教师 ID，防止伪造 teacherId 代他人确认
         Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
         log.info("教师确认接收论文 - 论文ID: {}, 教师ID: {}", paperId, teacherId);
@@ -57,8 +67,11 @@ public class TeacherAssignmentController {
      * 拒绝接收论文
      */
     @PostMapping("/reject")
+    @Operation(summary = "拒绝接收论文")
     @OperationLog(type = "teacher_reject_assignment", description = "教师拒绝论文分配")
-    public Result<Boolean> rejectPaper(@RequestParam Long paperId) {
+    public Result<Boolean> rejectPaper(
+            @Parameter(description = "论文ID", required = true)
+            @RequestParam Long paperId) {
         // P0-4：同上，操作主体只认当前登录人
         Long teacherId = UserBusinessInfoUtils.getCurrentUserId();
         log.info("教师拒绝接收论文 - 论文ID: {}, 教师ID: {}", paperId, teacherId);

@@ -13,6 +13,9 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import java.time.Duration;
 
 /**
@@ -27,6 +30,7 @@ import java.time.Duration;
 @RestController
 @RequestMapping("/api/report/verify")
 @Slf4j
+@Tag(name = "报告验真", description = "凭报告编号匿名验真报告")
 public class ReportVerifyController {
 
     /**
@@ -45,8 +49,9 @@ public class ReportVerifyController {
     /**
      * 按报告编号验真（公开，无需登录）
      */
+    @Operation(summary = "按报告编号验真", description = "公开接口，仅返回报告元数据；按 IP 限流")
     @GetMapping("/{reportNo}")
-    public Result<ReportVerifyVO> verify(@PathVariable("reportNo") String reportNo,
+    public Result<ReportVerifyVO> verify(@Parameter(description = "报告编号", required = true) @PathVariable("reportNo") String reportNo,
                                          HttpServletRequest request) {
         String clientIp = resolveClientIp(request);
         checkRateLimit(clientIp);

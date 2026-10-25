@@ -12,6 +12,9 @@ import com.abin.checkrepeatservice.teacher.vo.ReviewStatusVO;
 import com.abin.checkrepeatservice.teacher.vo.SimilarityDistributionVO;
 import com.abin.checkrepeatservice.teacher.vo.TrendDataVO;
 import io.swagger.annotations.ApiOperation;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
@@ -31,15 +34,20 @@ import java.util.stream.Collectors;
 @RestController
 @RequestMapping("/api/teacher/data-analysis")
 @Slf4j
+@Tag(name = "教师数据分析", description = "教师审核趋势与统计数据分析")
 public class TeacherDataAnalysisController {
     @Autowired
     private TeacherDataAnalysisService trendService;
 
     @GetMapping("/review-trend")
     @ApiOperation("获取审核趋势图表数据")
+    @Operation(summary = "获取审核趋势图表数据", description = "按时间范围返回审核趋势的分类与系列数据")
     public Result<Map<String, Object>> getReviewTrendForRequirement(
+            @Parameter(description = "教师ID", required = true)
             @RequestParam Long teacherId,
+            @Parameter(description = "时间范围，默认 week")
             @RequestParam(defaultValue = "week") String timeRange,
+            @Parameter(description = "图表类型，默认 line")
             @RequestParam(defaultValue = "line") String chartType) {
         // 构造查询参数
         TrendQueryDTO query = new TrendQueryDTO();
@@ -78,8 +86,11 @@ public class TeacherDataAnalysisController {
 
     @GetMapping("/review-stats")
     @ApiOperation("获取审核统计概览数据")
+    @Operation(summary = "获取审核统计概览数据", description = "返回审核总数、待审核、已通过、当前学生数及环比趋势")
     public Result<Map<String, Object>> getReviewStatsForRequirement(
+            @Parameter(description = "教师ID", required = true)
             @RequestParam Long teacherId,
+            @Parameter(description = "时间范围，默认 week")
             @RequestParam(defaultValue = "week") String timeRange) {
         Map<String, Object> stats = trendService.getReviewStats(teacherId, timeRange);
         
@@ -101,8 +112,11 @@ public class TeacherDataAnalysisController {
 
     @GetMapping("/stats")
     @ApiOperation("获取统计数据概览")
+    @Operation(summary = "获取统计数据概览")
     public Result<Map<String, Object>> getReviewStats(
+            @Parameter(description = "教师ID", required = true)
             @RequestParam Long teacherId,
+            @Parameter(description = "时间范围，默认 week")
             @RequestParam(defaultValue = "week") String timeRange) {
         Map<String, Object> stats = trendService.getReviewStats(teacherId, timeRange);
         return Result.success(stats);
@@ -110,10 +124,15 @@ public class TeacherDataAnalysisController {
 
     @GetMapping("/detail-data")
     @ApiOperation("获取详细统计数据（表格数据）")
+    @Operation(summary = "获取详细统计数据（表格数据）", description = "按日返回审核数、通过数、不通过数、平均相似度等明细")
     public Result<List<Map<String, Object>>> getDetailDataForRequirement(
+            @Parameter(description = "教师ID", required = true)
             @RequestParam Long teacherId,
+            @Parameter(description = "时间范围，默认 week")
             @RequestParam(defaultValue = "week") String timeRange,
+            @Parameter(description = "开始日期（可选）")
             @RequestParam(required = false) String startDate,
+            @Parameter(description = "结束日期（可选）")
             @RequestParam(required = false) String endDate) {
         // 构造查询参数
         TrendQueryDTO query = new TrendQueryDTO();
@@ -151,11 +170,17 @@ public class TeacherDataAnalysisController {
 
     @PostMapping("/export")
     @ApiOperation("导出数据")
+    @Operation(summary = "导出数据", description = "按时间范围导出审核趋势数据文件")
     public void exportData(
+            @Parameter(description = "教师ID（可选）")
             @RequestParam(required = false) Long teacherId,
+            @Parameter(description = "时间范围，默认 week")
             @RequestParam(defaultValue = "week") String timeRange,
+            @Parameter(description = "图表类型，默认 daily")
             @RequestParam(defaultValue = "daily") String chartType,
+            @Parameter(description = "开始日期（可选）")
             @RequestParam(required = false) String startDate,
+            @Parameter(description = "结束日期（可选）")
             @RequestParam(required = false) String endDate,
             HttpServletResponse response) {
         try {
@@ -169,8 +194,11 @@ public class TeacherDataAnalysisController {
 
     @GetMapping("/review-status-distribution")
     @ApiOperation("获取审核状态分布数据")
+    @Operation(summary = "获取审核状态分布数据", description = "返回各审核状态的名称与数量")
     public Result<List<Map<String, Object>>> getReviewStatusDistributionForRequirement(
+            @Parameter(description = "教师ID", required = true)
             @RequestParam Long teacherId,
+            @Parameter(description = "时间范围，默认 week")
             @RequestParam(defaultValue = "week") String timeRange) {
         List<ReviewStatusVO> distribution = trendService.getReviewStatusDistribution(teacherId, timeRange);
         
@@ -188,8 +216,11 @@ public class TeacherDataAnalysisController {
 
     @GetMapping("/similarity-distribution")
     @ApiOperation("获取论文相似度分布数据")
+    @Operation(summary = "获取论文相似度分布数据", description = "返回相似度区间分类与各区间论文数量")
     public Result<Map<String, Object>> getSimilarityDistributionForRequirement(
+            @Parameter(description = "教师ID", required = true)
             @RequestParam Long teacherId,
+            @Parameter(description = "时间范围，默认 week")
             @RequestParam(defaultValue = "week") String timeRange) {
         List<SimilarityDistributionVO> distribution = trendService.getSimilarityDistribution(teacherId, timeRange);
         
@@ -221,8 +252,11 @@ public class TeacherDataAnalysisController {
 
     @GetMapping("/college-distribution")
     @ApiOperation("获取学院分布数据")
+    @Operation(summary = "获取学院分布数据", description = "返回学院分类与各学院学生人数")
     public Result<Map<String, Object>> getCollegeDistributionForRequirement(
+            @Parameter(description = "教师ID", required = true)
             @RequestParam Long teacherId,
+            @Parameter(description = "时间范围，默认 week")
             @RequestParam(defaultValue = "week") String timeRange) {
         List<CollegeDistributionVO> distribution = trendService.getCollegeDistribution(teacherId, timeRange);
         

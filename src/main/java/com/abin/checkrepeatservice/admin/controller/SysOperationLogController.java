@@ -7,6 +7,9 @@ import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.common.utils.DateTimeUtils;
 import com.abin.checkrepeatservice.pojo.entity.SysOperationLog;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -29,6 +32,7 @@ import java.util.stream.Collectors;
 @RequestMapping("/api/admin/operation-logs")
 @PreAuthorize("hasAuthority('ADMIN')")
 @Slf4j
+@Tag(name = "操作日志管理", description = "操作日志分页查询、统计、汇总与导出")
 public class SysOperationLogController {
 
     @Resource
@@ -37,14 +41,22 @@ public class SysOperationLogController {
     /**
      * 分页查询操作日志
      */
+    @Operation(summary = "分页查询操作日志")
     @GetMapping("/page")
     public Result<Page<SysOperationLog>> getOperationLogPage(
+            @Parameter(description = "当前页码，默认 1")
             @RequestParam(defaultValue = "1") Integer page,
+            @Parameter(description = "每页条数，默认 10")
             @RequestParam(defaultValue = "10") Integer size,
+            @Parameter(description = "操作类型（可选）")
             @RequestParam(required = false) String operationType,
+            @Parameter(description = "用户名（可选）")
             @RequestParam(required = false) String username,
+            @Parameter(description = "状态（可选）")
             @RequestParam(required = false) Integer status,
+            @Parameter(description = "开始时间（可选）")
             @RequestParam(required = false) String startTime,
+            @Parameter(description = "结束时间（可选）")
             @RequestParam(required = false) String endTime) {
         
         log.info("接收分页查询操作日志请求: page={}, size={}, type={}, user={}, status={}", 
@@ -64,8 +76,9 @@ public class SysOperationLogController {
     /**
      * 获取操作日志详情
      */
+    @Operation(summary = "获取操作日志详情")
     @GetMapping("/{id}")
-    public Result<SysOperationLog> getOperationLogDetail(@PathVariable Long id) {
+    public Result<SysOperationLog> getOperationLogDetail(@Parameter(description = "日志ID", required = true) @PathVariable Long id) {
         log.info("接收获取操作日志详情请求: id={}", id);
         
         SysOperationLog logDetail = sysOperationLogService.getOperationLogById(id);
@@ -80,8 +93,10 @@ public class SysOperationLogController {
     /**
      * 获取操作统计信息
      */
+    @Operation(summary = "获取操作统计信息")
     @GetMapping("/statistics")
     public Result<Map<String, Object>> getOperationStatistics(
+            @Parameter(description = "统计天数，默认 7")
             @RequestParam(defaultValue = "7") Integer days) {
         
         log.info("接收获取操作统计信息请求: days={}", days);
@@ -94,9 +109,12 @@ public class SysOperationLogController {
     /**
      * 获取热门操作统计
      */
+    @Operation(summary = "获取热门操作统计")
     @GetMapping("/hot-operations")
     public Result<List<Map<String, Object>>> getHotOperations(
+            @Parameter(description = "统计天数，默认 7")
             @RequestParam(defaultValue = "7") Integer days,
+            @Parameter(description = "返回条数，默认 10")
             @RequestParam(defaultValue = "10") Integer limit) {
         
         log.info("接收获取热门操作统计请求: days={}, limit={}", days, limit);
@@ -109,8 +127,10 @@ public class SysOperationLogController {
     /**
      * 获取用户活跃度统计
      */
+    @Operation(summary = "获取用户活跃度统计")
     @GetMapping("/user-activity")
     public Result<List<Map<String, Object>>> getUserActivityStatistics(
+            @Parameter(description = "统计天数，默认 7")
             @RequestParam(defaultValue = "7") Integer days) {
         
         log.info("接收获取用户活跃度统计请求: days={}", days);
@@ -123,8 +143,10 @@ public class SysOperationLogController {
     /**
      * 获取模块使用统计
      */
+    @Operation(summary = "获取模块使用统计")
     @GetMapping("/module-usage")
     public Result<List<Map<String, Object>>> getModuleUsageStatistics(
+            @Parameter(description = "统计天数，默认 7")
             @RequestParam(defaultValue = "7") Integer days) {
         
         log.info("接收获取模块使用统计请求: days={}", days);
@@ -137,8 +159,9 @@ public class SysOperationLogController {
     /**
      * 批量删除操作日志
      */
+    @Operation(summary = "批量删除操作日志")
     @DeleteMapping("/batch")
-    public Result<String> batchDeleteOperationLogs(@RequestBody List<Long> ids) {
+    public Result<String> batchDeleteOperationLogs(@Parameter(description = "待删除的日志ID列表", required = true) @RequestBody List<Long> ids) {
         log.info("接收批量删除操作日志请求: ids={}", ids);
         
         if (ids == null || ids.isEmpty()) {
@@ -158,8 +181,9 @@ public class SysOperationLogController {
     /**
      * 清理过期操作日志
      */
+    @Operation(summary = "清理过期操作日志")
     @DeleteMapping("/clean-expired")
-    public Result<String> cleanExpiredLogs(@RequestParam(defaultValue = "30") Integer days) {
+    public Result<String> cleanExpiredLogs(@Parameter(description = "保留天数，默认 30") @RequestParam(defaultValue = "30") Integer days) {
         log.info("接收清理过期操作日志请求: days={}", days);
         
         boolean result = sysOperationLogService.cleanExpiredLogs(days);
@@ -176,11 +200,14 @@ public class SysOperationLogController {
      * 审计日志汇总（P5，仅超管）：按操作类型、用户类型两个维度分组计数。
      * 类级权限是 ADMIN，方法级叠加 SUPER_ADMIN 收敛到超管；时间范围可空=全量。
      */
+    @Operation(summary = "审计日志汇总", description = "按操作类型、用户类型两个维度分组计数")
     @GetMapping("/summary")
     @PreAuthorize("hasAuthority('SUPER_ADMIN')")
     public Result<Map<String, Object>> getOperationLogSummary(
+            @Parameter(description = "开始日期（可选）")
             @RequestParam(required = false)
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate beginDate,
+            @Parameter(description = "结束日期（可选）")
             @RequestParam(required = false)
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
 
@@ -203,16 +230,26 @@ public class SysOperationLogController {
     /**
      * 导出操作日志
      */
+    @Operation(summary = "导出操作日志")
     @GetMapping("/export")
     public void exportOperationLogs(HttpServletResponse response,
+                                    @Parameter(description = "操作类型（可选）")
                                     @RequestParam(required = false) String operationType,
+                                    @Parameter(description = "用户名（可选）")
                                     @RequestParam(required = false) String username,
+                                    @Parameter(description = "状态（可选）")
                                     @RequestParam(required = false) Integer status,
+                                    @Parameter(description = "用户类型（可选）")
                                     @RequestParam(required = false) String userType,
+                                    @Parameter(description = "关键字（可选）")
                                     @RequestParam(required = false) String keyword,
+                                    @Parameter(description = "开始日期（可选）")
                                     @RequestParam(required = false) String startDate,
+                                    @Parameter(description = "结束日期（可选）")
                                     @RequestParam(required = false) String endDate,
+                                    @Parameter(description = "开始时间（可选，兼容字段）")
                                     @RequestParam(required = false) String startTime,
+                                    @Parameter(description = "结束时间（可选，兼容字段）")
                                     @RequestParam(required = false) String endTime) {
 
         // 日期参数有两套叫法，都必须收：前端 LogCenter 的「导出日志」传的是

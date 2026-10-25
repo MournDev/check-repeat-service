@@ -22,6 +22,9 @@ import com.abin.checkrepeatservice.student.vo.PaperReSubmitReq;
 import com.abin.checkrepeatservice.student.dto.*;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
@@ -49,6 +52,7 @@ import org.springframework.web.bind.annotation.RestController;
 @Slf4j
 @RestController
 @RequestMapping("/api/papers")
+@Tag(name = "学生论文模块", description = "学生论文提交、查询、删除、版本管理与下载接口")
 public class StudentPaperController {
 
     @Resource
@@ -76,8 +80,10 @@ public class StudentPaperController {
      * @return 论文提交结果
      */
     @PostMapping("/submit")
+    @Operation(summary = "提交论文", description = "只接收文件ID，不处理文件上传")
     @OperationLog(type = "student_paper_submit", description = "学生提交论文", recordResult = true)
-    public Result<PaperInfo> submitPaper(@RequestBody @Valid PaperSubmitRequest request) {
+    public Result<PaperInfo> submitPaper(
+            @Parameter(description = "论文提交请求（包含文件ID）", required = true) @RequestBody @Valid PaperSubmitRequest request) {
         Long studentId = UserBusinessInfoUtils.getCurrentUserId();
         log.info("论文提交请求 - 学生ID: {}, 请求参数: {}", studentId, request);
 
@@ -145,7 +151,9 @@ public class StudentPaperController {
      * 分页查询学生论文列表
      */
     @PostMapping("/page")
-    public Result<Page<PaperInfo>> getStudentPaperPage(@RequestBody PaperQueryRequest request) {
+    @Operation(summary = "分页查询学生论文列表", description = "按查询条件分页返回当前学生的论文")
+    public Result<Page<PaperInfo>> getStudentPaperPage(
+            @Parameter(description = "论文分页查询请求", required = true) @RequestBody PaperQueryRequest request) {
         Page<PaperInfo> result = paperInfoService.getStudentPaperPage(request);
         return Result.success(result);
     }
@@ -157,7 +165,9 @@ public class StudentPaperController {
      * @return 论文详情
      */
     @GetMapping("/detail")
-    public Result<PaperInfo> getPaperDetail(@RequestParam Long paperId) {
+    @Operation(summary = "查询论文详情", description = "查询指定论文的详情，盲审评阅人返回脱敏视图")
+    public Result<PaperInfo> getPaperDetail(
+            @Parameter(description = "论文ID", required = true) @RequestParam Long paperId) {
         PaperInfo paperInfo = paperInfoService.getById(paperId);
         if (paperInfo == null || paperInfo.getIsDeleted() == 1) {
             return Result.error(ResultCode.RESOURCE_NOT_FOUND, "论文不存在或已删除");
@@ -256,7 +266,9 @@ public class StudentPaperController {
      * @return 删除结果
      */
     @PostMapping("/delete")
-    public Result<String> deletePaper(@RequestParam Long paperId) {
+    @Operation(summary = "删除论文", description = "支持软删除，仅待处理状态的论文可删除")
+    public Result<String> deletePaper(
+            @Parameter(description = "论文ID", required = true) @RequestParam Long paperId) {
         Long studentId = UserBusinessInfoUtils.getCurrentUserId();
         log.info("删除论文请求 - 学生ID: {}, 论文ID: {}", studentId, paperId);
 
@@ -292,7 +304,9 @@ public class StudentPaperController {
         return Result.success("论文删除成功");
     }
     @DeleteMapping("/delete/file")
-    public Result<String> deleteFile(@RequestParam Long fileId) {
+    @Operation(summary = "删除论文文件", description = "删除指定文件记录，仅上传人本人或管理员可操作")
+    public Result<String> deleteFile(
+            @Parameter(description = "文件ID", required = true) @RequestParam Long fileId) {
         if (fileId == null) {
             return Result.error(ResultCode.PARAM_ERROR, "文件 ID 不能为空");
         }
@@ -327,8 +341,10 @@ public class StudentPaperController {
      * @return 重新提交结果
      */
     @PostMapping("/resubmit")
+    @Operation(summary = "重新提交论文", description = "审核不通过后重新提交修改后的论文")
     @OperationLog(type = "student_paper_resubmit", description = "学生重新提交论文", recordResult = true)
-    public Result<Map<String, Object>> reSubmitPaper(@RequestBody PaperReSubmitReq reSubmitReq) {
+    public Result<Map<String, Object>> reSubmitPaper(
+            @Parameter(description = "重新提交请求参数", required = true) @RequestBody PaperReSubmitReq reSubmitReq) {
         return studentReviewService.reSubmitPaper(reSubmitReq);
     }
     
@@ -340,10 +356,11 @@ public class StudentPaperController {
      * @return 撤回结果
      */
     @PostMapping("/{paperId}/withdraw")
+    @Operation(summary = "撤回论文", description = "撤回已提交但未进入审核流程的论文")
     @OperationLog(type = "student_paper_withdraw", description = "学生撤回论文", recordResult = true)
     public Result<String> withdrawPaper(
-        @PathVariable Long paperId, 
-        @RequestBody @Valid PaperWithdrawRequest request
+        @Parameter(description = "论文ID", required = true) @PathVariable Long paperId, 
+        @Parameter(description = "撤回请求参数", required = true) @RequestBody @Valid PaperWithdrawRequest request
     ) {
         Long studentId = UserBusinessInfoUtils.getCurrentUserId();
         log.info("撤回论文请求 - 学生 ID: {}, 论文 ID: {}, 原因类型：{}, 详细描述：{}", 
@@ -362,10 +379,11 @@ public class StudentPaperController {
      * 撤回后重新提交论文接口
      */
     @PostMapping("/{paperId}/resubmit-after-withdraw")
+    @Operation(summary = "撤回后重新提交论文", description = "仅已撤回状态的论文可重新提交")
     @OperationLog(type = "student_paper_resubmit", description = "撤回后重新提交", recordResult = true)
     public Result<PaperInfo> resubmitAfterWithdraw(
-        @PathVariable Long paperId,
-        @RequestBody @Valid PaperReSubmitAfterWithdrawRequest request
+        @Parameter(description = "论文ID", required = true) @PathVariable Long paperId,
+        @Parameter(description = "重新提交请求参数", required = true) @RequestBody @Valid PaperReSubmitAfterWithdrawRequest request
     ) {
         Long studentId = UserBusinessInfoUtils.getCurrentUserId();
         log.info("撤回后重新提交请求 - 学生 ID: {}, 论文 ID: {}", studentId, paperId);
@@ -399,8 +417,11 @@ public class StudentPaperController {
      * @return 申请结果
      */
     @PostMapping("/{paperId}/modify-request")
+    @Operation(summary = "申请修改已通过论文", description = "对已通过审核的论文申请修改")
     @OperationLog(type = "student_paper_modify_request", description = "学生申请修改论文", recordResult = true)
-    public Result<String> requestModification(@PathVariable Long paperId, @RequestBody PaperModifyRequest request) {
+    public Result<String> requestModification(
+            @Parameter(description = "论文ID", required = true) @PathVariable Long paperId,
+            @Parameter(description = "修改申请参数", required = true) @RequestBody PaperModifyRequest request) {
         Long studentId = UserBusinessInfoUtils.getCurrentUserId();
         log.info("申请修改论文请求 - 学生ID: {}, 论文ID: {}, 原因: {}", studentId, paperId, request.getReason());
         
@@ -420,8 +441,11 @@ public class StudentPaperController {
      * @param response HTTP响应
      */
     @PostMapping("/batch-download")
+    @Operation(summary = "批量下载论文", description = "批量下载多篇论文并打包成ZIP")
     @OperationLog(type = "student_paper_batch_download", description = "学生批量下载论文", recordResult = true)
-    public void batchDownloadPapers(@RequestBody BatchOperationRequest request, HttpServletResponse response) {
+    public void batchDownloadPapers(
+            @Parameter(description = "批量操作请求（论文ID列表）", required = true) @RequestBody BatchOperationRequest request,
+            HttpServletResponse response) {
         Long studentId = UserBusinessInfoUtils.getCurrentUserId();
         log.info("批量下载论文请求 - 学生ID: {}, 论文数量: {}", studentId, request.getPaperIds().size());
         
@@ -436,8 +460,10 @@ public class StudentPaperController {
      * @return 删除结果
      */
     @DeleteMapping("/batch-delete")
+    @Operation(summary = "批量删除论文", description = "批量删除多篇论文")
     @OperationLog(type = "student_paper_batch_delete", description = "学生批量删除论文", recordResult = true)
-    public Result<Map<String, Object>> batchDeletePapers(@RequestBody BatchOperationRequest request) {
+    public Result<Map<String, Object>> batchDeletePapers(
+            @Parameter(description = "批量操作请求（论文ID列表）", required = true) @RequestBody BatchOperationRequest request) {
         Long studentId = UserBusinessInfoUtils.getCurrentUserId();
         log.info("批量删除论文请求 - 学生ID: {}, 论文数量: {}", studentId, request.getPaperIds().size());
         
@@ -453,7 +479,9 @@ public class StudentPaperController {
      * @return 版本列表（按提交版本号升序）
      */
     @GetMapping("/{paperId}/versions")
-    public Result<List<PaperVersionItemDTO>> getPaperVersions(@PathVariable Long paperId) {
+    @Operation(summary = "获取论文版本历史列表", description = "按提交版本号升序返回版本列表")
+    public Result<List<PaperVersionItemDTO>> getPaperVersions(
+            @Parameter(description = "论文ID", required = true) @PathVariable Long paperId) {
         Long studentId = UserBusinessInfoUtils.getCurrentUserId();
         List<PaperVersionItemDTO> versions = paperInfoService.getPaperVersions(paperId, studentId);
         return Result.success(versions);
@@ -468,7 +496,10 @@ public class StudentPaperController {
      * @return 版本详情
      */
     @GetMapping("/{paperId}/versions/{versionId}")
-    public Result<PaperVersionDTO> getPaperVersion(@PathVariable Long paperId, @PathVariable Long versionId) {
+    @Operation(summary = "获取论文版本详情", description = "获取指定版本的详细信息")
+    public Result<PaperVersionDTO> getPaperVersion(
+            @Parameter(description = "论文ID", required = true) @PathVariable Long paperId,
+            @Parameter(description = "版本ID", required = true) @PathVariable Long versionId) {
         Long studentId = UserBusinessInfoUtils.getCurrentUserId();
         PaperVersionDTO version = paperInfoService.getPaperVersion(paperId, versionId, studentId);
         return Result.success(version);
@@ -482,7 +513,9 @@ public class StudentPaperController {
      * @return 对比结果
      */
     @PostMapping("/compare-versions")
-    public Result<VersionCompareResult> comparePaperVersions(@RequestBody VersionCompareRequest request) {
+    @Operation(summary = "版本对比", description = "对比两个版本的差异")
+    public Result<VersionCompareResult> comparePaperVersions(
+            @Parameter(description = "版本对比请求", required = true) @RequestBody VersionCompareRequest request) {
         Long studentId = UserBusinessInfoUtils.getCurrentUserId();
         VersionCompareResult result = paperInfoService.comparePaperVersions(request.getPaperId(), 
             request.getVersionIds(), studentId);
@@ -497,7 +530,10 @@ public class StudentPaperController {
      * @param response HTTP响应
      */
     @PostMapping("/download-version-compare")
-    public void downloadVersionCompareReport(@RequestBody VersionCompareRequest request, HttpServletResponse response) {
+    @Operation(summary = "下载版本对比报告", description = "下载两个版本的对比报告（PDF格式）")
+    public void downloadVersionCompareReport(
+            @Parameter(description = "版本对比请求", required = true) @RequestBody VersionCompareRequest request,
+            HttpServletResponse response) {
         Long studentId = UserBusinessInfoUtils.getCurrentUserId();
         paperInfoService.downloadVersionCompareReport(request.getPaperId(), request.getVersionIds(), 
             studentId, response);
@@ -511,7 +547,10 @@ public class StudentPaperController {
      * @param response HTTP响应
      */
     @GetMapping("/versions/{versionId}/download")
-    public void downloadPaperVersion(@PathVariable Long versionId, HttpServletResponse response) {
+    @Operation(summary = "下载单个版本", description = "下载指定版本的论文文件")
+    public void downloadPaperVersion(
+            @Parameter(description = "版本ID", required = true) @PathVariable Long versionId,
+            HttpServletResponse response) {
         Long studentId = UserBusinessInfoUtils.getCurrentUserId();
         paperInfoService.downloadPaperVersion(versionId, studentId, response);
     }
@@ -524,7 +563,10 @@ public class StudentPaperController {
      * @param response HTTP响应
      */
     @GetMapping("/{paperId}/download")
-    public void downloadPaper(@PathVariable Long paperId, HttpServletResponse response) {
+    @Operation(summary = "下载论文", description = "直接下载指定论文的文件")
+    public void downloadPaper(
+            @Parameter(description = "论文ID", required = true) @PathVariable Long paperId,
+            HttpServletResponse response) {
         try {
             Long studentId = UserBusinessInfoUtils.getCurrentUserId();
             log.info("学生{}请求下载论文{}", studentId, paperId);
@@ -551,7 +593,10 @@ public class StudentPaperController {
      * @param response HTTP响应
      */
     @GetMapping("/attachments/{attachmentId}/download")
-    public void downloadAttachment(@PathVariable String attachmentId, HttpServletResponse response) {
+    @Operation(summary = "下载论文附件", description = "下载论文附件")
+    public void downloadAttachment(
+            @Parameter(description = "附件ID", required = true) @PathVariable String attachmentId,
+            HttpServletResponse response) {
         Long studentId = UserBusinessInfoUtils.getCurrentUserId();
         paperInfoService.downloadAttachment(attachmentId, studentId, response);
     }

@@ -8,6 +8,9 @@ import com.abin.checkrepeatservice.student.dto.StudentReviewDetailDTO;
 import com.abin.checkrepeatservice.student.vo.StudentReviewQueryReq;
 import com.abin.checkrepeatservice.student.service.StudentReviewService;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -22,6 +25,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/student/reviews")
 @PreAuthorize("hasAuthority('STUDENT')") // 权限控制：仅学生可访问
+@Tag(name = "学生论文审核模块", description = "学生查询审核结果、下载附件与重新提交论文接口")
 public class StudentReviewController {
 
     @Resource
@@ -34,10 +38,11 @@ public class StudentReviewController {
      * @param pageSize 每页条数（可选，默认10）
      */
     @GetMapping("/list")
+    @Operation(summary = "查询我的论文审核结果列表", description = "分页查询本人论文审核结果")
     public Result<Page<StudentReviewDetailDTO>> getMyReviewList(
-            @RequestParam(value = "paperStatus", required = false) Integer paperStatus,
-            @RequestParam(value = "currentPage", required = false, defaultValue = "1") Integer currentPage,
-            @RequestParam(value = "pageSize", required = false, defaultValue = "10") Integer pageSize) {
+            @Parameter(description = "论文状态（可选：2-待审核，3-通过，4-不通过）") @RequestParam(value = "paperStatus", required = false) Integer paperStatus,
+            @Parameter(description = "当前页码") @RequestParam(value = "currentPage", required = false, defaultValue = "1") Integer currentPage,
+            @Parameter(description = "每页条数") @RequestParam(value = "pageSize", required = false, defaultValue = "10") Integer pageSize) {
         StudentReviewQueryReq queryReq = new StudentReviewQueryReq();
         queryReq.setPaperStatus(paperStatus);
         queryReq.setCurrentPage(currentPage);
@@ -50,8 +55,9 @@ public class StudentReviewController {
      * @param paperId 论文ID（必传，通过@RequestParam）
      */
     @GetMapping("/detail")
+    @Operation(summary = "查询论文审核详情")
     public Result<StudentReviewDetailDTO> getReviewDetail(
-            @RequestParam("paperId") Long paperId) {
+            @Parameter(description = "论文ID", required = true) @RequestParam("paperId") Long paperId) {
         return studentReviewService.getReviewDetail(paperId);
     }
 
@@ -61,8 +67,9 @@ public class StudentReviewController {
      * @param response HTTP响应
      */
     @GetMapping("/download-attach")
+    @Operation(summary = "下载审核附件")
     public void downloadReviewAttach(
-            @RequestParam("attachPath") String attachPath,
+            @Parameter(description = "附件存储路径", required = true) @RequestParam("attachPath") String attachPath,
             HttpServletResponse response) {
         studentReviewService.downloadReviewAttach(attachPath, response);
     }
@@ -72,10 +79,11 @@ public class StudentReviewController {
      * （注：文件上传需用multipart/form-data格式）
      */
     @PostMapping(value = "/re-submit", consumes = "multipart/form-data")
+    @Operation(summary = "重新提交修改后的论文", description = "审核不通过后重新提交，文件上传使用 multipart/form-data 格式")
     public Result<Map<String, Object>> reSubmitPaper(
-            @RequestParam("originalPaperId") Long originalPaperId, // 原论文ID
-            @RequestParam("revisedFile") MultipartFile revisedFile, // 修改后的文件
-            @RequestParam(value = "revisionDesc", required = false) String revisionDesc) { // 修改说明
+            @Parameter(description = "原论文ID", required = true) @RequestParam("originalPaperId") Long originalPaperId, // 原论文ID
+            @Parameter(description = "修改后的文件", required = true) @RequestParam("revisedFile") MultipartFile revisedFile, // 修改后的文件
+            @Parameter(description = "修改说明") @RequestParam(value = "revisionDesc", required = false) String revisionDesc) { // 修改说明
         PaperReSubmitReq reSubmitReq = new PaperReSubmitReq();
         reSubmitReq.setOriginalPaperId(originalPaperId);
         reSubmitReq.setRevisedFile(revisedFile);
@@ -90,10 +98,11 @@ public class StudentReviewController {
      * @param pageSize 每页条数（必传，默认10）
      */
     @GetMapping("/resubmit-record")
+    @Operation(summary = "查询重新提交记录", description = "分页查询指定原论文的重新提交记录")
     public Result<Page<PaperInfo>> getResubmitRecord(
-            @RequestParam("originalPaperId") Long originalPaperId,
-            @RequestParam(value = "currentPage", defaultValue = "1") Integer currentPage,
-            @RequestParam(value = "pageSize", defaultValue = "10") Integer pageSize) {
+            @Parameter(description = "原论文ID", required = true) @RequestParam("originalPaperId") Long originalPaperId,
+            @Parameter(description = "当前页码") @RequestParam(value = "currentPage", defaultValue = "1") Integer currentPage,
+            @Parameter(description = "每页条数") @RequestParam(value = "pageSize", defaultValue = "10") Integer pageSize) {
         return studentReviewService.getResubmitRecord(originalPaperId, currentPage, pageSize);
     }
 }

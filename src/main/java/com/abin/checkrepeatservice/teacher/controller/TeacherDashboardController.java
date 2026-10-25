@@ -109,7 +109,9 @@ public class TeacherDashboardController {
     @PostMapping("/messages/send")
     @Operation(summary = "发送消息", description = "向学生发送消息")
     @OperationLog(type = "send_message", description = "发送消息给学生")
-    public Result<String> sendMessage(@RequestBody SendMessageDTO sendMessageDTO) {
+    public Result<String> sendMessage(
+            @Parameter(description = "消息发送请求体", required = true)
+            @RequestBody SendMessageDTO sendMessageDTO) {
         
         log.info("发送消息: receiverId={}, title={}", sendMessageDTO.getReceiverId(), sendMessageDTO.getTitle());
         boolean result = studentManagementService.sendMessage(sendMessageDTO);

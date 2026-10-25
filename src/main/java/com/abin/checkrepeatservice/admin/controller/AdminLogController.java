@@ -13,6 +13,9 @@ import com.alibaba.excel.ExcelWriter;
 import com.alibaba.excel.write.metadata.WriteSheet;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -40,6 +43,7 @@ import java.util.stream.Collectors;
 @RequestMapping("/api/admin/logs")
 @PreAuthorize("hasAuthority('ADMIN')")
 @Slf4j
+@Tag(name = "日志中心", description = "操作日志/登录日志/系统日志统计")
 public class AdminLogController {
 
     @Resource
@@ -51,14 +55,22 @@ public class AdminLogController {
     /**
      * 获取操作日志列表
      */
+    @Operation(summary = "获取操作日志列表", description = "分页查询操作日志，支持类型、用户类型、时间范围与关键字筛选")
     @GetMapping("/operations")
     public Result<Page<SysOperationLog>> getOperationLogs(
+            @Parameter(description = "当前页码，默认 1")
             @RequestParam(defaultValue = "1") Integer page,
+            @Parameter(description = "每页条数，默认 10")
             @RequestParam(defaultValue = "10") Integer size,
+            @Parameter(description = "操作类型（可选）")
             @RequestParam(required = false) String operationType,
+            @Parameter(description = "用户类型（可选）")
             @RequestParam(required = false) String userType,
+            @Parameter(description = "开始日期（可选）")
             @RequestParam(required = false) String startDate,
+            @Parameter(description = "结束日期（可选）")
             @RequestParam(required = false) String endDate,
+            @Parameter(description = "关键字，匹配用户名或描述（可选）")
             @RequestParam(required = false) String keyword) {
 
         Page<SysOperationLog> logPage = new Page<>(page, size);
@@ -114,10 +126,14 @@ public class AdminLogController {
     /**
      * 导出登录日志
      */
+    @Operation(summary = "导出登录日志", description = "按 IP 与时间范围导出登录日志为 Excel")
     @GetMapping("/login/export")
     public void exportLoginLogs(HttpServletResponse response,
+                              @Parameter(description = "登录IP（可选，模糊匹配）")
                               @RequestParam(required = false) String ip,
+                              @Parameter(description = "开始日期（可选）")
                               @RequestParam(required = false) String startDate,
+                              @Parameter(description = "结束日期（可选）")
                               @RequestParam(required = false) String endDate) throws IOException {
         
         try {
@@ -203,12 +219,18 @@ public class AdminLogController {
     /**
      * 获取登录日志列表
      */
+    @Operation(summary = "获取登录日志列表", description = "分页查询登录日志，支持 IP 与时间范围筛选")
     @GetMapping("/login")
     public Result<Page<SysLoginLog>> getLoginLogs(
+            @Parameter(description = "当前页码，默认 1")
             @RequestParam(defaultValue = "1") Integer page,
+            @Parameter(description = "每页条数，默认 10")
             @RequestParam(defaultValue = "10") Integer size,
+            @Parameter(description = "登录IP（可选，模糊匹配）")
             @RequestParam(required = false) String ip,
+            @Parameter(description = "开始日期（可选）")
             @RequestParam(required = false) String startDate,
+            @Parameter(description = "结束日期（可选）")
             @RequestParam(required = false) String endDate) {
         
         Page<SysLoginLog> logPage = new Page<>(page, size);
@@ -239,10 +261,14 @@ public class AdminLogController {
     /**
      * 获取系统日志统计
      */
+    @Operation(summary = "获取系统日志统计", description = "统计操作日志与登录日志数量及操作类型分布")
     @GetMapping("/system")
     public Result<Map<String, Object>> getSystemLogs(
+            @Parameter(description = "日志级别/操作类型（可选）")
             @RequestParam(required = false) String level,
+            @Parameter(description = "开始日期（可选）")
             @RequestParam(required = false) String startDate,
+            @Parameter(description = "结束日期（可选）")
             @RequestParam(required = false) String endDate) {
         
         Map<String, Object> stats = new HashMap<>();

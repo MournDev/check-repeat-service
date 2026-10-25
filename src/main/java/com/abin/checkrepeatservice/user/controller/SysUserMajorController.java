@@ -6,6 +6,9 @@ import com.abin.checkrepeatservice.user.vo.AdvisorMaxCountVO;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import io.swagger.annotations.ApiParam;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -19,6 +22,7 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/sys/user-major")
 @Api(tags = "指导任务上限管理")
+@Tag(name = "指导任务上限管理", description = "教师指导任务上限修改相关接口")
 public class SysUserMajorController {
 
     @Resource
@@ -32,13 +36,17 @@ public class SysUserMajorController {
      * @param newMaxCount 新上限（1-50）
      * @return 结果VO
      */
+    @Operation(summary = "修改指导任务上限", description = "仅管理员可操作，新上限需在1-50之间")
     @PostMapping("/modify-advisor-max-count")
     @ApiOperation(value = "修改指导任务上限", notes = "仅管理员可操作，新上限需在1-50之间")
     public Result<AdvisorMaxCountVO> modifyAdvisorMaxCount(
             // 从RequestAttribute获取当前登录用户ID（避免前端传参篡改）
             @RequestAttribute("loginUserId") Long operatorId,
+            @Parameter(description = "目标教师ID", required = true)
             @ApiParam(value = "目标教师ID", required = true) @RequestParam @NotNull Long targetUserId,
+            @Parameter(description = "专业ID", required = true)
             @ApiParam(value = "专业ID", required = true) @RequestParam @NotNull Long majorId,
+            @Parameter(description = "新指导任务上限（1-50）", required = true)
             @ApiParam(value = "新指导任务上限（1-50）", required = true)
             @RequestParam @NotNull @Min(1) @Max(50) Integer newMaxCount
     ) {

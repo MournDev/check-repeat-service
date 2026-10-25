@@ -3,6 +3,9 @@ package com.abin.checkrepeatservice.admin.controller;
 import com.abin.checkrepeatservice.admin.dto.NoticeBroadcastReq;
 import com.abin.checkrepeatservice.admin.service.NoticeBroadcastService;
 import com.abin.checkrepeatservice.common.Result;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +29,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/admin/notices")
 @PreAuthorize("hasAuthority('SUPER_ADMIN')")
 @Slf4j
+@Tag(name = "系统公告广播", description = "按目标角色向用户消息中心发布系统公告")
 public class AdminNoticeBroadcastController {
 
     @Resource
@@ -36,8 +40,11 @@ public class AdminNoticeBroadcastController {
      * 按 targetRoles 逐用户落库消息中心并对在线用户实时推送
      * 出参：data.sentCount = 实际落库的用户数
      */
+    @Operation(summary = "发布系统公告", description = "按 targetRoles 逐用户落库消息中心并对在线用户实时推送")
     @PostMapping("/broadcast")
-    public Result<java.util.Map<String, Object>> broadcast(@Valid @RequestBody NoticeBroadcastReq req) {
+    public Result<java.util.Map<String, Object>> broadcast(
+            @Parameter(description = "公告发布请求体：标题、公告类型、目标角色等", required = true)
+            @Valid @RequestBody NoticeBroadcastReq req) {
         log.info("接收系统公告发布请求: title={}, noticeType={}, targetRoles={}",
                 req.getTitle(), req.getNoticeType(), req.getTargetRoles());
         return noticeBroadcastService.broadcast(req);
