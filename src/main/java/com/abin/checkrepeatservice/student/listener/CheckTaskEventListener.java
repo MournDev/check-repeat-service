@@ -1,11 +1,11 @@
 package com.abin.checkrepeatservice.student.listener;
 
 import com.abin.checkrepeatservice.admin.mapper.CheckResultMapper;
-import com.abin.checkrepeatservice.admin.service.CollegeQuotaService;
 import com.abin.checkrepeatservice.common.component.PaperStageGate;
 import com.abin.checkrepeatservice.common.component.ReportPathResolver;
 import com.abin.checkrepeatservice.common.constant.DictConstants;
 import com.abin.checkrepeatservice.common.engine.CheckEngineManager;
+import com.abin.checkrepeatservice.common.enums.CheckTaskStatusEnum;
 import com.abin.checkrepeatservice.common.service.CheckPolicyResolver;
 import com.abin.checkrepeatservice.common.service.PaperLibraryIngestService;
 import com.abin.checkrepeatservice.common.statemachine.CheckTaskStateMachine;
@@ -24,6 +24,7 @@ import com.abin.checkrepeatservice.student.mapper.CheckReportMapper;
 import com.abin.checkrepeatservice.student.mapper.CheckSentenceHitMapper;
 import com.abin.checkrepeatservice.student.mapper.CheckTaskMapper;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
+import com.abin.checkrepeatservice.student.service.CheckTaskFailureRecoveryService;
 import com.abin.checkrepeatservice.student.service.websocket.CheckProgressWebSocketHandler;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import jakarta.annotation.Resource;
@@ -31,7 +32,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.tika.Tika;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
@@ -82,9 +83,13 @@ public class CheckTaskEventListener {
     @Resource
     private NotificationService notificationService;
 
-    // 任务失败时返还创建时扣减的学院月度额度（幂等）
+    // 任务失败统一恢复：failure -> 退额度 -> 回滚论文状态 -> 通知学生
     @Resource
-    private CollegeQuotaService collegeQuotaService;
+    private CheckTaskFailureRecoveryService checkTaskFailureRecoveryService;
+
+    // 任务完成态与论文状态必须同事务落库，避免“任务已完成、论文仍 checking”
+    @Resource
+    private TransactionTemplate transactionTemplate;
 
     // 论文状态流转统一校验（默认影子模式，只告警不阻断）
     @Resource
@@ -107,7 +112,6 @@ public class CheckTaskEventListener {
 
     /**
      * 报告验真哈希盐：与 ReportVerifyService 共用同一环境变量，
-     * 缺省兜底值仅用于本地开发，生产应显式注入
      */
     // 安全修复生产由环境变量 REPORT_HASH_SALT 注入（ProductionSecretValidator 强制校验）
     @Value("${REPORT_HASH_SALT:dev-only-report-hash-salt-do-not-use-in-prod-0123456789}")
@@ -122,7 +126,7 @@ public class CheckTaskEventListener {
      * 执行一个「已被抢占」的查重任务。
      *
      * <p>抢占动作已由 {@code CheckTaskDispatchScheduler} 通过
-     * {@link com.abin.checkrepeatservice.common.statemachine.CheckTaskStateMachine#claimForExecution}
+     * {@link CheckTaskStateMachine#claimForExecution}
      * 完成（PENDING -> CHECKING 条件更新），本方法只负责真正的解析/比对/报告生成。
      * 重复投递与并发执行由条件更新保证：只有抢到状态的派发方会调用到这里。</p>
      *
@@ -205,30 +209,33 @@ public class CheckTaskEventListener {
             // 8. 生成查重报告（含 P5 报告验真码 content_hash）
             CheckReport checkReport = generateCheckReport(checkTask, effectiveRateValue, repeatDetails, maxPerSource, citationRate);
 
-            // 9. 更新任务状态为成功（条件：CHECKING -> COMPLETED）
-            boolean completed = stateMachine.transitionStatus(taskId,
-                com.abin.checkrepeatservice.common.enums.CheckTaskStatusEnum.CHECKING,
-                com.abin.checkrepeatservice.common.enums.CheckTaskStatusEnum.COMPLETED,
-                "查重任务执行成功");
-            if (!completed) {
-                log.warn("任务成功态流转失败（可能已被超时扫描改写），任务 ID: {}", taskId);
-            }
+            // 9-11. 任务完成态、任务业务字段、论文状态必须同一事务：
+            //     任一步失败都整体回滚，任务保持 checking，由外层 catch 统一转 failure 并退款，
+            //     避免“任务已完成、论文仍 checking”的假成功状态。
+            final CheckReport finalReport = checkReport;
+            final PaperInfo paperForUpdate = paperInfo;
+            transactionTemplate.executeWithoutResult(status -> {
+                boolean completed = stateMachine.transitionStatus(taskId,
+                        CheckTaskStatusEnum.CHECKING,
+                        CheckTaskStatusEnum.COMPLETED,
+                        "查重任务执行成功");
+                if (!completed) {
+                    throw new IllegalStateException("任务成功态流转失败（可能已被超时扫描改写）");
+                }
 
-            // 10. 业务字段单独更新（P0-1）：
-            //     禁止再用执行前查出的 checkTask 做全量 updateById —— 它的 checkStatus 仍是
-            //     "checking"，会把上一步写入的 completed 覆盖回去，1 小时后被误判超时失败。
-            checkTaskMapper.update(null, new LambdaUpdateWrapper<CheckTask>()
-                    .eq(CheckTask::getId, taskId)
-                    .eq(CheckTask::getCheckStatus,
-                            com.abin.checkrepeatservice.common.enums.CheckTaskStatusEnum.COMPLETED.getCode())
-                    .set(CheckTask::getCheckRate, effectiveRateValue)
-                    .set(CheckTask::getMaxPerSource, maxPerSource)
-                    .set(CheckTask::getCitationRate, citationRate)
-                    .set(CheckTask::getEndTime, LocalDateTime.now())
-                    .set(CheckTask::getReportId, checkReport.getId()));
+                // 业务字段单独更新（P0-1）：禁止再用执行前查出的 checkTask 全量回写状态
+                checkTaskMapper.update(null, new LambdaUpdateWrapper<CheckTask>()
+                        .eq(CheckTask::getId, taskId)
+                        .eq(CheckTask::getCheckStatus,
+                                CheckTaskStatusEnum.COMPLETED.getCode())
+                        .set(CheckTask::getCheckRate, effectiveRateValue)
+                        .set(CheckTask::getMaxPerSource, maxPerSource)
+                        .set(CheckTask::getCitationRate, citationRate)
+                        .set(CheckTask::getEndTime, LocalDateTime.now())
+                        .set(CheckTask::getReportId, finalReport.getId()));
 
-            // 11. 更新论文状态（成功后）
-            updatePaperSuccess(paperInfo, effectiveRate);
+                updatePaperSuccess(paperForUpdate, effectiveRate);
+            });
 
             // 12. 写入详细查重结果（含 P5 句级命中明细批量落库）
             writeCheckResultDetail(taskId, paperId, effectiveRateValue, maxPerSource, citationRate,
@@ -239,8 +246,6 @@ public class CheckTaskEventListener {
 
             // 14. 告知学生结果（相似度 + 风险等级）
             // 放在报告与明细都落库之后，学生点进通知能看到数据。
-            // sendSimilarityCheckResultNotification 自带 catch 兜底、从不抛异常，
-            // 所以它失败不会把这次成功的查重翻成 FAILURE。
             if (paperInfo.getStudentId() != null) {
                 notificationService.sendSimilarityCheckResultNotification(
                         paperInfo.getStudentId(),
@@ -258,34 +263,12 @@ public class CheckTaskEventListener {
 
             // M1.2：引擎全失败/比对故障必须落 failure + fail_reason，且兜底 message 为 null 的情况
             String failReason = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
-            boolean failed = stateMachine.transitionStatus(taskId,
-                com.abin.checkrepeatservice.common.enums.CheckTaskStatusEnum.CHECKING,
-                com.abin.checkrepeatservice.common.enums.CheckTaskStatusEnum.FAILURE,
-                failReason);
-            if (!failed) {
-                // 任务已是终态（典型：报告落库后、后续步骤异常，而状态已是 COMPLETED）。
-                // 此时不能回滚论文、更不能返还额度，否则「查重成功」会被当成失败处理。
-                log.warn("任务已处于终态，跳过失败回滚与额度返还，任务 ID: {}", taskId);
+            // 统一恢复：failure -> 退额度 -> 回滚论文状态 -> 通知学生
+            boolean recovered = checkTaskFailureRecoveryService.failTaskAndRestorePaper(taskId, failReason);
+            if (!recovered) {
+                log.warn("任务失败恢复未执行（任务可能已是终态或已被并发改写），任务 ID: {}", taskId);
                 return;
             }
-
-            // 回滚论文状态（M4.1：有指导教师回"已分配"，未分配回"待分配"，与流程状态对齐）
-            // paperInfo 为 null 时（论文在加载前就被删除）跳过状态回滚，但不能因此漏掉额度返还
-            if (paperInfo != null) {
-                PaperInfo updatePaper = new PaperInfo();
-                updatePaper.setId(paperInfo.getId());
-                String restoreStatus = paperInfo.getTeacherId() != null
-                        ? DictConstants.PaperStatus.ASSIGNED
-                        : DictConstants.PaperStatus.PENDING;
-                paperStageGate.guard(paperInfo.getPaperStatus(), restoreStatus, "checkTaskListenerFailureRollback");
-                updatePaper.setPaperStatus(restoreStatus);
-                updatePaper.setCheckTime(null);
-                paperInfoMapper.updateById(updatePaper);
-            }
-
-            // M4.1：失败返还创建时扣减的学院月度额度（幂等，重复调用不会多退；
-            // 放在状态回滚之后，返还异常不影响任务/论文状态的一致落库）
-            collegeQuotaService.refundForFailedTask(taskId);
 
             // 推送失败消息
             publishProgress(taskId, paperId, "FAILED", 0, "查重失败：" + failReason, 0);
@@ -456,7 +439,11 @@ public class CheckTaskEventListener {
         updatePaper.setCheckEngineType("local");
         updatePaper.setCheckResult(qualified ? "合格" : "不合格");
         updatePaper.setCheckTime(LocalDateTime.now());
-        paperInfoMapper.updateById(updatePaper);
+        int rows = paperInfoMapper.updateById(updatePaper);
+        if (rows == 0) {
+            // 交给外层事务回滚：任务不能先落 completed，否则会出现“任务成功、论文未更新”的死状态
+            throw new IllegalStateException("更新论文状态失败，论文可能已被删除 - paperId=" + paperInfo.getId());
+        }
     }
 
     /**

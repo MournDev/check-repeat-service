@@ -3,9 +3,9 @@ package com.abin.checkrepeatservice.schedule;
 import com.abin.checkrepeatservice.admin.dto.PerformanceConfigDTO;
 import com.abin.checkrepeatservice.admin.service.SystemConfigService;
 import com.abin.checkrepeatservice.common.enums.CheckTaskStatusEnum;
-import com.abin.checkrepeatservice.common.statemachine.CheckTaskStateMachine;
 import com.abin.checkrepeatservice.pojo.entity.CheckTask;
 import com.abin.checkrepeatservice.student.mapper.CheckTaskMapper;
+import com.abin.checkrepeatservice.student.service.CheckTaskFailureRecoveryService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import lombok.extern.slf4j.Slf4j;
@@ -30,17 +30,14 @@ import java.util.concurrent.TimeUnit;
 public class CheckTaskScheduler {
 
     @Autowired
-    private CheckTaskStateMachine stateMachine;
-
-    @Autowired
     private SystemConfigService systemConfigService;
 
     @Autowired
     private CheckTaskMapper checkTaskMapper;
 
-    // M4.1：超时失败的任务同样返还已扣额度
+    // 超时/排队失败统一走监听器同一套恢复：置失败、退额度、回滚论文、通知学生
     @Autowired
-    private com.abin.checkrepeatservice.admin.service.CollegeQuotaService collegeQuotaService;
+    private CheckTaskFailureRecoveryService failureRecoveryService;
 
     /** 超时任务扫描开关，默认开（S13 起）：把超时任务标记为失败（写库）；application.yml 可覆盖关闭 */
     @Value("${schedule.check-task.timeout-scan-enabled:true}")
@@ -133,18 +130,13 @@ public class CheckTaskScheduler {
 
         int failed = 0;
         for (CheckTask task : timeoutTasks) {
-            boolean transitioned = stateMachine.transitionStatus(
-                    task.getId(),
-                    CheckTaskStatusEnum.CHECKING,
-                    CheckTaskStatusEnum.FAILURE,
-                    "任务执行超时（超过" + (timeoutMillis / 60000) + "分钟）");
-            if (transitioned) {
+            String reason = "任务执行超时（超过" + (timeoutMillis / 60000) + "分钟）";
+            if (failureRecoveryService.failTaskAndRestorePaper(task.getId(), reason)) {
                 failed++;
-                collegeQuotaService.refundForFailedTask(task.getId());
             }
         }
         if (failed > 0) {
-            log.warn("发现{}个 checking 超时任务，已置失败并返还额度", failed);
+            log.warn("发现{}个 checking 超时任务，已置失败、返还额度并恢复论文状态", failed);
         }
     }
 
@@ -172,18 +164,13 @@ public class CheckTaskScheduler {
 
         int failed = 0;
         for (CheckTask task : expiredTasks) {
-            boolean transitioned = stateMachine.transitionStatus(
-                    task.getId(),
-                    CheckTaskStatusEnum.PENDING,
-                    CheckTaskStatusEnum.FAILURE,
-                    "任务排队超过" + (deadlineMillis / 60000) + "分钟仍未执行");
-            if (transitioned) {
+            String reason = "任务排队超过" + (deadlineMillis / 60000) + "分钟仍未执行";
+            if (failureRecoveryService.failTaskAndRestorePaper(task.getId(), reason)) {
                 failed++;
-                collegeQuotaService.refundForFailedTask(task.getId());
             }
         }
         if (failed > 0) {
-            log.warn("pending 任务超过绝对截止时间，已置失败并返还额度：{} 个", failed);
+            log.warn("pending 任务超过绝对截止时间，已置失败、返还额度并恢复论文状态：{} 个", failed);
         }
 
         // 2) 滞留观察：只做告警，任务继续留在 pending 由派发器捞取

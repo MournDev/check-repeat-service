@@ -94,7 +94,9 @@ public enum CheckTaskStatusEnum {
         // 具体的状态流转规则
         switch (this) {
             case PENDING:
-                return targetStatus == CHECKING || targetStatus == CANCELLED;
+                // 排队超过绝对截止时间时需要允许 PENDING -> FAILURE，否则任务会永远滞留待执行
+                return targetStatus == CHECKING || targetStatus == CANCELLED
+                        || targetStatus == FAILURE;
             case CHECKING:
                 return targetStatus == COMPLETED || targetStatus == FAILURE;
             default:
