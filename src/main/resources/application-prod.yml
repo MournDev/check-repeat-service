@@ -137,7 +137,7 @@ redisson:
 check:
   task:
     max-concurrent: 2
-    timeout: 3600000
+    timeout: 1200000
     temp-file-path: /data/check-temp/
   simhash:
     hash-bits: 64

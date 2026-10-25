@@ -157,14 +157,23 @@ paper:
 # 查重算法配置
 check:
   task:
+    # 全局并发上限：CheckTaskDispatchScheduler 据此控制同时执行的任务数
     max-concurrent: 2
-    # checking 任务超时（毫秒）：超时后置 failure 并返还学院额度
-    timeout: 3600000
-    # pending 任务排队超时（毫秒）：超过后先重新投递一次事件，仍超时则置 failure
-    pending-timeout: 900000
-    # pending 超时重新投递的最大次数（0 表示不重投，直接失败）
-    pending-max-retry: 1
+    # 查重执行线程池：与 CPU 核数/上项 max-concurrent 对齐；真正的排队在 DB pending
+    executor:
+      core-size: 2
+      max-size: 2
+      queue-size: 50
+    # checking 任务超时（毫秒，20 分钟）：超时后置 failure 并返还学院额度
+    timeout: 1200000
+    # pending 滞留观察阈值（毫秒，2 分钟）：只告警积压量，不再据此判失败
+    pending-timeout: 120000
+    # pending 绝对截止时间（毫秒，24 小时）：超过才置 failure 并返还额度
+    pending-deadline-ms: 86400000
     temp-file-path: /data/check-temp/
+  # 单用户入口限流（秒）：同一用户 30 秒内只能发起 1 次查重
+  rate-limit:
+    user-window-seconds: 30
   simhash:
     hash-bits: 64
     k: 3
