@@ -2,14 +2,17 @@ package com.abin.checkrepeatservice.student.service.Impl;
 
 import com.abin.checkrepeatservice.admin.mapper.PaperSubmitMapper;
 import com.abin.checkrepeatservice.admin.mapper.SystemConfigMapper;
+import com.abin.checkrepeatservice.admin.service.CollegeQuotaService;
 import com.abin.checkrepeatservice.common.Exception.BusinessException;
 import com.abin.checkrepeatservice.common.Result;
 import com.abin.checkrepeatservice.common.component.PaperStageGate;
 import com.abin.checkrepeatservice.common.constant.DictConstants;
 import com.abin.checkrepeatservice.common.constant.PaperNoticeConstants;
+import com.abin.checkrepeatservice.common.enums.CheckTaskStatusEnum;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.common.service.FileService;
 import com.abin.checkrepeatservice.common.service.Impl.SubjectService;
+import com.abin.checkrepeatservice.common.statemachine.CheckTaskStateMachine;
 import com.abin.checkrepeatservice.mapper.FileInfoMapper;
 import com.abin.checkrepeatservice.mapper.PaperAttachmentMapper;
 import com.abin.checkrepeatservice.mapper.SysUserMapper;
@@ -89,6 +92,12 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
     
     @Resource
     private CheckTaskMapper checkTaskMapper;
+
+    @Resource
+    private CheckTaskStateMachine checkTaskStateMachine;
+
+    @Resource
+    private CollegeQuotaService collegeQuotaService;
     
     @Resource
     private CheckReportMapper checkReportMapper;
@@ -126,9 +135,6 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
         if (subjectId == null) {
             log.warn("学科编码在 subject 表中不存在，subject_id 置空 - 论文ID: {}, subjectCode: {}",
                     paperInfo.getId(), code);
-            // 更新场景下必须显式清库里的旧值：updateById 是 NOT_NULL 策略，subjectId=null
-            // 只会被跳过，留下一对互相矛盾的列（code 是新值、id 还是旧学科的）。
-            // 新建场景 paperInfo.getId() 为 null，本来就没有旧值可清。
             paperInfo.setSubjectId(null);
             if (paperInfo.getId() != null) {
                 paperInfoMapper.clearSubjectId(paperInfo.getId());
@@ -458,13 +464,6 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
 
             // 3. 创建提交记录
             createPaperSubmitRecord(paperInfo, fileId, fileMd5, studentId);
-
-//            // 4. 发送论文提交通知
-//            notificationFacadeService.sendPaperSubmittedNotice(
-//                    paperInfo.getId(),
-//                    paperInfo.getPaperTitle(),
-//                    studentId
-//            );
             // 4. 发送论文提交成功通知
             sendPaperSubmitSuccessNotification(paperInfo, studentId, isNewPaper);
             // 5. 事务提交后异步分配指导老师并触发查重（事件驱动，修复 @Async 自调用失效）
@@ -828,13 +827,19 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
                 return false;
             }
                 
-            // 3. 验证论文状态：待分配、待查重、待审核状态的论文可以撤回
-            if (!(DictConstants.PaperStatus.PENDING.equals(paperInfo.getPaperStatus()) ||
-                  DictConstants.PaperStatus.CHECKING.equals(paperInfo.getPaperStatus()) ||
-                  DictConstants.PaperStatus.AUDITING.equals(paperInfo.getPaperStatus()))) {
-                String statusLabel = getPaperStatusLabel(paperInfo.getPaperStatus());
+            // 3. 验证论文状态：只有待分配/已分配可撤回；查重中直接拦截，
+            //    避免任务跑完后把 withdrawn 覆盖回 auditing。
+            String currentStatus = paperInfo.getPaperStatus();
+            if (DictConstants.PaperStatus.CHECKING.equals(currentStatus)) {
+                throw new BusinessException(ResultCode.PERMISSION_NOT_STATUS,
+                        "论文正在查重中，无法撤回");
+            }
+            if (!(DictConstants.PaperStatus.PENDING.equals(currentStatus)
+                    || DictConstants.PaperStatus.ASSIGNED.equals(currentStatus))) {
+                String statusLabel = getPaperStatusLabel(currentStatus);
                 log.warn("论文状态不允许撤回 - 论文 ID: {}, 状态：{}", paperId, statusLabel);
-                return false;
+                throw new BusinessException(ResultCode.PERMISSION_NOT_STATUS,
+                        "当前状态不允许撤回：" + statusLabel);
             }
                 
             // 【新增】4. 检查撤回次数限制
@@ -851,28 +856,65 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
                     String.format("该论文撤回次数已达上限（最多%d次），请联系管理员", maxWithdrawCount));
             }
                 
-            // 5. 更新论文状态为已撤回
+            // 5. 条件更新为已撤回：以读取时的 pending/assigned 作为条件，
+            //    防止并发确认接收把论文改成 checking 后又被撤回覆盖。
             paperStageGate.guard(paperInfo.getPaperStatus(),
                     DictConstants.PaperStatus.WITHDRAWN, "withdrawPaper");
-            PaperInfo updateInfo = new PaperInfo();
-            updateInfo.setId(paperId);
-            updateInfo.setPaperStatus(DictConstants.PaperStatus.WITHDRAWN);
-            updateInfo.setUpdateTime(LocalDateTime.now());
-            
-            int result = paperInfoMapper.updateById(updateInfo);
-            boolean success = result > 0;
-            
-            if (success) {
-                // 5. 发送撤回成功通知
-                sendPaperWithdrawSuccessNotification(paperInfo, studentId, reason);
-                log.info("论文撤回成功 - 论文ID: {}", paperId);
+            int result = paperInfoMapper.update(null, new LambdaUpdateWrapper<PaperInfo>()
+                    .eq(PaperInfo::getId, paperId)
+                    .in(PaperInfo::getPaperStatus,
+                            DictConstants.PaperStatus.PENDING,
+                            DictConstants.PaperStatus.ASSIGNED)
+                    .eq(PaperInfo::getIsDeleted, 0)
+                    .set(PaperInfo::getPaperStatus, DictConstants.PaperStatus.WITHDRAWN)
+                    .set(PaperInfo::getUpdateTime, LocalDateTime.now()));
+            if (result == 0) {
+                throw new BusinessException(ResultCode.PERMISSION_NOT_STATUS,
+                        "论文状态已变化，撤回失败，请刷新后重试");
             }
+            // 6. 撤回成功后取消该论文所有 pending 任务（含退额度），防止撤回后任务继续执行
+            cancelPendingCheckTasks(paperId);
+            // 7. 发送撤回成功通知
+            sendPaperWithdrawSuccessNotification(paperInfo, studentId, reason);
+            log.info("论文撤回成功 - 论文ID: {}", paperId);
+            return true;
             
-            return success;
-            
+        } catch (BusinessException e) {
+            log.warn("论文撤回被业务规则拦截 - 论文ID: {}, 原因: {}", paperId, e.getMessage());
+            throw e;
         } catch (Exception e) {
             log.error("论文撤回失败 - 论文ID: {}", paperId, e);
             throw new RuntimeException("论文撤回失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 撤回论文时取消所有 pending 查重任务。
+     * 条件状态流转保证不会误取消已被调度器抢占的 checking 任务；
+     * 取消成功后按 quota_charged 幂等退还学院额度。
+     */
+    private void cancelPendingCheckTasks(Long paperId) {
+        List<CheckTask> pendingTasks = checkTaskMapper.selectList(
+                new LambdaQueryWrapper<CheckTask>()
+                        .eq(CheckTask::getPaperId, paperId)
+                        .eq(CheckTask::getCheckStatus, DictConstants.CheckStatus.PENDING)
+                        .eq(CheckTask::getIsDeleted, 0));
+        for (CheckTask task : pendingTasks) {
+            boolean cancelled = checkTaskStateMachine.transitionStatus(
+                    task.getId(),
+                    CheckTaskStatusEnum.PENDING,
+                    CheckTaskStatusEnum.CANCELLED,
+                    "论文已撤回，取消待执行查重任务");
+            if (!cancelled) {
+                log.warn("撤回论文时取消查重任务失败（状态已变化）- paperId={}, taskId={}",
+                        paperId, task.getId());
+                continue;
+            }
+            try {
+                collegeQuotaService.refundForFailedTask(task.getId());
+            } catch (Exception e) {
+                log.error("撤回论文时退还查重额度失败 - paperId={}, taskId={}", paperId, task.getId(), e);
+            }
         }
     }
     

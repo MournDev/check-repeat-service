@@ -4,6 +4,7 @@ import com.abin.checkrepeatservice.admin.mapper.CheckResultMapper;
 import com.abin.checkrepeatservice.common.component.PaperStageGate;
 import com.abin.checkrepeatservice.common.component.ReportPathResolver;
 import com.abin.checkrepeatservice.common.constant.DictConstants;
+import com.abin.checkrepeatservice.common.constant.PaperNoticeConstants;
 import com.abin.checkrepeatservice.common.engine.CheckEngineManager;
 import com.abin.checkrepeatservice.common.enums.CheckTaskStatusEnum;
 import com.abin.checkrepeatservice.common.service.CheckPolicyResolver;
@@ -255,6 +256,19 @@ public class CheckTaskEventListener {
                         RiskLevelUtils.of(effectiveRate));
             }
 
+            // 15. 告知导师：查重完成待审核
+            if (paperInfo.getTeacherId() != null) {
+                String studentName = paperInfo.getAuthor() == null || paperInfo.getAuthor().isBlank()
+                        ? "该学生" : paperInfo.getAuthor();
+                notificationService.sendSystemNotice(
+                        paperInfo.getTeacherId(),
+                        "论文查重完成待审核",
+                        String.format("您指导的学生 %s 已完成查重，请及时审核。论文：《%s》，总相似比：%.2f%%。",
+                                studentName, paperInfo.getPaperTitle(), effectiveRate),
+                        PaperNoticeConstants.NOTICE_TYPE_CHECK_SUCCESS,
+                        paperId);
+            }
+
             log.info("查重任务执行成功 - 任务 ID: {}, 总相似比：{}%, 单篇最大相似比：{}%, 引用率：{}%, 命中句数：{}",
                     taskId, effectiveRate, maxPerSource, citationRate, sentenceHits.size());
 
@@ -426,23 +440,28 @@ public class CheckTaskEventListener {
     private void updatePaperSuccess(PaperInfo paperInfo, double similarity) {
         BigDecimal threshold = checkPolicyResolver.resolveForPaper(paperInfo);
         boolean qualified = similarity <= threshold.doubleValue();
-        PaperInfo updatePaper = new PaperInfo();
-        updatePaper.setId(paperInfo.getId());
         String newStatus = qualified
                 ? DictConstants.PaperStatus.AUDITING
                 : DictConstants.PaperStatus.REJECTED;
         paperStageGate.guard(paperInfo.getPaperStatus(), newStatus, "checkTaskListenerSuccess");
-        updatePaper.setPaperStatus(newStatus);
-        updatePaper.setSimilarityRate(BigDecimal.valueOf(similarity));
-        updatePaper.setCheckCompleted(1);
-        updatePaper.setCheckSource("LOCAL");
-        updatePaper.setCheckEngineType("local");
-        updatePaper.setCheckResult(qualified ? "合格" : "不合格");
-        updatePaper.setCheckTime(LocalDateTime.now());
-        int rows = paperInfoMapper.updateById(updatePaper);
+
+        // 条件更新：只有论文仍处于 checking 才允许写入查重结论。
+        // 撤回、重新提交或其它并发流转后，状态已不是 checking，这里必须失败而不是覆盖。
+        int rows = paperInfoMapper.update(null, new LambdaUpdateWrapper<PaperInfo>()
+                .eq(PaperInfo::getId, paperInfo.getId())
+                .eq(PaperInfo::getPaperStatus, DictConstants.PaperStatus.CHECKING)
+                .eq(PaperInfo::getIsDeleted, 0)
+                .set(PaperInfo::getPaperStatus, newStatus)
+                .set(PaperInfo::getSimilarityRate, BigDecimal.valueOf(similarity))
+                .set(PaperInfo::getCheckCompleted, 1)
+                .set(PaperInfo::getCheckSource, "LOCAL")
+                .set(PaperInfo::getCheckEngineType, "local")
+                .set(PaperInfo::getCheckResult, qualified ? "合格" : "不合格")
+                .set(PaperInfo::getCheckTime, LocalDateTime.now()));
         if (rows == 0) {
             // 交给外层事务回滚：任务不能先落 completed，否则会出现“任务成功、论文未更新”的死状态
-            throw new IllegalStateException("更新论文状态失败，论文可能已被删除 - paperId=" + paperInfo.getId());
+            throw new IllegalStateException("论文状态已不是 checking，拒绝写入查重结论 - paperId="
+                    + paperInfo.getId());
         }
     }
 
