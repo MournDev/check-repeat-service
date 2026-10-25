@@ -12,17 +12,18 @@ import org.springframework.transaction.event.TransactionalEventListener;
 import java.util.concurrent.RejectedExecutionException;
 
 /**
- * 论文提交后「自动分配导师 + 触发查重」异步监听器（架构修复 P0）。
+ * 论文提交后「自动分配导师」异步监听器。
+ *
+ * <p>查重触发点已统一收敛：学生提交只负责分配导师，查重必须等导师确认接收后
+ * 由 {@code TeacherAssignmentServiceImpl#confirmAssignment} 触发。</p>
  *
  * <p>修复点：</p>
  * <ul>
- *   <li>AFTER_COMMIT：仅在提交事务成功落库后执行；事务回滚则不分配、不查重；</li>
+ *   <li>AFTER_COMMIT：仅在提交事务成功落库后执行；事务回滚则不分配；</li>
  *   <li>依赖独立线程池 {@code paperSubmitExecutor}（轻量 DB/通知任务），
- *       与查重执行池 {@code checkTaskExecutor} 隔离——查重队列打满时，
- *       论文提交链路不会跟着排队或报错；</li>
- *   <li>投递被拒绝时显式捕获并回落到提交线程执行：该路径只有导师分配与
- *       “创建查重任务事件”，不包含 Tika 解析/全库比对，回落是可控的，
- *       且保证论文已落库后“导师分配不会无声丢失”。</li>
+ *       与查重执行池 {@code checkTaskExecutor} 隔离；</li>
+ *   <li>投递被拒绝时显式捕获并回落到提交线程执行：该路径只有导师分配，
+ *       不包含 Tika 解析/全库比对，回落是可控的。</li>
  * </ul>
  */
 @Component
@@ -48,9 +49,9 @@ public class PaperSubmissionAllocationListener {
 
     private void runAllocation(PaperSubmittedEvent event) {
         try {
-            log.info("论文提交事务已提交，开始异步分配导师并触发查重 - 论文ID: {}, 学生ID: {}",
+            log.info("论文提交事务已提交，开始异步分配导师 - 论文ID: {}, 学生ID: {}",
                     event.getPaperId(), event.getStudentId());
-            paperInfoService.allocateAdvisorAndCheck(event.getPaperId(), event.getStudentId());
+            paperInfoService.allocateAdvisor(event.getPaperId(), event.getStudentId());
         } catch (Exception e) {
             // 后置任务异常不得反向影响已提交的论文事务
             log.error("论文提交后置任务执行失败 - 论文ID: {}", event.getPaperId(), e);

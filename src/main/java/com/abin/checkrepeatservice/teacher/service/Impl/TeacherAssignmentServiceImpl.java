@@ -2,6 +2,7 @@ package com.abin.checkrepeatservice.teacher.service.Impl;
 
 import com.abin.checkrepeatservice.common.Exception.BusinessException;
 import com.abin.checkrepeatservice.common.Result;
+import com.abin.checkrepeatservice.common.component.PaperStageGate;
 import com.abin.checkrepeatservice.common.constant.DictConstants;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.mapper.SysUserMapper;
@@ -20,6 +21,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -38,7 +40,7 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
 
     // M2.2 阶段门收口：论文状态流转统一校验（默认影子模式，只告警不阻断）
     @Resource
-    private com.abin.checkrepeatservice.common.component.PaperStageGate paperStageGate;
+    private PaperStageGate paperStageGate;
 
     @Resource
     private SysUserMapper sysUserMapper;
@@ -53,65 +55,53 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
     private AdvisorAssignService advisorAssignService;
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public Result<Boolean> confirmAssignment(Long paperId, Long teacherId) {
-        try {
-            // 1. 验证权限和状态
-            PaperInfo paperInfo = validateTeacherPermission(paperId, teacherId);
-            if (!DictConstants.AllocationStatus.PENDING.equals(paperInfo.getAllocationStatus())) {
-                return Result.error(ResultCode.BUSINESS_TASK_ASSIGNED, "论文分配状态不允许确认");
-            }
-
-            // 2. 更新论文分配状态
-            PaperInfo updatePaper = new PaperInfo();
-            updatePaper.setId(paperId);
-            updatePaper.setAllocationStatus(DictConstants.AllocationStatus.CONFIRMED);
-            paperStageGate.guard(paperInfo.getPaperStatus(),
-                    DictConstants.PaperStatus.CHECKING, "confirmAssignment");
-            updatePaper.setPaperStatus(DictConstants.PaperStatus.CHECKING);  // 进入待查重状态
-            updatePaper.setConfirmTime(LocalDateTime.now());
-            updatePaper.setUpdateTime(LocalDateTime.now());
-            paperInfoMapper.updateById(updatePaper);
-
-            // 3. 发送确认通知给学生
-            sendConfirmationNoticeToStudent(paperId, teacherId, true);
-
-            // 4. 记录确认操作
-            //createConfirmationRecord(paperId, teacherId, DictConstants.AllocationStatus.CONFIRMED, null);
-
-            // 5. 触发查重逻辑
-            triggerCheckRepeatLogic(paperInfo);
-            log.info("教师确认接收论文成功 - 论文ID: {}, 老师ID: {}", paperId, teacherId);
-            return Result.success( "确认接收成功", true);
-
-        } catch (BusinessException e) {
-            throw e;
-        } catch (Exception e) {
-            log.error("教师确认接收论文异常 - 论文ID: {}, 老师ID: {}", paperId, teacherId, e);
-            return Result.error(ResultCode.SYSTEM_ERROR, "确认接收失败");
+        // 1. 验证权限和状态
+        PaperInfo paperInfo = validateTeacherPermission(paperId, teacherId);
+        if (!DictConstants.AllocationStatus.PENDING.equals(paperInfo.getAllocationStatus())) {
+            return Result.error(ResultCode.BUSINESS_TASK_ASSIGNED, "论文分配状态不允许确认");
         }
-    }
-    /**
-     * 触发查重逻辑（P0-8）
-     *
-     * <p>教师确认接收论文时，当前登录人是教师；查重归属校验必须按「论文所属学生」
-     * 判断，因此这里显式把 paperInfo.studentId 传给创建入口。旧实现用
-     * getCurrentUserId() 比对 paper.studentId，必然校验失败且异常被静默吞掉，
-     * 论文会永远停在「待查重」。</p>
-     */
-    private void triggerCheckRepeatLogic(PaperInfo paperInfo) {
-        try {
-            Result<CheckResultVO> createResult =
-                    checkTaskService.createCheckTask(paperInfo.getId(), paperInfo.getStudentId());
-            if (createResult == null || !createResult.isSuccess()) {
-                log.error("触发查重逻辑失败 - 论文ID: {}, 原因: {}",
-                        paperInfo.getId(), createResult == null ? "空响应" : createResult.getMessage());
-                return;
+
+        // 2. 先创建查重任务：与学生提交后的“只分配不查重”规则配套，
+        //    确认接收是唯一的查重触发点。任务创建失败必须抛出并回滚本事务，
+        //    不允许出现“论文已 checking、却没有任务”的死状态。
+        Result<CheckResultVO> createResult =
+                checkTaskService.createCheckTask(paperId, paperInfo.getStudentId());
+        if (createResult == null || !createResult.isSuccess()) {
+            String message = createResult == null ? "查重任务创建失败" : createResult.getMessage();
+            log.error("确认接收前创建查重任务失败 - 论文ID: {}, 原因: {}", paperId, message);
+            if (createResult != null && createResult.getErrorCode() != null
+                    && createResult.getErrorCode().equals(ResultCode.BUSINESS_QUOTA_EXCEEDED.getCode())) {
+                throw new BusinessException(ResultCode.BUSINESS_QUOTA_EXCEEDED, message);
             }
-            log.info("查重任务创建成功 - 论文ID: {}", paperInfo.getId());
-        } catch (Exception e) {
-            log.error("触发查重逻辑失败 - 论文ID: {}", paperInfo.getId(), e);
-            // 查重触发失败不应影响主流程，仅记录日志
+            throw new BusinessException(ResultCode.BUSINESS_NO_REPEAT, message);
         }
+
+        // 3. 任务创建成功后，再条件更新分配状态与论文状态：
+        //    以读取时的 allocation_status + paper_status 作为条件，避免并发确认/撤回覆盖。
+        paperStageGate.guard(paperInfo.getPaperStatus(),
+                DictConstants.PaperStatus.CHECKING, "confirmAssignment");
+        LocalDateTime now = LocalDateTime.now();
+        LambdaUpdateWrapper<PaperInfo> paperUpdate = new LambdaUpdateWrapper<>();
+        paperUpdate.eq(PaperInfo::getId, paperId)
+                .eq(PaperInfo::getAllocationStatus, DictConstants.AllocationStatus.PENDING)
+                .eq(PaperInfo::getPaperStatus, paperInfo.getPaperStatus())
+                .set(PaperInfo::getAllocationStatus, DictConstants.AllocationStatus.CONFIRMED)
+                .set(PaperInfo::getPaperStatus, DictConstants.PaperStatus.CHECKING)
+                .set(PaperInfo::getConfirmTime, now)
+                .set(PaperInfo::getUpdateTime, now);
+        int updated = paperInfoMapper.update(null, paperUpdate);
+        if (updated == 0) {
+            throw new BusinessException(ResultCode.BUSINESS_NO_REPEAT,
+                    "论文状态已变化，确认接收失败，请刷新后重试");
+        }
+
+        // 4. 发送确认通知给学生
+        sendConfirmationNoticeToStudent(paperId, teacherId, true);
+
+        log.info("教师确认接收论文成功，查重任务已创建 - 论文ID: {}, 老师ID: {}", paperId, teacherId);
+        return Result.success("确认接收成功", true);
     }
 
 

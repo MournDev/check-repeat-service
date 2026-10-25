@@ -4,6 +4,7 @@ import com.abin.checkrepeatservice.admin.mapper.PaperSubmitMapper;
 import com.abin.checkrepeatservice.admin.mapper.SystemConfigMapper;
 import com.abin.checkrepeatservice.common.Exception.BusinessException;
 import com.abin.checkrepeatservice.common.Result;
+import com.abin.checkrepeatservice.common.component.PaperStageGate;
 import com.abin.checkrepeatservice.common.constant.DictConstants;
 import com.abin.checkrepeatservice.common.constant.PaperNoticeConstants;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
@@ -18,14 +19,12 @@ import com.abin.checkrepeatservice.student.mapper.CheckTaskMapper;
 import com.abin.checkrepeatservice.student.mapper.CheckReportMapper;
 import com.abin.checkrepeatservice.student.mapper.CheckRuleMapper;
 import com.abin.checkrepeatservice.student.event.PaperSubmittedEvent;
-import com.abin.checkrepeatservice.student.service.CheckTaskService;
 import com.abin.checkrepeatservice.student.service.PaperInfoService;
 import com.abin.checkrepeatservice.student.vo.PaperQueryRequest;
 import com.abin.checkrepeatservice.student.dto.*;
 import com.abin.checkrepeatservice.user.service.AdvisorAssignService;
 import com.abin.checkrepeatservice.notification.service.NotificationService;
 import com.abin.checkrepeatservice.user.service.Impl.NotificationFacadeService;
-import com.abin.checkrepeatservice.user.service.MessageService;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.TypeReference;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -71,9 +70,6 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
     private AdvisorAssignService advisorAssignService;
 
     @Resource
-    private CheckTaskService checkTaskService;
-
-    @Resource
     private PaperInfoMapper paperInfoMapper;
 
     @Resource
@@ -107,34 +103,18 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
     private PaperAttachmentMapper paperAttachmentMapper;
 
     @Resource
-    private MessageService messageService;
-
-    @Resource
     private SubjectService subjectService;
 
     // M2.2 阶段门收口：论文状态流转统一校验（默认影子模式，只告警不阻断）
     @Resource
-    private com.abin.checkrepeatservice.common.component.PaperStageGate paperStageGate;
+    private PaperStageGate paperStageGate;
 
-    // 架构修复（P0）：提交后分配导师/查重改为事件驱动，避免本类 @Async 自调用失效
+    // 提交后分配导师改为事件驱动；查重由导师确认接收触发
     @Resource
     private ApplicationEventPublisher eventPublisher;
 
     /**
      * 由学科编码反查并写入学科ID —— 论文写路径的**唯一入口**。
-     *
-     * 三条提交路径（新建 / 更新 / 撤回后重提）都从这里走，避免出现「某一条路写了
-     * subject_code、忘了写 subject_id」的半吊子状态：那种论文在阈值解析时会因为
-     * subjectId 为空而拿不到学科维度的规则，且不会报任何错。
-     *
-     * code 为空/null 时**不碰 subjectId**：与这几处 setter 的既有语义（null = 不修改，
-     * MyBatis-Plus 的 NOT_NULL 更新策略会跳过空字段）保持一致，也让「只改标题不改学科」
-     * 的调用不会把已存在的学科清掉。
-     *
-     * code 非空但**查不到**学科（历史脏 code，或老客户端传的旧值）时只告警、不抛异常：
-     * subject_code 的值域必须原样保留（AcademicIntegrityServiceImpl 拿它当 subjectArea
-     * 匹配资源分类），而且按 DEPLOY.md 第八节，新代码要能跟旧客户端并存 —— 直接拒绝会
-     * 把一次正常的提交变成 500。此时 subject_id 会被**显式清空**（见下），不留旧值。
      */
     private void applySubject(PaperInfo paperInfo, String subjectCode) {
         if (subjectCode == null || subjectCode.isBlank()) {
@@ -500,41 +480,51 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
         }
     }
     /**
-     * 分配指导老师并在分配成功后触发查重。
+     * 论文提交后的导师分配（不再触发查重）。
      *
-     * <p>架构修复（P0）：本方法不再标注 @Async，也不应被本类直接调用——由
-     * {@link com.abin.checkrepeatservice.student.listener.PaperSubmissionAllocationListener}
-     * 在论文提交事务 AFTER_COMMIT 后以独立 bean 异步调用。此前在本类事务方法内直接
-     * 调 {@code @Async} 本方法属于 Spring AOP 自调用，代理不生效，分配+解析+全库比对
-     * 全部同步跑在提交请求内并长占数据库连接。</p>
+     * <p>查重触发点已统一收敛：学生提交只负责分配导师，查重必须等导师在
+     * {@code TeacherAssignmentServiceImpl#confirmAssignment} 中确认接收后再触发。</p>
+     *
+     * <p>已有导师的再次提交（修订版重提、撤回后重提、同标题重提）不重新分配，
+     * 只补发“待确认”站内信，让导师确认新版本后再触发查重。</p>
+     *
+     * <p>由 {@link com.abin.checkrepeatservice.student.listener.PaperSubmissionAllocationListener}
+     * 在论文提交事务 AFTER_COMMIT 后以独立 bean 异步调用。</p>
      */
-    public void allocateAdvisorAndCheck(Long paperSubmitId, Long studentId) {
+    public void allocateAdvisor(Long paperSubmitId, Long studentId) {
         try {
             log.info("开始异步分配指导老师 - 论文ID: {}, 学生ID: {}", paperSubmitId, studentId);
 
-            // 1. 分配指导老师
+            PaperInfo paperInfo = paperInfoMapper.selectById(paperSubmitId);
+            if (paperInfo == null) {
+                log.warn("论文不存在，跳过导师分配 - 论文ID: {}", paperSubmitId);
+                return;
+            }
+
+            // 已有导师：不重新分配，只提醒导师确认新版本；查重由确认动作触发
+            if (paperInfo.getTeacherId() != null) {
+                if (DictConstants.AllocationStatus.PENDING.equals(paperInfo.getAllocationStatus())) {
+                    notificationService.sendTeacherAssignmentNotice(
+                            paperInfo.getId(), paperInfo.getPaperTitle(), studentId, paperInfo.getTeacherId());
+                }
+                log.info("论文已有指导教师，等待导师确认后触发查重 - 论文ID: {}", paperSubmitId);
+                return;
+            }
+
+            // 无导师：走自动分配；分配成功通知由 autoAssignAdvisor 内部统一发送
             Result<Boolean> result = advisorAssignService.autoAssignAdvisor(paperSubmitId);
-            boolean allocationSuccess = result.isSuccess();
-            if (allocationSuccess) {
-                // 分配成功的站内通知已在 autoAssignAdvisor 内部 sendAssignmentNotifications
-                // 统一发送（带导师姓名，师生各一条），此处不再重复发送
-                log.info("指导老师分配成功，开始触发查重 - 论文ID: {}", paperSubmitId);
-                // 2. 分配成功后触发查重（显式传学生归属，后台线程没有 SecurityContext）
-                triggerCheckRepeat(paperSubmitId, studentId);
+            if (result.isSuccess()) {
+                log.info("指导老师分配成功，等待导师确认接收 - 论文ID: {}", paperSubmitId);
             } else {
-                log.warn("指导老师分配失败，跳过查重流程 - 论文ID: {}", paperSubmitId);
-                // 发送指导老师分配失败通知
-                String errorMsg = result.getMessage();
-                sendAdvisorAllocateFailedNotification(paperSubmitId, studentId, errorMsg);
+                log.warn("指导老师分配失败 - 论文ID: {}, 原因: {}", paperSubmitId, result.getMessage());
+                sendAdvisorAllocateFailedNotification(paperSubmitId, studentId, result.getMessage());
             }
 
         } catch (BusinessException e) {
-            // 业务异常正常抛出，这样你就能看到具体的错误信息
             log.error("异步分配指导老师业务异常 - 论文ID: {}, 错误: {}", paperSubmitId, e.getMessage());
-            throw e; // 重新抛出业务异常
+            throw e;
         } catch (Exception e) {
-            log.error("异步分配指导老师并触发查重系统异常 - 论文ID: {}", paperSubmitId, e);
-            // 系统异常可以继续捕获，不影响主流程
+            log.error("异步分配指导老师系统异常 - 论文ID: {}", paperSubmitId, e);
         }
     }
 
@@ -676,6 +666,11 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
         paperStageGate.guard(existingPaper.getPaperStatus(),
                 DictConstants.PaperStatus.PENDING, "updatePaperInfo");
         existingPaper.setPaperStatus(DictConstants.PaperStatus.PENDING); // 重置状态
+        // 查重触发点已收敛到导师确认：已有导师的再次提交必须重新进入待确认，
+        // 否则 autoAssignAdvisor 会因 teacherId 非空直接返回，论文永远等不到查重。
+        if (existingPaper.getTeacherId() != null) {
+            existingPaper.setAllocationStatus(DictConstants.AllocationStatus.PENDING);
+        }
         existingPaper.setWordCount(fileInfoMapper.selectById(fileId).getWordCount());//论文字数
         // 重置相似度为 NULL（= 未检测）：updateById 按非空策略跳过 null 字段，必须显式置空
         existingPaper.setSimilarityRate(null);
@@ -733,135 +728,6 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
         return lastSubmit != null ? lastSubmit.getSubmitVersion() : 0;
     }
 
-    /**
-     * 触发查重逻辑（增加重试机制）
-     */
-    private void triggerCheckRepeat(Long paperId, Long studentId) {
-        int maxRetries = 3; // 最大重试次数
-        int retryCount = 0;
-        boolean success = false;
-            
-        while (retryCount < maxRetries && !success) {
-            try {
-                log.info("触发查重逻辑 - 论文 ID: {}, 尝试次数：{}", paperId, retryCount + 1);
-    
-                // 后台线程没有登录上下文，必须显式传入论文归属学生
-                checkTaskService.createCheckTask(paperId, studentId);
-                    
-                success = true;
-                log.info("查重任务创建成功 - 论文 ID: {}", paperId);
-    
-            } catch (Exception e) {
-                retryCount++;
-                log.error("触发查重失败 - 论文 ID: {}, 重试次数：{}/{}", paperId, retryCount, maxRetries, e);
-                    
-                if (retryCount >= maxRetries) {
-                    // 超过最大重试次数，发送告警通知
-                    sendCheckFailedAlert(paperId, e.getMessage());
-                    log.error("查重任务创建失败，已达到最大重试次数 - 论文 ID: {}", paperId);
-                } else {
-                    // 等待一段时间后重试
-                    try {
-                        Thread.sleep(2000 * retryCount); // 递增等待时间
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        log.warn("查重重试被中断 - 论文 ID: {}", paperId);
-                        break;
-                    }
-                }
-            }
-        }
-    }
-        
-    /**
-     * 发送查重失败告警通知
-     */
-    private void sendCheckFailedAlert(Long paperId, String errorMessage) {
-        try {
-            // 获取论文信息
-            PaperInfo paperInfo = paperInfoMapper.selectById(paperId);
-            if (paperInfo == null) {
-                log.warn("论文不存在，无法发送告警通知 - 论文 ID：{}", paperId);
-                return;
-            }
-                    
-            // 获取学生信息
-            SysUser student = sysUserMapper.selectById(paperInfo.getStudentId());
-                    
-            // 获取管理员信息：按角色编码查询，超管同样需要收到严重告警
-            // （此前硬编码 roleId=4001，角色 ID 变动或超管都会漏收）
-            List<SysUser> admins = sysUserMapper.selectList(
-                new LambdaQueryWrapper<SysUser>()
-                    .apply("role_id IN (SELECT id FROM sys_role WHERE is_deleted = 0 AND role_code IN ('ADMIN', 'SUPER_ADMIN'))")
-                    .eq(SysUser::getIsDeleted, 0)
-            );
-                    
-            // 给管理员发送系统消息
-            for (SysUser admin : admins) {
-                SystemMessage alertMessage = new SystemMessage();
-                alertMessage.setSenderId(0L); // 系统发送
-                alertMessage.setReceiverId(admin.getId());
-                alertMessage.setTitle("【严重】查重任务创建失败告警");
-                alertMessage.setContent(String.format(
-                    "论文《%s》（ID: %d）的查重任务创建失败，已达到最大重试次数。\n" +
-                    "学生：%s\n" +
-                    "错误信息：%s\n" +
-                    "系统将自动重置论文状态，请及时处理！",
-                    paperInfo.getPaperTitle(),
-                    paperId,
-                    student != null ? student.getRealName() : "未知",
-                    errorMessage
-                ));
-                alertMessage.setMessageType("ALERT");
-                alertMessage.setPriority(3); // 高优先级
-                alertMessage.setRelatedType("PAPER");
-                alertMessage.setRelatedId(paperId);
-                alertMessage.setCreateTime(LocalDateTime.now());
-                alertMessage.setUpdateTime(LocalDateTime.now());
-                alertMessage.setIsRead(0);
-                        
-                messageService.sendMessage(alertMessage);
-            }
-                    
-            log.info("查重失败告警通知已发送 - 论文 ID: {}, 管理员数量：{}", paperId, admins.size());
-                
-            // 【修复】重置论文状态为待分配，允许重新分配导师
-            resetPaperStatusAfterCheckFailed(paperId, paperInfo);
-                    
-        } catch (Exception e) {
-            log.error("发送查重失败告警通知失败 - 论文 ID：{}", paperId, e);
-        }
-    }
-        
-    /**
-     * 查重失败后重置论文状态（独立方法，便于事务控制）
-     */
-    @Transactional(rollbackFor = Exception.class)
-    private void resetPaperStatusAfterCheckFailed(Long paperId, PaperInfo paperInfo) {
-        try {
-            paperStageGate.guard(paperInfo.getPaperStatus(),
-                    DictConstants.PaperStatus.PENDING, "resetPaperStatusAfterCheckFailed");
-            PaperInfo updatePaper = new PaperInfo();
-            updatePaper.setId(paperId);
-            updatePaper.setPaperStatus(DictConstants.PaperStatus.PENDING);  // 重置为待分配
-            updatePaper.setTeacherId(null);  // 清空导师
-            updatePaper.setTeacherName(null);
-            updatePaper.setAllocationStatus(null);  // 清空分配状态
-            updatePaper.setAllocationType(null);
-            updatePaper.setUpdateTime(LocalDateTime.now());
-                
-            int result = paperInfoMapper.updateById(updatePaper);
-                
-            if (result > 0) {
-                log.info("查重失败后论文状态已重置 - 论文 ID: {}, 新状态：{}", paperId, DictConstants.PaperStatus.PENDING);
-            } else {
-                log.error("重置论文状态失败 - 论文 ID: {}", paperId);
-            }
-        } catch (Exception e) {
-            log.error("重置论文状态异常 - 论文 ID: {}", paperId, e);
-        }
-    }
-    
     /**
      * 发送论文提交成功通知
      */
@@ -1026,9 +892,15 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
             }
             
             // 2. 更新论文基本信息
-            // M2.2：撤回后重提是从 withdrawn 回到 pending，先过阶段门（影子模式默认只告警）
+            // 撤回后重提只允许从 withdrawn 回到 pending；显式校验，避免任意状态被重置
             PaperInfo currentPaper = paperInfoMapper.selectById(paperId);
-            paperStageGate.guard(currentPaper == null ? null : currentPaper.getPaperStatus(),
+            if (currentPaper == null
+                    || !DictConstants.PaperStatus.WITHDRAWN.equals(currentPaper.getPaperStatus())) {
+                throw new BusinessException(ResultCode.PERMISSION_NOT_STATUS,
+                        "仅已撤回的论文可重新提交，当前状态："
+                                + (currentPaper == null ? "未知" : currentPaper.getPaperStatus()));
+            }
+            paperStageGate.guard(DictConstants.PaperStatus.WITHDRAWN,
                     DictConstants.PaperStatus.PENDING, "resubmitAfterWithdraw");
             PaperInfo updatePaper = new PaperInfo();
             updatePaper.setId(paperId);
@@ -1038,8 +910,14 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
             if (StringUtils.hasText(request.getDegreeType())) {
                 updatePaper.setDegreeType(request.getDegreeType().trim().toLowerCase());
             }
-            updatePaper.setFileId(request.getFileId());
-            updatePaper.setFileMd5(request.getFileMd5());
+            // 查重读取的是 file_path，必须与主提交链路保持同一份相对路径；
+            // 只更新 file_id 会让查重继续比对旧文件。
+            String effectiveMd5 = StringUtils.hasText(fileInfo.getMd5())
+                    ? fileInfo.getMd5() : request.getFileMd5();
+            updatePaper.setFileId(fileInfo.getId());
+            updatePaper.setFileMd5(effectiveMd5);
+            updatePaper.setFilePath(fileInfo.getStoragePath());
+            updatePaper.setWordCount(fileInfo.getWordCount());
             // 撤回后重提也允许改学科。request.subjectCode 这个字段一直存在、前端 submitParams
             // 也一直在传，只是服务层从来没读过 —— 所以老论文撤回重提时改了学科也不生效。
             applySubject(updatePaper, request.getSubjectCode());
@@ -1047,8 +925,11 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
             // 3. 获取当前版本号
             Integer currentVersion = getCurrentVersion(paperId);
             Integer newVersion = currentVersion+1;
-            // 4. 重置状态为待分配
+            // 4. 重置状态为待分配；已有导师时重新进入待确认，查重由导师确认后触发
             updatePaper.setPaperStatus(DictConstants.PaperStatus.PENDING);
+            if (currentPaper.getTeacherId() != null) {
+                updatePaper.setAllocationStatus(DictConstants.AllocationStatus.PENDING);
+            }
             updatePaper.setUpdateTime(LocalDateTime.now());
             
             int updateResult = paperInfoMapper.updateById(updatePaper);
@@ -1061,8 +942,8 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
             submitRecord.setPaperId(paperId);
             submitRecord.setStudentId(studentId);
             submitRecord.setSubmitVersion(newVersion);
-            submitRecord.setFileId(request.getFileId());
-            submitRecord.setFileMd5(request.getFileMd5());
+            submitRecord.setFileId(fileInfo.getId());
+            submitRecord.setFileMd5(effectiveMd5);
             submitRecord.setSubmitTime(LocalDateTime.now());
             submitRecord.setRemark("撤回后重新提交");
             int submitResult = paperSubmitMapper.insert(submitRecord);
@@ -1070,7 +951,7 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
                 throw new BusinessException(ResultCode.SYSTEM_ERROR,"创建提交记录失败");
             }
             
-            // 6. 事务提交后异步分配导师并触发查重（事件驱动，修复 @Async 自调用失效）
+            // 6. 事务提交后只分配导师/提醒已有导师确认，查重由导师确认触发
             eventPublisher.publishEvent(new PaperSubmittedEvent(this, paperId, studentId));
             
             PaperInfo updatedPaper = paperInfoMapper.selectById(paperId);

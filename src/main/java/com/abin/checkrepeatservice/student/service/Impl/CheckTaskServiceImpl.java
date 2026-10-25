@@ -103,8 +103,11 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
 
         // 前置校验（在事务外执行）
         log.info("开始创建查重任务 - 论文 ID: {}, 发起人 ID: {}, 归属学生 ID: {}", paperId, currentUserId, ownerId);
+        // 单用户 30 秒限流只针对学生自助发起；教师确认接收、后台触发等代操作
+        // 不应共用教师的限流窗口，否则教师连续确认多篇会被误拦。
+        boolean selfService = currentUserId != null && currentUserId.equals(ownerId);
         CheckTaskValidationService.ValidationResult validationResult =
-            validationService.validateCheckRequest(paperId, ownerId);
+            validationService.validateCheckRequest(paperId, ownerId, selfService);
 
         if (!validationResult.isSuccess()) {
             log.warn("查重前置校验失败 - 论文 ID: {}, 原因：{}", paperId, validationResult.getMessage());
