@@ -117,6 +117,11 @@ public class SecurityConfig {
                         // 注：/ws/info 与 /actuator/health 那两次 401 也是同一类问题的不同表现。
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         .requestMatchers("/error").permitAll()
+                        // Swagger / OpenAPI 文档：文档 JSON 与静态资源必须匿名放行，
+                        // 否则会被 anyRequest().authenticated() 拦截而看不到文档页
+                        // （JWT 过滤器对匿名请求不会阻断，只有授权规则会拒绝）
+                        .requestMatchers("/v3/api-docs", "/v3/api-docs/**",
+                                "/swagger-ui.html", "/swagger-ui/**").permitAll()
                         // 放行公开接口
                         // /ws/** 是 SockJS 握手入口，握手走 HTTP 请求，必须在过滤器链上放行，
                         // STOMP CONNECT 帧仍由 WebSocketChannelInterceptor 校验 JWT，无有效 token 照样拒绝。
