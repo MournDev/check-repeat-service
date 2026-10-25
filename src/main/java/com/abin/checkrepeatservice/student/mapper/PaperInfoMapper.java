@@ -24,6 +24,13 @@ public interface PaperInfoMapper extends BaseMapper<PaperInfo> {
     PaperInfo selectLatestPaper(Long studentId);
 
     /**
+     * 对论文行加排他锁（SELECT ... FOR UPDATE），用于串行化同一论文的查重任务创建。
+     * 必须在事务内调用；行锁会一直持有到事务提交/回滚。
+     */
+    @Select("SELECT id FROM paper_info WHERE id = #{paperId} AND is_deleted = 0 FOR UPDATE")
+    Long lockPaperForCheck(@Param("paperId") Long paperId);
+
+    /**
      * 把 subject_id 显式清空（置 NULL），仅用于「学科编码解析不出学科」时抹掉旧值。
      *
      * 为什么不能靠 updateById 顺带清：MyBatis-Plus 的更新策略是 NOT_NULL，null 字段会被

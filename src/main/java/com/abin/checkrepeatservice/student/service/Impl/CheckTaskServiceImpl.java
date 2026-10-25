@@ -27,12 +27,16 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
@@ -66,16 +70,26 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
     private CheckTaskValidationService validationService;
 
     /**
-     * 显式事务模板（P0-2）：createCheckTask 内部原本用 this 调用 @Transactional 方法，
+     * createCheckTask 内部原本用 this 调用 @Transactional 方法，
      * 绕过 Spring 代理导致事务失效。这里用编程式事务把「扣额度 + 落任务」包成同一个事务；
      * 任务以 pending 状态落库后，由 CheckTaskDispatchScheduler 按容量受控派发。
      */
     @Resource
     private TransactionTemplate transactionTemplate;
 
-    // P5 学院月度查重额度：新建任务落库前校验并扣减
+    //学院月度查重额度：新建任务落库前校验并扣减
     @Resource
     private CollegeQuotaService collegeQuotaService;
+
+    // 同一论文创建查重任务的短锁（Redis 快速失败 + 数据库行锁兜底）
+    @Resource
+    private StringRedisTemplate stringRedisTemplate;
+
+    private static final long PAPER_CHECK_LOCK_SECONDS = 5L;
+
+    private static final DefaultRedisScript<Long> RELEASE_LOCK_SCRIPT = new DefaultRedisScript<>(
+            "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
+            Long.class);
 
     @Override
     public Result<CheckResultVO> createCheckTask(Long paperId) {
@@ -101,11 +115,33 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
             return Result.error(ResultCode.NOT_LOGIN, "无法确定论文归属学生，请重新登录后再试");
         }
 
+        // 第一道并发闸门：同一论文 5 秒短锁，避免两个请求同时走到数据库。
+        // Redis 异常时放行，最终由事务内的 paper_info 行锁 + 活跃任务二次校验兜底。
+        String lockKey = "check:task:create:lock:" + paperId;
+        String lockToken = UUID.randomUUID().toString();
+        if (!tryAcquirePaperCheckLock(lockKey, lockToken)) {
+            log.warn("同一论文查重任务创建锁未获取 - paperId={}", paperId);
+            return Result.error(ResultCode.BUSINESS_NO_REPEAT,
+                    "该论文已有查重任务正在创建，请勿重复提交");
+        }
+        try {
+            return doCreateCheckTask(paperId, ownerId, currentUserId);
+        } finally {
+            releasePaperCheckLock(lockKey, lockToken);
+        }
+    }
+
+    /**
+     * 实际创建逻辑：入口校验 + 事务内落库。
+     * 事务内会再次检查活跃任务，确保并发请求只能成功一个。
+     */
+    private Result<CheckResultVO> doCreateCheckTask(Long paperId, Long ownerId, Long currentUserId) {
         // 前置校验（在事务外执行）
         log.info("开始创建查重任务 - 论文 ID: {}, 发起人 ID: {}, 归属学生 ID: {}", paperId, currentUserId, ownerId);
         // 单用户 30 秒限流只针对学生自助发起；教师确认接收、后台触发等代操作
         // 不应共用教师的限流窗口，否则教师连续确认多篇会被误拦。
         boolean selfService = currentUserId != null && currentUserId.equals(ownerId);
+        // 已有 pending/checking 任务时这里会直接抛业务异常，让调用方按 409 处理
         CheckTaskValidationService.ValidationResult validationResult =
             validationService.validateCheckRequest(paperId, ownerId, selfService);
 
@@ -139,6 +175,31 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
     }
 
     /**
+     * Redis 短锁获取；Redis 异常 fail-open，事务内论文行锁仍会兜底。
+     */
+    private boolean tryAcquirePaperCheckLock(String lockKey, String lockToken) {
+        try {
+            Boolean acquired = stringRedisTemplate.opsForValue().setIfAbsent(
+                    lockKey, lockToken, PAPER_CHECK_LOCK_SECONDS, TimeUnit.SECONDS);
+            return Boolean.TRUE.equals(acquired);
+        } catch (Exception e) {
+            log.warn("查重任务创建锁不可用（Redis 异常），回退数据库行锁 - key={}", lockKey, e);
+            return true;
+        }
+    }
+
+    /**
+     * 仅释放自己持有的锁，避免误删其他请求的锁。
+     */
+    private void releasePaperCheckLock(String lockKey, String lockToken) {
+        try {
+            stringRedisTemplate.execute(RELEASE_LOCK_SCRIPT, Collections.singletonList(lockKey), lockToken);
+        } catch (Exception e) {
+            log.warn("释放查重任务创建锁失败 - key={}", lockKey, e);
+        }
+    }
+
+    /**
      * 当前登录用户 ID；后台线程（论文提交后自动查重）没有 SecurityContext 时返回 null。
      */
     private Long currentUserIdOrNull() {
@@ -154,7 +215,12 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
      * 任何一步抛异常都会回滚额度扣减，避免「扣了额度却没有任务」。
      */
     private CheckResultVO createCheckTaskInTransaction(Long paperId, PaperInfo paperInfo, Long ownerId) {
-        // P5 学院月度额度：任务真正落库前校验并扣减学院当月额度。
+        Long lockedPaperId = paperInfoMapper.lockPaperForCheck(paperId);
+        if (lockedPaperId == null) {
+            throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "论文不存在或已删除");
+        }
+        validationService.assertNoActiveTask(paperId);
+
         // 重试路径复用已存在任务（重新入队），不走本新建入口，不会重复扣减。
         // M4.1：记录本次是否实际扣减，失败返还时据此幂等退回
         boolean quotaConsumed = collegeQuotaService.checkAndConsume(paperInfo.getCollegeId());
@@ -175,7 +241,6 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
         UserBusinessInfoUtils.setAuditField(checkTask, true);
         save(checkTask);
 
-        // 2. 只落库 pending，不再发布事件直接触发 @Async 执行。
         //    CheckTaskDispatchScheduler 每 5 秒按 checking 余量捞取 pending 任务，
         //    从根上避免瞬时提交把线程池/队列打满。
         return buildCheckResultVO(checkTask);
@@ -197,7 +262,7 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
      */
     private int getQueuePosition() {
         return (int)count(
-            new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<CheckTask>()
+            new LambdaQueryWrapper<CheckTask>()
                 .eq(CheckTask::getCheckStatus, DictConstants.CheckStatus.PENDING)
                 .eq(CheckTask::getIsDeleted, 0)
         ) + 1;
@@ -245,8 +310,6 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
         }
 
         // 3. 按任务状态过滤（可选）
-        // check_status 是 varchar，不能用 Integer 直接比较：MySQL 会把字符串转数字，
-        // "pending"/"checking" 等都会变成 0，导致按 0 过滤命中全部状态。
         if (checkStatus != null) {
             String statusCode = switch (checkStatus) {
                 case 0 -> DictConstants.CheckStatus.PENDING;
@@ -435,7 +498,7 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
      * 生成唯一任务编号（格式：CHECK+ 年月日 +3 位序号，如 CHECK20251108001）
      */
     private String generateTaskNo() {
-        String datePrefix = LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd"));
+        String datePrefix = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
         String seqPrefix = "CHECK" + datePrefix;
         // 查询当日最大序号
         LambdaQueryWrapper<CheckTask> wrapper = new LambdaQueryWrapper<>();

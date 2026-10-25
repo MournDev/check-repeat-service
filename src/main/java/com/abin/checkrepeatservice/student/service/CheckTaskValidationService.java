@@ -87,7 +87,10 @@ public class CheckTaskValidationService {
             return result;
         }
         
-        // 3. 校验历史查重次数
+        // 3. 同一论文只允许一个活跃任务：pending/checking 存在时直接拒绝。
+        assertNoActiveTask(paperId);
+
+        // 4. 校验历史查重次数
         List<CheckTask> historyTasks = getHistoryCheckTasks(paperId);
         if (historyTasks.size() >= defaultMaxCount) {
             result.setSuccess(false);
@@ -121,6 +124,25 @@ public class CheckTaskValidationService {
         
         log.info("查重前置校验通过 - 论文 ID: {}, 排队位置：{}", paperId, result.getQueuePosition());
         return result;
+    }
+
+    /**
+     * 同一论文存在 pending/checking 任务时拒绝再次创建。
+     *
+     * <p>调用方分两处：入口快速失败，以及事务内拿到论文行锁后的权威二次校验。
+     * 后者能拦住两个并发请求同时通过入口校验、随后各自落库的竞态。</p>
+     */
+    public void assertNoActiveTask(Long paperId) {
+        Long activeCount = checkTaskMapper.selectCount(new LambdaQueryWrapper<CheckTask>()
+                .eq(CheckTask::getPaperId, paperId)
+                .in(CheckTask::getCheckStatus,
+                        DictConstants.CheckStatus.PENDING,
+                        DictConstants.CheckStatus.CHECKING)
+                .eq(CheckTask::getIsDeleted, 0));
+        if (activeCount != null && activeCount > 0) {
+            throw new BusinessException(ResultCode.BUSINESS_NO_REPEAT,
+                    "该论文已有查重任务正在执行，请勿重复提交", null);
+        }
     }
 
     /**

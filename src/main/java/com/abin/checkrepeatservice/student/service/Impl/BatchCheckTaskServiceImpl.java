@@ -1,8 +1,10 @@
 package com.abin.checkrepeatservice.student.service.Impl;
 
+import com.abin.checkrepeatservice.admin.mapper.PaperSubmitMapper;
 import com.abin.checkrepeatservice.admin.service.CollegeQuotaService;
 import com.abin.checkrepeatservice.common.Exception.BusinessException;
 import com.abin.checkrepeatservice.common.Result;
+import com.abin.checkrepeatservice.common.constant.DictConstants;
 import com.abin.checkrepeatservice.common.enums.ResultCode;
 import com.abin.checkrepeatservice.pojo.entity.CheckTask;
 import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
@@ -20,11 +22,12 @@ import lombok.extern.slf4j.Slf4j;
 
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -50,9 +53,13 @@ public class BatchCheckTaskServiceImpl {
     @Resource
     private CollegeQuotaService collegeQuotaService;
 
+    // 每篇论文的「行锁 + 活跃任务复查 + 扣额度 + 落库」必须同一事务
+    @Resource
+    private TransactionTemplate transactionTemplate;
+
     // M3.1 版本—报告绑定：任务落库时快照论文版本与最新提交记录
     @Resource
-    private com.abin.checkrepeatservice.admin.mapper.PaperSubmitMapper paperSubmitMapper;
+    private PaperSubmitMapper paperSubmitMapper;
 
     /**
      * S13：批量创建并行化用线程池（AsyncConfig 的通用池，core 3 / max 10 / CallerRunsPolicy 兜底）。
@@ -77,7 +84,12 @@ public class BatchCheckTaskServiceImpl {
      */
     public Result<BatchCheckResultDTO> batchCreateCheckTasks(BatchCheckRequestDTO request) {
         Long currentUserId = UserBusinessInfoUtils.getCurrentUserId();
-        List<Long> paperIds = request.getPaperIds();
+        // 先去重再限流/限数：同一 paperId 重复传入不应产生多个任务或重复扣额度
+        List<Long> paperIds = request.getPaperIds() == null ? null
+                : request.getPaperIds().stream()
+                        .filter(Objects::nonNull)
+                        .distinct()
+                        .toList();
 
         if (paperIds == null || paperIds.isEmpty()) {
             return Result.error(ResultCode.PARAM_ERROR, "论文 ID 列表不能为空");
@@ -141,10 +153,18 @@ public class BatchCheckTaskServiceImpl {
      * 处理单篇论文
      */
     private BatchCheckResultDTO.TaskResult processSinglePaper(Long paperId, Long studentId) {
-        // 1. 校验
-        // 批量任务由一次用户动作触发，不逐篇消耗“单用户 30 秒”限流额度
-        CheckTaskValidationService.ValidationResult validationResult =
-            validationService.validateCheckRequest(paperId, studentId, false);
+        // 1. 入口校验（批量任务不逐篇消耗“单用户 30 秒”限流额度）
+        CheckTaskValidationService.ValidationResult validationResult;
+        try {
+            validationResult = validationService.validateCheckRequest(paperId, studentId, false);
+        } catch (BusinessException e) {
+            // 已有活跃任务等业务拒绝按单篇失败返回，不中断批量
+            return BatchCheckResultDTO.TaskResult.builder()
+                .paperId(paperId)
+                .success(false)
+                .message(e.getMessage())
+                .build();
+        }
 
         if (!validationResult.isSuccess()) {
             return BatchCheckResultDTO.TaskResult.builder()
@@ -156,28 +176,23 @@ public class BatchCheckTaskServiceImpl {
 
         PaperInfo paperInfo = validationResult.getPaper();
 
-        // P5 学院月度额度：新建任务落库前校验并扣减学院当月额度。
-        // 重试路径复用已存在任务，不经过本批量新建入口，不会重复扣减。
-        boolean quotaConsumed;
+        // 2. 行锁 + 活跃任务复查 + 扣额度 + 落库必须在同一事务内完成，
+        //    避免两个并发批量请求同时通过入口校验后各自落一个任务、各扣一次额度。
         try {
-            // M4.1：记录本次是否实际扣减，失败返还时据此幂等退回
-            quotaConsumed = collegeQuotaService.checkAndConsume(paperInfo.getCollegeId());
-        } catch (BusinessException e) {
-            // 额度不足（40916）按单篇失败返回，不中断批量中其他论文
-            return BatchCheckResultDTO.TaskResult.builder()
-                .paperId(paperId)
-                .success(false)
-                .message(e.getMessage())
-                .build();
-        }
-
-        // 2. 创建任务
-        try {
-            CheckTask checkTask = createCheckTask(paperId, paperInfo, studentId, quotaConsumed);
+            CheckTask checkTask = transactionTemplate.execute(status -> {
+                Long lockedPaperId = paperInfoMapper.lockPaperForCheck(paperId);
+                if (lockedPaperId == null) {
+                    throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "论文不存在或已删除");
+                }
+                validationService.assertNoActiveTask(paperId);
+                boolean quotaConsumed = collegeQuotaService.checkAndConsume(paperInfo.getCollegeId());
+                return createCheckTask(paperId, paperInfo, studentId, quotaConsumed);
+            });
+            if (checkTask == null) {
+                throw new BusinessException(ResultCode.SYSTEM_ERROR, "查重任务创建失败");
+            }
 
             // 3. 只落库 pending，由 CheckTaskDispatchScheduler 按容量受控派发
-
-            // 4. 计算预估时间
             int estimatedTime = estimateDuration(paperInfo.getWordCount());
             int queuePosition = getQueuePosition();
             int waitTime = estimateWaitTime(queuePosition);
@@ -191,6 +206,12 @@ public class BatchCheckTaskServiceImpl {
                 .queuePosition(queuePosition)
                 .waitTime(waitTime)
                 .build();
+        } catch (BusinessException e) {
+            return BatchCheckResultDTO.TaskResult.builder()
+                .paperId(paperId)
+                .success(false)
+                .message(e.getMessage())
+                .build();
         } catch (Exception e) {
             log.error("创建查重任务失败 - 论文 ID: {}", paperId, e);
             return BatchCheckResultDTO.TaskResult.builder()
@@ -202,16 +223,15 @@ public class BatchCheckTaskServiceImpl {
     }
 
     /**
-     * 创建查重任务
+     * 创建查重任务（由外层 TransactionTemplate 包裹，禁止单独调用）
      */
-    @Transactional(rollbackFor = Exception.class)
     protected CheckTask createCheckTask(Long paperId, PaperInfo paperInfo, Long studentId,
                                         boolean quotaConsumed) {
         CheckTask checkTask = new CheckTask();
         checkTask.setPaperId(paperId);
         checkTask.setFileId(paperInfo.getFileId());
         checkTask.setTaskNo(generateTaskNo());
-        checkTask.setCheckStatus("PENDING");
+        checkTask.setCheckStatus(DictConstants.CheckStatus.PENDING);
         // M4.1：记录本次是否实际扣减学院月度额度，失败返还时据此幂等退回
         checkTask.setQuotaCharged(quotaConsumed ? 1 : 0);
         // M3.1 版本—报告绑定：快照论文版本 + 最新一次提交记录
@@ -260,7 +280,7 @@ public class BatchCheckTaskServiceImpl {
         // 查询 PENDING 状态的任务数 +1
         long pendingCount = ((CheckTaskServiceImpl)checkTaskService).count(
             new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.abin.checkrepeatservice.pojo.entity.CheckTask>()
-                .eq(com.abin.checkrepeatservice.pojo.entity.CheckTask::getCheckStatus, "PENDING")
+                .eq(com.abin.checkrepeatservice.pojo.entity.CheckTask::getCheckStatus, DictConstants.CheckStatus.PENDING)
                 .eq(com.abin.checkrepeatservice.pojo.entity.CheckTask::getIsDeleted, 0)
         );
         return (int)pendingCount + 1;
@@ -286,7 +306,7 @@ public class BatchCheckTaskServiceImpl {
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<CheckTask>()
                     .isNotNull(CheckTask::getDurationSeconds)
                     .gt(CheckTask::getDurationSeconds, 0)
-                    .eq(CheckTask::getCheckStatus, "COMPLETED")
+                    .eq(CheckTask::getCheckStatus, DictConstants.CheckStatus.COMPLETED)
                     .eq(CheckTask::getIsDeleted, 0)
                     .orderByDesc(CheckTask::getEndTime)
                     .last("LIMIT 100")
@@ -366,7 +386,7 @@ public class BatchCheckTaskServiceImpl {
             // 获取正在执行的任务数
             long runningCount = ((CheckTaskServiceImpl)checkTaskService).count(
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.abin.checkrepeatservice.pojo.entity.CheckTask>()
-                    .eq(com.abin.checkrepeatservice.pojo.entity.CheckTask::getCheckStatus, "CHECKING")
+                    .eq(com.abin.checkrepeatservice.pojo.entity.CheckTask::getCheckStatus, DictConstants.CheckStatus.CHECKING)
                     .eq(com.abin.checkrepeatservice.pojo.entity.CheckTask::getIsDeleted, 0)
             );
             
