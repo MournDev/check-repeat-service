@@ -519,8 +519,8 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
                 // 分配成功的站内通知已在 autoAssignAdvisor 内部 sendAssignmentNotifications
                 // 统一发送（带导师姓名，师生各一条），此处不再重复发送
                 log.info("指导老师分配成功，开始触发查重 - 论文ID: {}", paperSubmitId);
-                // 2. 分配成功后触发查重
-                triggerCheckRepeat(paperSubmitId);
+                // 2. 分配成功后触发查重（显式传学生归属，后台线程没有 SecurityContext）
+                triggerCheckRepeat(paperSubmitId, studentId);
             } else {
                 log.warn("指导老师分配失败，跳过查重流程 - 论文ID: {}", paperSubmitId);
                 // 发送指导老师分配失败通知
@@ -736,7 +736,7 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
     /**
      * 触发查重逻辑（增加重试机制）
      */
-    private void triggerCheckRepeat(Long paperId) {
+    private void triggerCheckRepeat(Long paperId, Long studentId) {
         int maxRetries = 3; // 最大重试次数
         int retryCount = 0;
         boolean success = false;
@@ -745,8 +745,8 @@ public class PaperInfoServiceImpl extends ServiceImpl<PaperInfoMapper, PaperInfo
             try {
                 log.info("触发查重逻辑 - 论文 ID: {}, 尝试次数：{}", paperId, retryCount + 1);
     
-                // 这里调用查重服务
-                checkTaskService.createCheckTask(paperId);
+                // 后台线程没有登录上下文，必须显式传入论文归属学生
+                checkTaskService.createCheckTask(paperId, studentId);
                     
                 success = true;
                 log.info("查重任务创建成功 - 论文 ID: {}", paperId);

@@ -46,6 +46,29 @@ public class CheckTaskStateMachine {
     }
 
     /**
+     * 释放抢占：CHECKING -> PENDING。
+     *
+     * <p>派发器先抢占再投递线程池；若线程池拒绝接收，必须把任务退回 pending，
+     * 否则它会一直占用 checking 名额直到超时扫描。仅用于“派发失败”这一种场景。</p>
+     */
+    public boolean releaseClaim(Long taskId) {
+        if (taskId == null) {
+            return false;
+        }
+        int rows = checkTaskMapper.update(null, new LambdaUpdateWrapper<CheckTask>()
+                .eq(CheckTask::getId, taskId)
+                .eq(CheckTask::getCheckStatus, CheckTaskStatusEnum.CHECKING.getCode())
+                .set(CheckTask::getCheckStatus, CheckTaskStatusEnum.PENDING.getCode())
+                .set(CheckTask::getStartTime, null)
+                .setSql("version = version + 1"));
+        if (rows > 0) {
+            log.warn("任务抢占已回退 CHECKING -> PENDING：taskId={}", taskId);
+            return true;
+        }
+        return false;
+    }
+
+    /**
      * 条件状态流转。
      *
      * @param taskId         任务 ID

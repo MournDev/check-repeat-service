@@ -1,9 +1,5 @@
 package com.abin.checkrepeatservice.config;
 
-import com.abin.checkrepeatservice.admin.dto.PerformanceConfigDTO;
-import com.abin.checkrepeatservice.admin.mapper.SystemConfigMapper;
-import com.abin.checkrepeatservice.pojo.entity.SystemConfig;
-import com.alibaba.fastjson2.JSON;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -35,29 +31,33 @@ public class AsyncConfig {
     @Value("${async.paper-submit.queue-size:100}")
     private int paperSubmitQueueSize;
 
+    /** 查重执行池：核心线程数（与 CPU 核数对齐） */
+    @Value("${check.task.executor.core-size:2}")
+    private int checkCoreSize;
+
+    /** 查重执行池：最大线程数（与 check.task.max-concurrent 同一口径） */
+    @Value("${check.task.executor.max-size:2}")
+    private int checkMaxSize;
+
+    /** 查重执行池：队列容量（真正的排队在数据库，这里只留很小的缓冲） */
+    @Value("${check.task.executor.queue-size:50}")
+    private int checkQueueSize;
+
     @Bean("checkTaskExecutor")
-    public ThreadPoolTaskExecutor checkTaskExecutor(SystemConfigMapper systemConfigMapper) {
-        PerformanceConfigDTO perf = loadPerformanceConfigWithFallback(systemConfigMapper);
-        // 防御性夹取，与 PerformanceConfigDTO 校验范围一致
-        int maxConcurrent = Math.max(1, Math.min(100,
-                perf.getMaxConcurrent() == null ? 20 : perf.getMaxConcurrent()));
-        int queueSize = Math.max(10, Math.min(1000,
-                perf.getQueueSize() == null ? 100 : perf.getQueueSize()));
+    public ThreadPoolTaskExecutor checkTaskExecutor() {
+        int core = Math.max(1, checkCoreSize);
+        int max = Math.max(core, checkMaxSize);
+        int queue = Math.max(10, checkQueueSize);
 
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
 
-        // 核心线程数：保持原有 5，但不得大于最大线程数（配置页可能把 max 调到 <5）
-        executor.setCorePoolSize(Math.min(5, maxConcurrent));
-        // 最大线程数 = 最大并发数
-        executor.setMaxPoolSize(maxConcurrent);
-        // 队列容量
-        executor.setQueueCapacity(queueSize);
-        // 线程名称前缀
+        executor.setCorePoolSize(core);
+        executor.setMaxPoolSize(max);
+        executor.setQueueCapacity(queue);
         executor.setThreadNamePrefix("check-task-");
-        // 线程空闲时间（秒）
         executor.setKeepAliveSeconds(60);
         // 拒绝策略（P0 雪崩修复）：绝不允许 CallerRunsPolicy 把 Tika 解析 + 全库比对
-        // 回落到 Tomcat 请求线程。队列满即拒绝，由调用方捕获并给出“排队中”提示。
+        // 回落到 Tomcat 请求线程。派发器会捕获拒绝并把任务退回 pending。
         executor.setRejectedExecutionHandler((task, pool) -> {
             log.error("查重任务队列已满，拒绝执行 - activeCount={}, queueSize={}, poolSize={}",
                     pool.getActiveCount(), pool.getQueue().size(), pool.getPoolSize());
@@ -69,8 +69,7 @@ public class AsyncConfig {
         executor.setAwaitTerminationSeconds(60);
 
         executor.initialize();
-        log.info("查重线程池已按性能配置初始化: core={}, max={}, queue={}",
-                executor.getCorePoolSize(), maxConcurrent, queueSize);
+        log.info("查重线程池初始化完成: core={}, max={}, queue={}", core, max, queue);
         return executor;
     }
     
@@ -130,22 +129,4 @@ public class AsyncConfig {
         return executor;
     }
 
-    /**
-     * 启动期从 system_config 表读取性能配置。
-     * 任何异常（表不存在、JSON 损坏、数据库未就绪）都退回 DTO 默认值，绝不阻断启动。
-     */
-    private PerformanceConfigDTO loadPerformanceConfigWithFallback(SystemConfigMapper systemConfigMapper) {
-        try {
-            SystemConfig config = systemConfigMapper.selectByConfigKey("performance");
-            if (config != null && config.getConfigValue() != null) {
-                PerformanceConfigDTO dto = JSON.parseObject(config.getConfigValue(), PerformanceConfigDTO.class);
-                if (dto != null && dto.getMaxConcurrent() != null && dto.getQueueSize() != null) {
-                    return dto;
-                }
-            }
-        } catch (Exception e) {
-            log.warn("启动时读取性能配置失败，使用默认线程池参数: {}", e.getMessage());
-        }
-        return new PerformanceConfigDTO();
-    }
 }

@@ -20,7 +20,6 @@ import com.abin.checkrepeatservice.pojo.entity.CheckTask;
 import com.abin.checkrepeatservice.pojo.entity.PaperInfo;
 import com.abin.checkrepeatservice.student.dto.ReportPreviewDTO;
 import com.abin.checkrepeatservice.student.event.CheckProgressEvent;
-import com.abin.checkrepeatservice.student.event.CheckTaskCreatedEvent;
 import com.abin.checkrepeatservice.student.mapper.CheckReportMapper;
 import com.abin.checkrepeatservice.student.mapper.CheckSentenceHitMapper;
 import com.abin.checkrepeatservice.student.mapper.CheckTaskMapper;
@@ -31,11 +30,8 @@ import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.tika.Tika;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.event.TransactionPhase;
-import org.springframework.transaction.event.TransactionalEventListener;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
@@ -123,30 +119,21 @@ public class CheckTaskEventListener {
     private final Tika tika = new Tika();
 
     /**
-     * 监听查重任务创建事件，异步执行查重。
+     * 执行一个「已被抢占」的查重任务。
      *
-     * <p>改为 AFTER_COMMIT 监听，保证任务行与额度扣减已提交后
-     * 异步线程才读取得到；fallbackExecution=true 兼容无事务环境下的事件发布。</p>
+     * <p>抢占动作已由 {@code CheckTaskDispatchScheduler} 通过
+     * {@link com.abin.checkrepeatservice.common.statemachine.CheckTaskStateMachine#claimForExecution}
+     * 完成（PENDING -> CHECKING 条件更新），本方法只负责真正的解析/比对/报告生成。
+     * 重复投递与并发执行由条件更新保证：只有抢到状态的派发方会调用到这里。</p>
+     *
+     * @param taskId  已处于 checking 的任务 ID
+     * @param paperId 论文 ID
      */
-    @Async("checkTaskExecutor")
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
-    public void handleCheckTaskCreated(CheckTaskCreatedEvent event) {
-        Long taskId = event.getTaskId();
-        Long paperId = event.getPaperId();
+    public void executeClaimedTask(Long taskId, Long paperId) {
         LocalDateTime startTime = LocalDateTime.now();
+        log.info("开始执行已抢占的查重任务 - 任务 ID: {}, 论文 ID: {}", taskId, paperId);
 
-        log.info("接收到查重任务创建事件 - 任务 ID: {}, 论文 ID: {}", taskId, paperId);
-
-        // 1. 先抢占任务：只有 PENDING -> CHECKING 条件更新成功才继续。
-        //    重复事件、已被取消、已被超时扫描改写的任务都会抢占失败并直接退出，
-        //    无需加锁即可保证同一任务不会被并发执行（天然幂等）。
-        boolean claimed = stateMachine.claimForExecution(taskId);
-        if (!claimed) {
-            log.warn("任务抢占失败，放弃本次执行（可能已被其他线程/超时扫描处理），任务 ID: {}", taskId);
-            return;
-        }
-
-        // 2. 推送进度：开始处理
+        // 1. 推送进度：开始处理
         publishProgress(taskId, paperId, "FILE_PARSING", 10, "正在解析论文文件...", 5);
 
         CheckTask checkTask = checkTaskMapper.selectById(taskId);

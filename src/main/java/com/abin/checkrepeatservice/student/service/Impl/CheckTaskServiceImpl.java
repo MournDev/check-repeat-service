@@ -14,7 +14,6 @@ import com.abin.checkrepeatservice.common.statemachine.CheckTaskStateMachine;
 import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
 import com.abin.checkrepeatservice.pojo.entity.*;
 import com.abin.checkrepeatservice.student.dto.CheckTaskResultDTO;
-import com.abin.checkrepeatservice.student.event.CheckTaskCreatedEvent;
 import com.abin.checkrepeatservice.student.mapper.CheckReportMapper;
 import com.abin.checkrepeatservice.student.mapper.CheckTaskMapper;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
@@ -28,15 +27,12 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.core.task.TaskRejectedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.concurrent.RejectedExecutionException;
 import java.util.stream.Collectors;
 
 /**
@@ -69,13 +65,10 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
     @Resource
     private CheckTaskValidationService validationService;
 
-    @Resource
-    private ApplicationEventPublisher eventPublisher;
-
     /**
      * 显式事务模板（P0-2）：createCheckTask 内部原本用 this 调用 @Transactional 方法，
-     * 绕过 Spring 代理导致事务失效。这里用编程式事务把「扣额度 + 落任务 + 发事件」
-     * 包成同一个事务，事件由 @TransactionalEventListener(AFTER_COMMIT) 在提交后消费。
+     * 绕过 Spring 代理导致事务失效。这里用编程式事务把「扣额度 + 落任务」包成同一个事务；
+     * 任务以 pending 状态落库后，由 CheckTaskDispatchScheduler 按容量受控派发。
      */
     @Resource
     private TransactionTemplate transactionTemplate;
@@ -92,17 +85,21 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
     /**
      * 创建查重任务（P0-2 / P0-8）。
      *
-     * <p>事务边界：前置校验放在事务外；「扣额度 + 任务落库 + 发布事件」由
+     * <p>事务边界：前置校验放在事务外；「扣额度 + 任务落库」由
      * TransactionTemplate 显式包裹，避免同类 this 调用绕过 @Transactional。
-     * 事件由监听器的 @TransactionalEventListener(AFTER_COMMIT) 在提交后异步消费。</p>
+     * 任务只以 pending 状态落库，由 CheckTaskDispatchScheduler 按容量受控派发。</p>
      *
      * @param studentId 论文归属学生；教师代触发时显式传入，学生自助时为 null
      */
     @Override
     public Result<CheckResultVO> createCheckTask(Long paperId, Long studentId) {
-        Long currentUserId = UserBusinessInfoUtils.getCurrentUserId();
+        Long currentUserId = currentUserIdOrNull();
         // 归属校验主体：显式传入的学生优先，否则当前登录用户
         Long ownerId = studentId != null ? studentId : currentUserId;
+        if (ownerId == null) {
+            log.error("创建查重任务失败：未传入归属学生且无登录上下文 - paperId={}", paperId);
+            return Result.error(ResultCode.NOT_LOGIN, "无法确定论文归属学生，请重新登录后再试");
+        }
 
         // 前置校验（在事务外执行）
         log.info("开始创建查重任务 - 论文 ID: {}, 发起人 ID: {}, 归属学生 ID: {}", paperId, currentUserId, ownerId);
@@ -133,37 +130,24 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
             log.warn("创建查重任务业务校验失败 - 论文 ID: {}, 原因：{}", paperId, e.getMessage());
             return Result.error(e.getResultCode(), e.getMessage());
         } catch (Exception e) {
-            // 线程池满时 AFTER_COMMIT 监听器会被拒绝，异常可能被事务管理器包装；
-            // 此时任务已落库为 pending，交给超时扫描重投，绝不能让请求线程兜底执行查重。
-            if (isAsyncRejected(e)) {
-                log.error("查重任务投递被拒绝（线程池已满），任务保持 pending 等待重投 - paperId: {}, 任务创建人: {}",
-                        paperId, currentUserId, e);
-                return Result.error(ResultCode.SYSTEM_ERROR,
-                        "当前查重队列繁忙，任务已排队，请稍后在查重记录中查看结果");
-            }
             log.error("创建查重任务失败 - 论文 ID: {}", paperId, e);
             return Result.error(ResultCode.SYSTEM_ERROR, "查重任务创建失败：系统异常，请稍后重试");
         }
     }
 
     /**
-     * 判断异常链里是否包含线程池拒绝（TaskRejectedException / RejectedExecutionException）。
-     * AFTER_COMMIT 监听器在事务提交阶段被拒绝时，Spring 可能把它包装成 TransactionSystemException。
+     * 当前登录用户 ID；后台线程（论文提交后自动查重）没有 SecurityContext 时返回 null。
      */
-    private boolean isAsyncRejected(Throwable throwable) {
-        Throwable current = throwable;
-        while (current != null) {
-            if (current instanceof TaskRejectedException
-                    || current instanceof RejectedExecutionException) {
-                return true;
-            }
-            current = current.getCause();
+    private Long currentUserIdOrNull() {
+        try {
+            return UserBusinessInfoUtils.getCurrentUserId();
+        } catch (Exception e) {
+            return null;
         }
-        return false;
     }
 
     /**
-     * 在 TransactionTemplate 中执行的数据库操作：扣额度、落任务、发事件。
+     * 在 TransactionTemplate 中执行的数据库操作：扣额度、落 pending 任务。
      * 任何一步抛异常都会回滚额度扣减，避免「扣了额度却没有任务」。
      */
     private CheckResultVO createCheckTaskInTransaction(Long paperId, PaperInfo paperInfo, Long ownerId) {
@@ -188,10 +172,9 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
         UserBusinessInfoUtils.setAuditField(checkTask, true);
         save(checkTask);
 
-        // 2. 发布事件，事务提交后由 @TransactionalEventListener(AFTER_COMMIT) 异步执行
-        eventPublisher.publishEvent(new CheckTaskCreatedEvent(this, checkTask.getId(), paperId));
-
-        // 3. 返回 VO，真正响应在事务提交后组装
+        // 2. 只落库 pending，不再发布事件直接触发 @Async 执行。
+        //    CheckTaskDispatchScheduler 每 5 秒按 checking 余量捞取 pending 任务，
+        //    从根上避免瞬时提交把线程池/队列打满。
         return buildCheckResultVO(checkTask);
     }
     
