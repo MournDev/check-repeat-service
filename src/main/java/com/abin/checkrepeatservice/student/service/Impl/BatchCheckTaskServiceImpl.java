@@ -17,6 +17,7 @@ import com.abin.checkrepeatservice.student.mapper.CheckTaskMapper;
 import com.abin.checkrepeatservice.student.service.CheckTaskValidationService;
 import com.abin.checkrepeatservice.student.service.CheckTaskService;
 import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 
@@ -185,6 +186,17 @@ public class BatchCheckTaskServiceImpl {
                     throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "论文不存在或已删除");
                 }
                 validationService.assertNoActiveTask(paperId);
+
+                // 学生批量查重同样是自助发起：论文可能还是待分配/已分配，
+                // 必须在同一事务内推进到 checking，否则监听器成功分支必然写不进去
+                paperInfoMapper.update(null, new LambdaUpdateWrapper<PaperInfo>()
+                        .eq(PaperInfo::getId, paperId)
+                        .eq(PaperInfo::getIsDeleted, 0)
+                        .in(PaperInfo::getPaperStatus,
+                                DictConstants.PaperStatus.PENDING, DictConstants.PaperStatus.ASSIGNED)
+                        .set(PaperInfo::getPaperStatus, DictConstants.PaperStatus.CHECKING)
+                        .set(PaperInfo::getUpdateTime, LocalDateTime.now()));
+
                 boolean quotaConsumed = collegeQuotaService.checkAndConsume(paperInfo.getCollegeId());
                 return createCheckTask(paperId, paperInfo, studentId, quotaConsumed);
             });

@@ -23,6 +23,7 @@ import com.abin.checkrepeatservice.user.vo.CheckResultVO;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.TypeReference;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import jakarta.annotation.Resource;
@@ -154,7 +155,7 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
 
         try {
             CheckResultVO checkResultVO = transactionTemplate.execute(status ->
-                    createCheckTaskInTransaction(paperId, paperInfo, ownerId));
+                    createCheckTaskInTransaction(paperId, paperInfo, ownerId, selfService));
             if (checkResultVO == null) {
                 throw new BusinessException(ResultCode.SYSTEM_ERROR,
                         "查重任务创建失败：事务未返回结果", null);
@@ -215,12 +216,18 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
      * 在 TransactionTemplate 中执行的数据库操作：扣额度、落 pending 任务。
      * 任何一步抛异常都会回滚额度扣减，避免「扣了额度却没有任务」。
      */
-    private CheckResultVO createCheckTaskInTransaction(Long paperId, PaperInfo paperInfo, Long ownerId) {
+    private CheckResultVO createCheckTaskInTransaction(Long paperId, PaperInfo paperInfo, Long ownerId,
+                                                       boolean selfService) {
         Long lockedPaperId = paperInfoMapper.lockPaperForCheck(paperId);
         if (lockedPaperId == null) {
             throw new BusinessException(ResultCode.RESOURCE_NOT_FOUND, "论文不存在或已删除");
         }
         validationService.assertNoActiveTask(paperId);
+
+        // 学生自助发起时，论文可能仍是待分配/已分配，必须在同一事务内推进到 checking：
+        // 监听器成功分支只允许从 checking 写入查重结论，否则报告生成后必然改判失败。
+        // 教师确认接收路径由 confirmAssignment 自己写 checking，这里不重复处理。
+        markPaperCheckingForSelfService(paperId, selfService);
 
         // 重试路径复用已存在任务（重新入队），不走本新建入口，不会重复扣减。
         // M4.1：记录本次是否实际扣减，失败返还时据此幂等退回
@@ -245,6 +252,23 @@ public class CheckTaskServiceImpl extends ServiceImpl<CheckTaskMapper, CheckTask
         //    CheckTaskDispatchScheduler 每 5 秒按 checking 余量捞取 pending 任务，
         //    从根上避免瞬时提交把线程池/队列打满。
         return buildCheckResultVO(checkTask);
+    }
+
+    /**
+     * 学生自助查重：把论文从待分配/已分配推进到 checking（同事务、条件更新）。
+     * 已处于 checking 时更新 0 行属正常（并发下可能被教师确认先行推进）。
+     */
+    private void markPaperCheckingForSelfService(Long paperId, boolean selfService) {
+        if (!selfService) {
+            return;
+        }
+        paperInfoMapper.update(null, new LambdaUpdateWrapper<PaperInfo>()
+                .eq(PaperInfo::getId, paperId)
+                .eq(PaperInfo::getIsDeleted, 0)
+                .in(PaperInfo::getPaperStatus,
+                        DictConstants.PaperStatus.PENDING, DictConstants.PaperStatus.ASSIGNED)
+                .set(PaperInfo::getPaperStatus, DictConstants.PaperStatus.CHECKING)
+                .set(PaperInfo::getUpdateTime, LocalDateTime.now()));
     }
     
     /**
