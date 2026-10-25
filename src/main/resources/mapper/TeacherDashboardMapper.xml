@@ -25,6 +25,39 @@
           AND pi.paper_status = 'auditing'
     </select>
 
+    <!-- 统计截至 asOf 仍待审核的论文数量：已分配、且此前没有通过/不通过的审核结论 -->
+    <select id="countPendingPapersUntil" resultType="java.lang.Long">
+        SELECT
+            COUNT(*) AS pending_papers
+        FROM
+            paper_info pi
+        WHERE
+            pi.teacher_id = #{teacherId}
+          AND pi.is_deleted = 0
+          AND COALESCE(pi.allocation_time, pi.create_time) &lt;= #{asOf}
+          AND NOT EXISTS (
+              SELECT 1
+              FROM review_record rr
+              WHERE rr.paper_id = pi.id
+                AND rr.teacher_id = #{teacherId}
+                AND rr.is_deleted = 0
+                AND rr.review_status IN (3, 4)
+                AND rr.create_time &lt;= #{asOf}
+          )
+    </select>
+
+    <!-- 统计截至 asOf 已分配给该教师的学生数 -->
+    <select id="countStudentsUntil" resultType="java.lang.Long">
+        SELECT
+            COUNT(DISTINCT pi.student_id) AS total_students
+        FROM
+            paper_info pi
+        WHERE
+            pi.teacher_id = #{teacherId}
+          AND pi.is_deleted = 0
+          AND COALESCE(pi.allocation_time, pi.create_time) &lt;= #{asOf}
+    </select>
+
     <!-- 统计已审核论文数量 -->
     <select id="countReviewedPapers" resultType="java.lang.Long">
         SELECT

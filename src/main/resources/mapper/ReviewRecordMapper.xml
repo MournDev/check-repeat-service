@@ -85,17 +85,6 @@
         </if>
     </select>
 
-    <!-- 统计当前指导学生数 -->
-    <select id="countCurrentStudents" resultType="java.lang.Integer">
-        SELECT COUNT(DISTINCT pi.student_id)
-        FROM paper_info pi
-        INNER JOIN review_record rr ON pi.id = rr.paper_id
-        WHERE rr.teacher_id = #{teacherId}
-          AND rr.is_deleted = 0
-          AND pi.paper_status IN ('auditing', 'completed', 'rejected')
-          AND pi.is_deleted = 0
-    </select>
-
     <!-- 按状态统计数量 -->
     <select id="countByStatus" resultType="java.lang.Integer">
         SELECT COUNT(*)

@@ -23,6 +23,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.ArrayList;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.stream.Collectors;
 
 
@@ -87,11 +89,12 @@ public class TeacherDataAnalysisController {
         responseData.put("pendingReviews", stats.get("pendingReviews"));
         responseData.put("approvedReviews", stats.get("approvedReviews"));
         responseData.put("currentStudents", stats.get("currentStudents"));
-        
-        // 添加趋势数据
-        responseData.put("totalReviewsTrend", createTrendData("up", "+12% 同比增长"));
-        responseData.put("approvedReviewsTrend", createTrendData("up", "+8% 同比增长"));
-        responseData.put("currentStudentsTrend", createTrendData("down", "-2% 同比下降"));
+
+        // 趋势按「当前周期 vs 上一等长周期」实际统计结果生成
+        responseData.put("totalReviewsTrend", buildTrend(stats.get("totalReviews"), stats.get("previousTotalReviews")));
+        responseData.put("pendingReviewsTrend", buildTrend(stats.get("pendingReviews"), stats.get("previousPendingReviews")));
+        responseData.put("approvedReviewsTrend", buildTrend(stats.get("approvedReviews"), stats.get("previousApprovedReviews")));
+        responseData.put("currentStudentsTrend", buildTrend(stats.get("currentStudents"), stats.get("previousStudents")));
         
         return Result.success(responseData);
     }
@@ -257,6 +260,33 @@ public class TeacherDataAnalysisController {
         trend.put("type", type);
         trend.put("text", text);
         return trend;
+    }
+
+    /**
+     * 按当前值/上一周期值生成趋势：有基数算百分比，无基数时按新增/无变化表达
+     */
+    private Map<String, Object> buildTrend(Object currentValue, Object previousValue) {
+        int current = toInt(currentValue);
+        int previous = toInt(previousValue);
+
+        if (previous == 0) {
+            if (current == 0) {
+                return createTrendData("flat", "无变化");
+            }
+            return createTrendData("up", "新增 " + current);
+        }
+
+        BigDecimal percentage = BigDecimal.valueOf((current - previous) * 100.0 / previous)
+                .setScale(1, RoundingMode.HALF_UP)
+                .stripTrailingZeros();
+        String type = percentage.compareTo(BigDecimal.ZERO) > 0 ? "up"
+                : percentage.compareTo(BigDecimal.ZERO) < 0 ? "down" : "flat";
+        String sign = percentage.compareTo(BigDecimal.ZERO) > 0 ? "+" : "";
+        return createTrendData(type, sign + percentage.toPlainString() + "% 较上一周期");
+    }
+
+    private int toInt(Object value) {
+        return value instanceof Number ? ((Number) value).intValue() : 0;
     }
     private TrendQueryDTO buildTrendQuery(Long teacherId, String timeRange, String chartType, 
                                         String startDate, String endDate) {

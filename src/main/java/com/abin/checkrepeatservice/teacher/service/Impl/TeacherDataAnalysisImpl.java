@@ -7,6 +7,7 @@ import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
 import com.abin.checkrepeatservice.teacher.dto.TrendQueryDTO;
 import com.abin.checkrepeatservice.teacher.dto.TrendResultDTO;
 import com.abin.checkrepeatservice.teacher.mapper.ReviewRecordMapper;
+import com.abin.checkrepeatservice.teacher.mapper.TeacherDashboardMapper;
 import com.abin.checkrepeatservice.teacher.service.TeacherDataAnalysisService;
 import com.abin.checkrepeatservice.teacher.vo.CollegeDistributionVO;
 import com.abin.checkrepeatservice.teacher.vo.ReviewStatusVO;
@@ -47,6 +48,9 @@ public class TeacherDataAnalysisImpl implements TeacherDataAnalysisService {
 
     @Autowired
     private PaperInfoMapper paperInfoMapper;
+
+    @Autowired
+    private TeacherDashboardMapper teacherDashboardMapper;
 
     @Override
     public TrendResultDTO getReviewTrend(TrendQueryDTO query) {
@@ -430,16 +434,30 @@ public class TeacherDataAnalysisImpl implements TeacherDataAnalysisService {
 
         log.info("审核状态统计 - 通过: {}, 拒绝: {}", approvedReviews, rejectedReviews);
 
-        // 查询指导学生数
-        Integer currentStudents = reviewRecordMapper.countCurrentStudents(teacherId);
+        // 待审核：当前仍停留在 auditing 的论文数（快照值）
+        Long pendingCount = teacherDashboardMapper.countPendingPapers(teacherId);
+        Integer pendingReviews = pendingCount != null ? pendingCount.intValue() : 0;
+
+        // 指导学生数：以「已分配到我名下」的学生为准，便于与上一周期同口径比较
+        Long studentCount = teacherDashboardMapper.countTotalStudents(teacherId);
+        Integer currentStudents = studentCount != null ? studentCount.intValue() : 0;
         log.info("指导学生数: {}", currentStudents);
 
+        // 上一周期结束时刻（上一周期不含当前周期起点）
+        LocalDateTime previousEndDateTime = startDateTime.minusSeconds(1);
+
         // 查询比较周期数据（只针对通过和拒绝状态）
-        Integer previousApproved = reviewRecordMapper.countByStatus(teacherId, 3, compareStartDateTime, startDateTime.minusSeconds(1));
-        Integer previousRejected = reviewRecordMapper.countByStatus(teacherId, 4, compareStartDateTime, startDateTime.minusSeconds(1));
+        Integer previousApproved = reviewRecordMapper.countByStatus(teacherId, 3, compareStartDateTime, previousEndDateTime);
+        Integer previousRejected = reviewRecordMapper.countByStatus(teacherId, 4, compareStartDateTime, previousEndDateTime);
 
         Integer previousTotal = (previousApproved != null ? previousApproved : 0) + (previousRejected != null ? previousRejected : 0);
         Integer currentTotal = (approvedReviews != null ? approvedReviews : 0) + (rejectedReviews != null ? rejectedReviews : 0);
+
+        // 快照类指标（待审核、指导学生）按「上一周期结束时刻」的口径回溯统计
+        Long previousPendingCount = teacherDashboardMapper.countPendingPapersUntil(teacherId, previousEndDateTime);
+        Long previousStudentCount = teacherDashboardMapper.countStudentsUntil(teacherId, previousEndDateTime);
+        Integer previousPendingReviews = previousPendingCount != null ? previousPendingCount.intValue() : 0;
+        Integer previousStudents = previousStudentCount != null ? previousStudentCount.intValue() : 0;
 
         // 计算趋势
         BigDecimal approvedTrend = calculatePercentageTrend(approvedReviews, previousApproved);
@@ -451,12 +469,21 @@ public class TeacherDataAnalysisImpl implements TeacherDataAnalysisService {
 
         // 基础统计数据
         stats.put("totalReviews", currentTotal);
+        stats.put("pendingReviews", pendingReviews);
         stats.put("approvedReviews", approvedReviews != null ? approvedReviews : 0);
         stats.put("rejectedReviews", rejectedReviews != null ? rejectedReviews : 0);
-        stats.put("currentStudents", currentStudents != null ? currentStudents : 0);
+        stats.put("currentStudents", currentStudents);
+
+        // 上一周期同类指标（控制器据此生成真实的趋势文案）
+        stats.put("previousTotalReviews", previousTotal);
+        stats.put("previousPendingReviews", previousPendingReviews);
+        stats.put("previousApprovedReviews", previousApproved != null ? previousApproved : 0);
+        stats.put("previousStudents", previousStudents);
 
         // 趋势数据
         stats.put("totalTrend", totalTrend);
+        // 兼容导出：历史导出逻辑读取的是 reviewTrend
+        stats.put("reviewTrend", totalTrend);
         stats.put("approvedTrend", approvedTrend != null ? approvedTrend : BigDecimal.ZERO);
         stats.put("rejectedTrend", rejectedTrend != null ? rejectedTrend : BigDecimal.ZERO);
 

@@ -87,11 +87,6 @@ List<Map<String, Object>> selectAllStatusReviews(@Param("teacherId") Long teache
             @Param("endDate") LocalDateTime endDateTime);
 
     /**
-     * 获取当前审核人数
-     */
-    Integer countCurrentStudents(Long teacherId);
-
-    /**
      * 获取审核状态分布
      */
     List<ReviewStatusVO> selectReviewStatusDistribution(

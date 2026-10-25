@@ -5,6 +5,7 @@ import org.apache.ibatis.annotations.MapKey;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -24,6 +25,17 @@ public interface TeacherDashboardMapper {
      * 统计待审核论文数量
      */
     Long countPendingPapers(@Param("teacherId") Long teacherId);
+
+    /**
+     * 统计指定时间点仍处于待审核的论文数量（用于待审核趋势对比）
+     * 口径：已分配给该教师、且在 asOf 之前没有产生通过/不通过的审核结论
+     */
+    Long countPendingPapersUntil(@Param("teacherId") Long teacherId, @Param("asOf") LocalDateTime asOf);
+
+    /**
+     * 统计指定时间点之前已分配给该教师的学生数（用于指导学生趋势对比）
+     */
+    Long countStudentsUntil(@Param("teacherId") Long teacherId, @Param("asOf") LocalDateTime asOf);
 
     /**
      * 统计已审核论文数量
