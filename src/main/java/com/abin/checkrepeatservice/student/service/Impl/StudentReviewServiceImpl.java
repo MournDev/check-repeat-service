@@ -17,6 +17,7 @@ import com.abin.checkrepeatservice.student.mapper.CheckTaskMapper;
 import com.abin.checkrepeatservice.student.mapper.PaperInfoMapper;
 import com.abin.checkrepeatservice.student.service.StudentReviewService;
 import com.abin.checkrepeatservice.teacher.mapper.ReviewRecordMapper;
+import com.abin.checkrepeatservice.common.service.FileService;
 import com.abin.checkrepeatservice.common.utils.UserBusinessInfoUtils;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
@@ -74,9 +75,8 @@ public class StudentReviewServiceImpl extends ServiceImpl<PaperInfoMapper, Paper
     @Resource
     private ApplicationEventPublisher eventPublisher;
 
-    // 论文存储根路径（复用之前的配置）
-    @Value("${paper.upload.base-path:/data/paper-upload}")
-    private String paperBasePath;
+    @Resource
+    private FileService fileService;
 
     // 审核附件存储根路径（复用之前的配置）
     @Value("${review.attach.base-path:/data/review-attach/}")
@@ -99,8 +99,6 @@ public class StudentReviewServiceImpl extends ServiceImpl<PaperInfoMapper, Paper
 
         // 2. 按论文状态过滤（前端数字码 → paper_info.paper_status 的 varchar 字典值：
         //    2-待审核 auditing，3-审核通过 completed，4-审核不通过 rejected）。
-        //    旧代码直接把 Integer 传给 varchar 列做 eq，MyBatis 拼出 paper_status = 2，
-        //    字符串列与数字经隐式转换后无一匹配，带筛选的请求恒为空。
         Integer paperStatus = queryReq.getPaperStatus();
         String statusFilter = mapReviewStatusCode(paperStatus);
         if (statusFilter != null) {
@@ -247,9 +245,6 @@ public class StudentReviewServiceImpl extends ServiceImpl<PaperInfoMapper, Paper
                     String.format("论文文件大小不能超过200MB，当前大小：%.2fMB", revisedFile.getSize() / 1024.0 / 1024.0));
         }
 
-        // 2. 保存修改后的论文文件
-        String revisedPaperPath = saveRevisedPaperFile(revisedFile, currentStudentId, originalPaperId);
-
         // 3. 生成新的论文记录（原论文保留，新增修改版，靠 parent_paper_id 精确关联）
         // 3.1 链式重提（修改版再次被驳回后又重提）时父版本始终指向根论文，标题也基于
         //     根标题生成，避免出现「xxx(修改版_日期)(修改版_日期)」且查询断链
@@ -259,6 +254,21 @@ public class StudentReviewServiceImpl extends ServiceImpl<PaperInfoMapper, Paper
                 ? originalPaper : baseMapper.selectById(rootPaperId);
         if (rootPaper == null || rootPaper.getIsDeleted() == 1) {
             return Result.error(ResultCode.RESOURCE_NOT_FOUND, "原论文的根版本不存在或已删除");
+        }
+
+        // 与主提交链路共用 FileService 流式保存：返回相对路径，
+        // 查重、预览、下载统一按 file.upload.base-path 解析，禁止再自建存储根目录。
+        Long revisedFileId;
+        FileInfo revisedFileInfo;
+        try {
+            revisedFileId = fileService.uploadFile(revisedFile, currentStudentId);
+            revisedFileInfo = fileService.getById(revisedFileId);
+        } catch (Exception e) {
+            log.error("保存修改后论文文件失败：", e);
+            throw new BusinessException(ResultCode.SYSTEM_ERROR, "文件保存异常，请重试");
+        }
+        if (revisedFileInfo == null) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR, "文件保存失败，请重试");
         }
 
         PaperInfo revisedPaper = new PaperInfo();
@@ -279,18 +289,14 @@ public class StudentReviewServiceImpl extends ServiceImpl<PaperInfoMapper, Paper
         revisedPaper.setSubjectCode(originalPaper.getSubjectCode());
         revisedPaper.setSubjectId(originalPaper.getSubjectId());
         revisedPaper.setAllocationType(originalPaper.getAllocationType());
-        revisedPaper.setAllocationStatus(originalPaper.getAllocationStatus());
-        // 计算文件MD5（防重复上传）
-        String fileMd5;
-        try {
-            fileMd5 = org.apache.commons.codec.digest.DigestUtils.md5Hex(revisedFile.getInputStream());
-        } catch (IOException e) {
-            log.error("计算修改后论文MD5失败：", e);
-            throw new BusinessException(ResultCode.SYSTEM_ERROR, "文件校验失败，请重试");
-        }
-        revisedPaper.setFileMd5(fileMd5);
-        // 文件落盘路径此前只存了局部变量从未写库，查重链路按 file_path 取文件必然读不到
-        revisedPaper.setFilePath(revisedPaperPath);
+        // 查重触发点已收敛到导师确认：修订版继承导师时必须重新进入待确认，
+        // 否则没有导师确认动作，修订版会永远不触发查重。
+        revisedPaper.setAllocationStatus(DictConstants.AllocationStatus.PENDING);
+        // 文件关联必须一次写全：fileId 供预览/下载，filePath 供查重读取，wordCount 供时长预估
+        revisedPaper.setFileId(revisedFileInfo.getId());
+        revisedPaper.setFileMd5(revisedFileInfo.getMd5());
+        revisedPaper.setFilePath(revisedFileInfo.getStoragePath());
+        revisedPaper.setWordCount(revisedFileInfo.getWordCount());
         revisedPaper.setSubmitTime(LocalDateTime.now());
         revisedPaper.setPaperStatus(DictConstants.PaperStatus.PENDING);
         // 填充审计字段（创建人=当前学生）
@@ -302,7 +308,8 @@ public class StudentReviewServiceImpl extends ServiceImpl<PaperInfoMapper, Paper
         submitRecord.setPaperId(revisedPaper.getId());
         submitRecord.setStudentId(currentStudentId);
         submitRecord.setSubmitVersion(1);
-        submitRecord.setFileMd5(fileMd5);
+        submitRecord.setFileId(revisedFileInfo.getId());
+        submitRecord.setFileMd5(revisedFileInfo.getMd5());
         submitRecord.setSubmitTime(LocalDateTime.now());
         String submitRemark = "审核不通过重新提交";
         if (StringUtils.hasText(revisionDesc)) {
@@ -311,9 +318,8 @@ public class StudentReviewServiceImpl extends ServiceImpl<PaperInfoMapper, Paper
         submitRecord.setRemark(submitRemark.length() > 500 ? submitRemark.substring(0, 500) : submitRemark);
         paperSubmitMapper.insert(submitRecord);
 
-        // 5. 事务提交后异步走「分配导师 + 触发查重」（与主链路同一事件监听器）。
-        //    修改版已继承原导师：autoAssignAdvisor 见 teacherId 非空会直接返回成功，
-        //    不会重新分配给别人，随后正常触发查重。
+        // 5. 事务提交后只做导师分配/已有导师提醒，查重由导师确认接收后触发。
+        //    修改版已继承原导师，allocateAdvisor 会补发“待确认”站内信，不会重新分配。
         eventPublisher.publishEvent(new PaperSubmittedEvent(this, revisedPaper.getId(), currentStudentId));
 
         // 6. 构建返回结果
@@ -324,7 +330,7 @@ public class StudentReviewServiceImpl extends ServiceImpl<PaperInfoMapper, Paper
 
         log.info("学生重新提交论文成功：原论文ID={}，新论文ID={}，学生ID={}",
                 originalPaperId, revisedPaper.getId(), currentStudentId);
-        return Result.success("重新提交成功，论文已进入待查重队列", resultMap);
+        return Result.success("重新提交成功，等待导师确认接收后触发查重", resultMap);
     }
 
     @Override
@@ -532,37 +538,6 @@ public class StudentReviewServiceImpl extends ServiceImpl<PaperInfoMapper, Paper
 
             return dto;
         }).collect(Collectors.toList());
-    }
-
-    /**
-     * 保存修改后的论文文件（按学生ID+原论文ID分目录）
-     */
-    private String saveRevisedPaperFile(MultipartFile file, Long studentId, Long originalPaperId) {
-        try {
-            // 构建存储路径：basePath/student_xxx/original_xxx/yyyyMMdd/
-            String dateDir = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy/MM/dd"));
-            String studentDir = "student_" + studentId;
-            String originalDir = "original_" + originalPaperId;
-            java.nio.file.Path saveDirPath = Paths.get(paperBasePath, studentDir, originalDir, dateDir);
-            java.io.File saveDir = saveDirPath.toFile();
-            if (!saveDir.exists() && !saveDir.mkdirs()) {
-                throw new BusinessException(ResultCode.SYSTEM_ERROR, "创建修改论文存储目录失败");
-            }
-
-            // 生成唯一文件名（UUID+原后缀）
-            String originalFileName = file.getOriginalFilename();
-            String fileSuffix = originalFileName.substring(originalFileName.lastIndexOf(".") + 1);
-            String uniqueFileName = UUID.randomUUID().toString() + "." + fileSuffix;
-            java.nio.file.Path saveFilePath = Paths.get(saveDirPath.toString(), uniqueFileName);
-
-            // 保存文件
-            file.transferTo(saveFilePath);
-            log.info("修改后论文文件保存成功：{}", saveFilePath);
-            return saveFilePath.toString();
-        } catch (IOException e) {
-            log.error("修改后论文文件保存失败：", e);
-            throw new BusinessException(ResultCode.SYSTEM_ERROR, "文件保存异常，请重试");
-        }
     }
 
     /**
