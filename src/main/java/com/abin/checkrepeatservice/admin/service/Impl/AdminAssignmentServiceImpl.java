@@ -132,9 +132,9 @@ public class AdminAssignmentServiceImpl implements AdminAssignmentService {
             Page<Map<String, Object>> resultMap = new Page<>(resultPage.getCurrent(), resultPage.getSize(), resultPage.getTotal());
             List<Map<String, Object>> records = resultPage.getRecords().stream().map(paper -> {
                 Map<String, Object> record = new HashMap<>();
-                record.put("id", paper.getId());
+                record.put("id", String.valueOf(paper.getId()));
                 record.put("title", paper.getPaperTitle());
-                record.put("studentId", paper.getStudentId());
+                record.put("studentId", paper.getStudentId() == null ? null : String.valueOf(paper.getStudentId()));
 
                 // 获取学生信息（取自批量预载 Map）
                 SysUser student = paper.getStudentId() == null ? null : studentMap.get(paper.getStudentId());
@@ -190,7 +190,7 @@ public class AdminAssignmentServiceImpl implements AdminAssignmentService {
             Page<Map<String, Object>> resultMap = new Page<>(resultPage.getCurrent(), resultPage.getSize(), resultPage.getTotal());
             List<Map<String, Object>> records = resultPage.getRecords().stream().map(teacher -> {
                 Map<String, Object> record = new HashMap<>();
-                record.put("id", teacher.getId());
+                record.put("id", String.valueOf(teacher.getId()));
                 record.put("name", teacher.getRealName());
                 record.put("title", teacher.getProfessionalTitle());
                 record.put("department", teacher.getOffice());

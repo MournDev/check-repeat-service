@@ -535,7 +535,7 @@ public class TeacherStudentManagementServiceImpl implements TeacherStudentManage
                 
                 // 构建返回数据（初始密码仅本次返回给管理员，库中只存 BCrypt 密文）
                 Map<String, Object> responseData = new HashMap<>();
-                responseData.put("studentId", newUser.getId());
+                responseData.put("studentId", String.valueOf(newUser.getId()));
                 responseData.put("username", newUser.getUsername());
                 responseData.put("studentName", newUser.getRealName());
                 responseData.put("collegeName", newUser.getCollegeName());

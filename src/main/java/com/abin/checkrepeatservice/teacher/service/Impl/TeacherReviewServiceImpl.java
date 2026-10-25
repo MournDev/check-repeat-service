@@ -978,7 +978,7 @@ public class TeacherReviewServiceImpl extends ServiceImpl<ReviewRecordMapper, Re
 
         Result<Boolean> sendResult = instantMessageService.sendMessage(message);
         if (sendResult.isSuccess() && Boolean.TRUE.equals(sendResult.getData())) {
-            result.put("messageId", message.getId());
+            result.put("messageId", message.getId() == null ? null : String.valueOf(message.getId()));
             result.put("sendTime", LocalDateTime.now().toString());
             return Result.success("即时消息发送成功", result);
         }

@@ -66,7 +66,7 @@ public class UserController {
         java.util.List<Map<String, Object>> records = new java.util.ArrayList<>();
         for (SystemMessage message : pageResult.getList()) {
             Map<String, Object> record = new HashMap<>();
-            record.put("id", message.getId());
+            record.put("id", message.getId() == null ? null : String.valueOf(message.getId()));
             record.put("title", message.getTitle());
             record.put("content", message.getContent());
             record.put("createTime", message.getCreateTime());

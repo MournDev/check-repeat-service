@@ -318,7 +318,7 @@ public class StudentReviewServiceImpl extends ServiceImpl<PaperInfoMapper, Paper
 
         // 6. 构建返回结果
         Map<String, Object> resultMap = new HashMap<>(4);
-        resultMap.put("revisedPaperId", revisedPaper.getId());
+        resultMap.put("revisedPaperId", String.valueOf(revisedPaper.getId()));
         resultMap.put("reSubmitTime", revisedPaper.getSubmitTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
         resultMap.put("currentStatus", revisedPaper.getPaperStatus());
 

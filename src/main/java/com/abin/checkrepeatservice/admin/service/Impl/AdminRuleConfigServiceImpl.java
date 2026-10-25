@@ -408,7 +408,7 @@ public class AdminRuleConfigServiceImpl extends ServiceImpl<CheckRuleMapper, Che
         // 4. 构建返回结果
         Map<String, Object> resultMap = new HashMap<>(2);
         if (libId == null) {
-            resultMap.put("libId", compareLib.getId());
+            resultMap.put("libId", String.valueOf(compareLib.getId()));
             resultMap.put("message", "比对库新增成功");
         } else {
             resultMap.put("success", true);

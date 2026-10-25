@@ -359,7 +359,7 @@ public class AutoAssignmentServiceImpl implements AutoAssignmentService {
             Map<String, Object> detail = new HashMap<>();
             // 雪花ID按字符串下发，避免前端 Number 精度丢失
             detail.put("id", history.getId() == null ? null : history.getId().toString());
-            detail.put("taskId", history.getTaskId());
+            detail.put("taskId", history.getTaskId() == null ? null : String.valueOf(history.getTaskId()));
             detail.put("status", history.getStatus());
             detail.put("strategy", history.getStrategy());
             detail.put("startTime", history.getStartTime());

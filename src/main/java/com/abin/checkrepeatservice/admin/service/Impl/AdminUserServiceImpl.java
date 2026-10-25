@@ -153,7 +153,7 @@ public class AdminUserServiceImpl implements AdminUserService {
             }
             
             Map<String, Object> result = new HashMap<>();
-            result.put("userId", newUser.getId());
+            result.put("userId", String.valueOf(newUser.getId()));
             result.put("username", newUser.getUsername());
             result.put("message", "用户创建成功");
             

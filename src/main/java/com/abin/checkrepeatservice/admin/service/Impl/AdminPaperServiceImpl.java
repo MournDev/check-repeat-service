@@ -310,7 +310,7 @@ public class AdminPaperServiceImpl implements AdminPaperService {
                     operatorId, null);
 
             Map<String, Object> data = new HashMap<>();
-            data.put("reviewRecordId", reviewRecord.getId());
+            data.put("reviewRecordId", String.valueOf(reviewRecord.getId()));
             data.put("paperStatus", targetStatus);
             data.put("auditSource", auditSource);
 

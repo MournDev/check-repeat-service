@@ -85,7 +85,7 @@ public class AdminPermissionServiceImpl implements AdminPermissionService {
             }
             
             Map<String, Object> resultMap = new HashMap<>();
-            resultMap.put("roleId", newRole.getId());
+            resultMap.put("roleId", String.valueOf(newRole.getId()));
             resultMap.put("roleName", newRole.getRoleName());
             resultMap.put("message", "角色创建成功");
             
