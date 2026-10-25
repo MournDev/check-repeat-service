@@ -12,10 +12,21 @@ server:
 # 预览服务
 kkfileview:
   base-url: ${KKFILEVIEW_BASE_URL:http://localhost:8080}
+  # 探活路径（后台定时探测用，不再在请求线程里硬编码 /index）
+  health-path: ${KKFILEVIEW_HEALTH_PATH:/index}
+  health:
+    enabled: ${KKFILEVIEW_HEALTH_ENABLED:true}
+    connect-timeout-ms: 2000
+    read-timeout-ms: 3000
+    # 启动后延迟探测，避免拖慢启动
+    initial-delay-ms: 10000
+    interval-ms: 60000
 
 # 前端页面地址（邮箱验证邮件里的链接使用）
 app:
   frontend-base-url: ${FRONTEND_BASE_URL:http://localhost:3000}
+  # kkFileView 回源后端时的协议（容器内网默认 http，可配 https）
+  scheme: ${APP_SCHEME:http}
 
 # 对象存储
 minio:
@@ -26,6 +37,11 @@ minio:
   public-endpoint: ${MINIO_PUBLIC_ENDPOINT:${MINIO_ENDPOINT:http://localhost:9000}}
   accesskey: ${MINIO_ACCESSKEY:minioadmin}
   secretkey: ${MINIO_SECRETKEY:minioadmin}
+  # SDK 超时与连接池（防止存储抖动拖死查重/上传线程）
+  connect-timeout-ms: 3000
+  read-timeout-ms: 10000
+  write-timeout-ms: 10000
+  max-idle-connections: 32
   bucket:
     main: check-repeat-service
     avatar: avatar
@@ -106,6 +122,10 @@ spring:
             required: true
           starttls:
             enable: false
+          # 外部依赖超时（H10）：SMTP 不可用时最多阻塞 5s，避免拖死请求/异步线程
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
         debug: false
 
   # 通知内容模板
@@ -119,6 +139,13 @@ spring:
 # 防止缓存把 768MB 堆吃穿（见 DetectionCacheService#resolveCapacityBytes）
 cache:
   max-size-mb: ${CACHE_MAX_SIZE_MB:256}
+
+# 论文提交后置任务独立线程池（自动分配导师 + 触发查重，与查重执行池隔离）
+async:
+  paper-submit:
+    core-size: ${PAPER_SUBMIT_CORE:2}
+    max-size: ${PAPER_SUBMIT_MAX:4}
+    queue-size: ${PAPER_SUBMIT_QUEUE:100}
 
 # 论文全生命周期阶段门（M2.2 收口）
 paper:

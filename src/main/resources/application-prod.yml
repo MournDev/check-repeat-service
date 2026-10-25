@@ -22,6 +22,8 @@ kkfileview:
 # 地址，线上本机并不存在，且后端 8080 只发布在 127.0.0.1，容器必然取不到文件。
 app:
   host: ${APP_HOST:check-backend}
+  # kkFileView 回源后端时的协议（容器内网默认 http）
+  scheme: ${APP_SCHEME:http}
   # 邮箱验证邮件里的链接指向的前端页面；部署时可用 FRONTEND_BASE_URL 覆盖
   frontend-base-url: ${FRONTEND_BASE_URL:https://check-repeat-system.xyz}
 
@@ -109,6 +111,10 @@ spring:
             required: true
           starttls:
             enable: false
+          # 外部依赖超时（H10）：SMTP 不可用时最多阻塞 5s
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
         debug: false
 
   # 通知内容模板
