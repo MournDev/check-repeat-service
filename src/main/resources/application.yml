@@ -58,6 +58,8 @@ spring:
     multipart:
       max-file-size: 50MB
       max-request-size: 200MB
+      # 大于 1MB 的文件直接落磁盘临时目录，不再整包驻留堆内存（上传 OOM 防护）
+      file-size-threshold: 1MB
 
   # Redis 缓存配置
   data:
@@ -112,6 +114,11 @@ spring:
       subject-prefix: "[论文查重管理系统] "
       content-header: "尊敬的用户：<br><br>您有一条新的系统通知，请查收：<br><br>"
       content-footer: "<br><br>此邮件为系统自动发送，请勿回复。如需帮助，请联系管理员。<br>论文查重系统团队"
+
+# 检测缓存容量上限（MB）。实际生效值 = min(本值, JVM 堆的 25%)，
+# 防止缓存把 768MB 堆吃穿（见 DetectionCacheService#resolveCapacityBytes）
+cache:
+  max-size-mb: ${CACHE_MAX_SIZE_MB:256}
 
 # 论文全生命周期阶段门（M2.2 收口）
 paper:
@@ -278,6 +285,22 @@ review:
     max-count: 20
   notify:
     enabled: true
+  # 盲审专用副本（文档级去标识化）：评阅人只拿到重新生成的匿名 PDF
+  blind:
+    # 副本缓存目录（落在 /data 卷内，随 app_data 持久化）
+    base-path: ${REVIEW_BLIND_PATH:/data/review-blind/}
+    # 正文最大字符数，超出截断，防止超大文档打满堆
+    max-chars: 5000000
+    # 移除“致谢/谢辞/Acknowledgements”章节
+    remove-acknowledgement: true
+    # 副本清理（每日 03:50）：清历史版本、已删除论文与超期副本
+    cleanup:
+      enabled: true
+      cron: "0 50 3 * * ?"
+      # 当前版本副本保留天数；<=0 时只在版本变化/论文删除时清理
+      retention-days: 30
+      # 只清理修改时间超过 N 分钟的文件，避免与正在生成的副本竞争
+      min-age-minutes: 10
 
 # 管理员规则配置模块默认值（已合并到上面的 admin 配置）
 

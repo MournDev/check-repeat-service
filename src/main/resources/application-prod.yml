@@ -67,6 +67,8 @@ spring:
     multipart:
       max-file-size: 50MB
       max-request-size: 200MB
+      # 大于 1MB 的文件直接落磁盘临时目录，不再整包驻留堆内存（上传 OOM 防护）
+      file-size-threshold: 1MB
 
   # Redis 缓存配置
   data:
@@ -121,7 +123,7 @@ redisson:
   config: |
     singleServerConfig:
       address: "redis://${REDIS_HOST:localhost}:${REDIS_PORT:6379}"
-      password: "${REDIS_PASSWORD:123456}"
+      password: "${REDIS_PASSWORD}"
       connectionPoolSize: 64
       connectionMinimumIdleSize: 10
 
