@@ -237,6 +237,5 @@ docker run -d -p 8080:8080 --name check-repeat-service check-repeat-service
 5. 提交 Pull Request
 
 ## 联系方式
-
-- 项目地址：https://gitee.com/Sc0102_1129/check-repeat-service
-- 如有问题，请提交 Issue 或联系项目维护者
+- 邮箱：3070500838@qq.com
+- 如有问题，请提交 Issue 或联系作者
